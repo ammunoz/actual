@@ -27,8 +27,13 @@ export type {
   VendorMap,
 } from './types';
 
-export { flagFor, gateByTrustLevel, outcomeFor } from './resolver/flags';
-export type { GateOutcome, GateResult } from './resolver/flags';
+export {
+  flagDuplicateFitids,
+  flagFor,
+  isHardBlock,
+  outcomeFor,
+} from './resolver/flags';
+export type { GateOutcome } from './resolver/flags';
 
 export { canonicalize, strip } from './resolver/strip';
 export type { StripResult, StripRule } from './resolver/strip';
@@ -55,6 +60,7 @@ export {
   buildPreviewState,
   effectiveAmountCents,
   effectiveTransferAccountId,
+  evaluateRows,
   isSplitRow,
   PreviewStateError,
   PREVIEW_STATE_NOT_FOUND,
@@ -70,6 +76,16 @@ export type {
   PreviewRow,
   PreviewSummary,
 } from './preview/preview-state';
+
+export {
+  effectiveFlags,
+  evaluateRow,
+  gateFromFlags,
+  gateRow,
+  isUsableDate,
+  normalizePayeeName,
+} from './preview/gating';
+export type { GateOpts, RowEvaluation, RowGate } from './preview/gating';
 
 export {
   addLeg,

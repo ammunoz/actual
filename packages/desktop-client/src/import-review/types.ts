@@ -119,13 +119,14 @@ export type ImportReviewUpdate = {
 /**
  * How a row is presented in the review list.
  */
-export type ReviewRowStatus = 'pending' | 'accept' | 'drop';
+export type ReviewRowStatus = 'pending' | 'accept' | 'accept-override' | 'drop';
 
 /**
  * The synced preference that gates the whole feature.
  *
- * `SyncedPrefs` has a catch-all `| string`, so this key needs no change to
- * upstream's preference types.
+ * `SyncedPrefs` does NOT have a catch-all: `keyof` collapses to the literal
+ * union of the known keys, so this key needs `useCustomSyncedPref` rather
+ * than `useSyncedPref`, and no change to upstream's preference types.
  */
 export const KEYBOARD_MODE_PREF = 'import-review.keyboard-mode';
 

@@ -17,6 +17,7 @@ export type ReviewAction =
   | 'move-last'
   | 'accept'
   | 'accept-confirm'
+  | 'accept-override'
   | 'drop'
   | 'undo'
   | 'edit-payee'
@@ -67,6 +68,12 @@ export type KeyBinding = {
  * `h`/`l` (switch OFX source account) is deliberately absent: Actual's OFX
  * parser discards `ACCTID`, so a multi-account OFX file cannot be addressed
  * without a change to upstream's `ofx2json.ts`.
+ *
+ * `ctrl+shift+a` is the override: it accepts a row the trust level is
+ * holding back. It has a binding of its own rather than overloading
+ * `ctrl+a`, because `ctrl+a` already means "accept this row without moving
+ * on" and a binding whose meaning depends on the state of the row under the
+ * cursor is one the user cannot predict.
  */
 export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
@@ -98,6 +105,12 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     keys: 'ctrl+a',
     action: 'accept-confirm',
     labelKey: 'Accept row (confirm)',
+    showInHelp: true,
+  },
+  {
+    keys: 'ctrl+shift+a',
+    action: 'accept-override',
+    labelKey: 'Accept row despite its flags',
     showInHelp: true,
   },
   {

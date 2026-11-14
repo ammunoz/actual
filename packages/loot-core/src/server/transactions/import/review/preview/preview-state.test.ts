@@ -363,6 +363,84 @@ describe('summarize', () => {
     expect(summary.blocked).toBe(1);
   });
 
+  it('does not count a dropped row as held back', () => {
+    // The user threw the row away, which is a stronger statement than the
+    // gate.
+    const state = buildPreviewState(
+      [
+        mkRow({
+          importedId: 't-1',
+          flags: [{ kind: 'unknown-payee', code: 'PAYEE-UNK-001' }],
+        }),
+      ],
+      'cautious',
+    );
+    const dropped = applyDecision(state, 't-1', 'drop');
+    const summary = summarize(dropped);
+    expect(summary.blocked).toBe(0);
+    expect(summary.dropped).toBe(1);
+  });
+
+  it('releases a held-back row the user overrode', () => {
+    const state = buildPreviewState(
+      [
+        mkRow({
+          importedId: 't-1',
+          flags: [{ kind: 'unknown-payee', code: 'PAYEE-UNK-001' }],
+        }),
+      ],
+      'cautious',
+    );
+    const overridden = applyDecision(state, 't-1', 'accept-override');
+    const summary = summarize(overridden);
+    expect(summary.blocked).toBe(0);
+    expect(summary.overridden).toBe(1);
+    expect(summary.accepted).toBe(1);
+  });
+
+  it('counts an overridden row as accepted as well as overridden', () => {
+    const state = buildPreviewState(
+      [
+        mkRow({
+          importedId: 't-1',
+          flags: [{ kind: 'unknown-payee', code: 'PAYEE-UNK-001' }],
+        }),
+      ],
+      'cautious',
+    );
+    const overridden = applyDecision(state, 't-1', 'accept-override');
+    const summary = summarize(overridden);
+    expect(summary.accepted).toBe(1);
+    expect(summary.overridden).toBe(1);
+    expect(summary.pending).toBe(0);
+  });
+
+  it('excludes a held-back row from the inflow/outflow split', () => {
+    // The split describes what will reach the budget, so a row the gate
+    // holds back is not counted.
+    const state = buildPreviewState(
+      [
+        mkRow({
+          importedId: 't-1',
+          amountCents: -2500,
+          flags: [{ kind: 'unknown-payee', code: 'PAYEE-UNK-001' }],
+        }),
+      ],
+      'cautious',
+    );
+    const summary = summarize(state);
+    expect(summary.blocked).toBe(1);
+    expect(summary.outflowCount).toBe(0);
+  });
+
+  it('does not warn about a row with no flags at all', () => {
+    const state = buildPreviewState([mkRow({ importedId: 't-1' })], 'cautious');
+    const summary = summarize(state);
+    expect(summary.warned).toBe(0);
+    expect(summary.blocked).toBe(0);
+    expect(summary.skipped).toBe(0);
+  });
+
   it('returns zeroed counts for an empty state', () => {
     const summary = summarize(buildPreviewState([], 'cautious'));
     expect(summary.total).toBe(0);

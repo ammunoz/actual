@@ -82,8 +82,10 @@ export function buildImportModal(
 /**
  * The hook form: reads the opt-in preference and returns the descriptor.
  *
- * `useSyncedPref` accepts any string key — `SyncedPrefs` has a catch-all —
- * so enabling the feature needs no change to upstream's preference types.
+ * `SyncedPrefs` does NOT have a catch-all: `keyof` collapses to the literal
+ * union of the known keys, so `useSyncedPref` rejects a key this feature
+ * invents. `useCustomSyncedPref` confines that cast to one file, so the
+ * preference types upstream owns stay untouched.
  */
 export function useOpenImportModalFor(): (
   accountId: string,

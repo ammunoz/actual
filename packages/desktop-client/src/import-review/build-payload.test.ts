@@ -4,7 +4,11 @@ import {
   rowKey,
 } from '@actual-app/core/server/transactions/import/review/index';
 
-import { buildImportPayload, buildUpdatePayload } from './build-payload';
+import {
+  buildApplyPayload,
+  buildPreviewPayload,
+  buildUpdatePayload,
+} from './build-payload';
 
 const PAYEES = [
   { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
@@ -40,7 +44,7 @@ function buildState(rows: readonly Record<string, unknown>[]) {
 describe('buildImportPayload', () => {
   it('sends the account, date and amount', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -52,7 +56,7 @@ describe('buildImportPayload', () => {
 
   it('carries imported_id byte-for-byte', () => {
     const state = buildState([mkRow({ importedId: 'FITID-0001-X' })]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -65,7 +69,7 @@ describe('buildImportPayload', () => {
     // not have, unless it starts with an underscore. The preview key has
     // to travel through the import, so it has to be underscore-prefixed.
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -78,7 +82,7 @@ describe('buildImportPayload', () => {
     // The import's update path keeps the existing payee, category and
     // notes, so sending the row again would undo the edit.
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -89,7 +93,7 @@ describe('buildImportPayload', () => {
 
   it('sends the RAW vendor string as imported_payee', () => {
     const state = buildState([mkRow({ payeeRaw: 'POS PURCHASE 4251' })]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -99,7 +103,7 @@ describe('buildImportPayload', () => {
 
   it('sends the resolved payee id when there is one', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -110,7 +114,7 @@ describe('buildImportPayload', () => {
 
   it('sends payee_name only when no payee id is known', () => {
     const state = buildState([mkRow({ payeeRaw: 'Brand New Vendor' })]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -121,7 +125,7 @@ describe('buildImportPayload', () => {
 
   it('marks accepted rows as cleared', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -135,7 +139,7 @@ describe('buildImportPayload', () => {
       ...state,
       rows: state.rows.map(row => ({ ...row, decision: 'drop' as const })),
     };
-    const payload = buildImportPayload(dropped, {
+    const payload = buildApplyPayload(dropped, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -146,7 +150,7 @@ describe('buildImportPayload', () => {
 
   it('does not set skipTransaction on a pending row', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -159,7 +163,7 @@ describe('buildImportPayload', () => {
     // creates a SECOND transaction. It is not a way to change an existing
     // transaction's payee.
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -169,7 +173,7 @@ describe('buildImportPayload', () => {
 
   it('resolves a transfer account to its transfer payee id', () => {
     const state = buildState([mkRow({ payeeRaw: 'Demo Checking' })]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -179,7 +183,7 @@ describe('buildImportPayload', () => {
 
   it('drops a stale category id', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: [], // c-groceries is not live
@@ -196,7 +200,7 @@ describe('buildImportPayload', () => {
         edits: { ...row.edits, memo: 'a note' },
       })),
     };
-    const payload = buildImportPayload(withMemo, {
+    const payload = buildApplyPayload(withMemo, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -213,7 +217,7 @@ describe('buildImportPayload', () => {
         edits: { ...row.edits, memo: '' },
       })),
     };
-    const payload = buildImportPayload(cleared, {
+    const payload = buildApplyPayload(cleared, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -236,7 +240,7 @@ describe('buildImportPayload', () => {
         },
       })),
     };
-    const payload = buildImportPayload(split, {
+    const payload = buildApplyPayload(split, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -262,7 +266,7 @@ describe('buildImportPayload', () => {
         },
       })),
     };
-    const payload = buildImportPayload(split, {
+    const payload = buildApplyPayload(split, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -272,7 +276,7 @@ describe('buildImportPayload', () => {
 
   it('omits subtransactions entirely for an ordinary row', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -289,7 +293,7 @@ describe('buildImportPayload', () => {
         edits: { ...row.edits, amountCents: -3000 },
       })),
     };
-    const payload = buildImportPayload(edited, {
+    const payload = buildApplyPayload(edited, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -299,12 +303,259 @@ describe('buildImportPayload', () => {
 
   it('returns an empty array for an empty state', () => {
     const state = buildPreviewState([], 'cautious');
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
     });
     expect(payload).toEqual([]);
+  });
+});
+
+describe('buildApplyPayload — the trust-level gate', () => {
+  /**
+   * A row whose vendor string matches no payee and cannot be canonicalised
+   * into one: the resolver finds nothing, and flags it.
+   */
+  function buildBlockedState(trustLevel: 'paranoid' | 'cautious' | 'trusted') {
+    const state = buildState([mkRow({ payeeRaw: '' })]);
+    return buildPreviewState(
+      state.rows.map(row => ({
+        ...row,
+        flags: [
+          { kind: 'unknown-payee' as const, code: 'PAYEE-UNK-001' as const },
+        ],
+      })),
+      trustLevel,
+    );
+  }
+
+  it('marks a blocked row so it is not imported', () => {
+    const state = buildBlockedState('cautious');
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload).toHaveLength(1);
+    expect(payload[0].skipTransaction).toBe(true);
+  });
+
+  it('still marks a blocked row the user merely accepted', () => {
+    // The gate holds over a plain accept. The row is released again if the
+    // trust level is lowered.
+    const state = buildBlockedState('cautious');
+    const accepted = {
+      ...state,
+      rows: state.rows.map(row => ({ ...row, decision: 'accept' as const })),
+    };
+    const payload = buildApplyPayload(accepted, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].skipTransaction).toBe(true);
+  });
+
+  it('does not mark a blocked row the user overrode', () => {
+    const state = buildBlockedState('cautious');
+    const overridden = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        decision: 'accept-override' as const,
+      })),
+    };
+    const payload = buildApplyPayload(overridden, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].skipTransaction).toBeUndefined();
+  });
+
+  it('marks a hard-blocked row even when the user overrode it', () => {
+    // Its data is broken, so an override cannot release it.
+    const state = buildPreviewState(
+      buildState([mkRow()]).rows.map(row => ({
+        ...row,
+        flags: [
+          {
+            kind: 'date-out-of-range' as const,
+            code: 'DATE-RANGE-001' as const,
+          },
+        ],
+      })),
+      'trusted',
+    );
+    const overridden = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        decision: 'accept-override' as const,
+      })),
+    };
+    const payload = buildApplyPayload(overridden, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload).toHaveLength(1);
+    expect(payload[0].skipTransaction).toBe(true);
+  });
+
+  it('omits a row the engine cannot accept, in BOTH payloads', () => {
+    // A row whose date the file did not supply makes the whole import
+    // throw: Actual's matching pass does `subDays(trans.date, 7)` before it
+    // looks at `skipTransaction`. Marking the row is not enough, so the
+    // row is not sent at all.
+    const rows = buildState([
+      mkRow(),
+      mkRow({ previewKey: 'row-1', importedId: 'fit-2' }),
+    ]).rows;
+    const state = buildPreviewState(
+      rows.map((row, index) =>
+        index === 1
+          ? {
+              ...row,
+              date: 'Invalid Date',
+              flags: [
+                {
+                  kind: 'date-out-of-range' as const,
+                  code: 'DATE-RANGE-001' as const,
+                },
+              ],
+            }
+          : row,
+      ),
+      'cautious',
+    );
+    const opts = {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    };
+    expect(buildPreviewPayload(state, opts)).toHaveLength(1);
+    expect(buildApplyPayload(state, opts)).toHaveLength(1);
+  });
+
+  it('sends a row whose date the user fixed', () => {
+    // The fix clears the flag and makes the row sendable again.
+    const state = buildPreviewState(
+      buildState([mkRow()]).rows.map(row => ({
+        ...row,
+        date: 'Invalid Date',
+        flags: [
+          {
+            kind: 'date-out-of-range' as const,
+            code: 'DATE-RANGE-001' as const,
+          },
+        ],
+      })),
+      'cautious',
+    );
+    const fixed = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, date: '2026-09-09' },
+      })),
+    };
+    const payload = buildApplyPayload(fixed, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload).toHaveLength(1);
+    expect(payload[0].date).toBe('2026-09-09');
+    expect(payload[0].skipTransaction).toBeUndefined();
+  });
+
+  it('imports a blocked row once the trust level is relaxed', () => {
+    const state = buildBlockedState('trusted');
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].skipTransaction).toBeUndefined();
+  });
+
+  it('does not update a row the gate holds back', () => {
+    // An update would put the row in the budget by the back door.
+    //
+    // The edit is the memo, not the payee: editing the payee would CLEAR
+    // the unknown-payee flag, which is the point of the edit-aware gate.
+    const state = buildBlockedState('cautious');
+    const edited = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, memo: 'a note' },
+      })),
+    };
+    const { updates } = buildUpdatePayload(edited, {
+      accountId: 'a-1',
+      matchedTransactionIds: new Map([['row-0', 'trx-1']]),
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['row-0']),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('updates a held-back row once the user fixes what was wrong with it', () => {
+    // Picking a payee clears the unknown-payee flag, so the row is no
+    // longer held back and the edit can be applied.
+    const state = buildBlockedState('cautious');
+    const edited = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, payeeCanonical: 'Demo Payee Two' },
+      })),
+    };
+    const { updates } = buildUpdatePayload(edited, {
+      accountId: 'a-1',
+      matchedTransactionIds: new Map([['row-0', 'trx-1']]),
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['row-0']),
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.payee).toBe('p-two');
+  });
+});
+
+describe('buildPreviewPayload', () => {
+  it('marks nothing, so every row comes back with a match', () => {
+    // Actual skips a marked row BEFORE it reports the match, so a marked
+    // row would come back with no correlation at all, and any later edit
+    // to it could never be applied in place.
+    const state = buildState([mkRow()]);
+    const dropped = {
+      ...state,
+      rows: state.rows.map(row => ({ ...row, decision: 'drop' as const })),
+    };
+    const payload = buildPreviewPayload(dropped, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload).toHaveLength(1);
+    expect(payload[0].skipTransaction).toBeUndefined();
+  });
+
+  it('sends the same row the apply payload sends', () => {
+    const state = buildState([mkRow()]);
+    const opts = {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    };
+    expect(buildPreviewPayload(state, opts)).toEqual(
+      buildApplyPayload(state, opts),
+    );
   });
 });
 
@@ -523,7 +774,7 @@ describe('buildImportPayload — a user payee edit beats the resolver match', ()
     // The resolver matched 'p-coffee' from the raw vendor string. The user
     // then chose 'Demo Payee Two', and their choice has to win.
     const state = buildStateWithEdit({ payeeCanonical: 'Demo Payee Two' });
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -536,7 +787,7 @@ describe('buildImportPayload — a user payee edit beats the resolver match', ()
     const state = buildStateWithEdit({
       payeeCanonical: 'Demo Brand New Payee',
     });
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
@@ -547,7 +798,7 @@ describe('buildImportPayload — a user payee edit beats the resolver match', ()
 
   it('still uses the resolver match when the user did not choose a payee', () => {
     const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
+    const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,

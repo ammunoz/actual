@@ -12,15 +12,29 @@
  * rows over the secure channel.
  */
 
-import { gateByTrustLevel } from '#server/transactions/import/review/resolver/flags';
 import type {
   ResolvedRow,
   TrustLevel,
 } from '#server/transactions/import/review/types';
 
+import { evaluateRow } from './gating';
+import type { GateOpts, RowEvaluation } from './gating';
 import type { PreviewSplitLeg } from './split-primitives';
 
-export type PreviewDecision = 'pending' | 'accept' | 'drop';
+/**
+ * What the user decided about a row.
+ *
+ *   `pending`         not decided yet; the row lands unless the gate holds
+ *                     it back.
+ *   `accept`          the user accepted the row. The gate still applies: a
+ *                     row the gate holds back is not imported, and it is
+ *                     released again if the trust level is lowered.
+ *   `accept-override` the user accepted the row DESPITE its flags. This is
+ *                     the only decision that survives a stricter trust
+ *                     level, and the only way past a soft block.
+ *   `drop`            the user threw the row away.
+ */
+export type PreviewDecision = 'pending' | 'accept' | 'accept-override' | 'drop';
 
 export type PreviewEdits = {
   /** The payee name the user chose. */
@@ -94,21 +108,37 @@ export type ImportPreviewState = {
 
 export type PreviewSummary = {
   total: number;
+  /**
+   * Rows the gate is holding back with a `block`.
+   *
+   * A hard-blocked row is counted here even when the user overrode it: an
+   * override cannot release it, because its data is broken.
+   */
   blocked: number;
+  /** Rows the gate is holding back with a `skip`. */
   skipped: number;
+  /**
+   * Rows carrying a warning.
+   *
+   * A row with no flags at all is not warned about. It is simply not gated,
+   * and it is counted in `total` and in the decision counts.
+   */
   warned: number;
+  /** Rows the user accepted, whether or not they override a flag. */
   accepted: number;
+  /** Rows the user accepted DESPITE their flags. */
+  overridden: number;
   dropped: number;
   pending: number;
   /**
    * Rows that will land as money IN (inflow), and as money OUT.
    *
-   * Counting basis is accept + pending — dropped rows are excluded, so these
-   * two numbers describe the transactions that will actually reach the
-   * budget, not the contents of the file. They therefore move as the user
-   * accepts/drops, which is what makes the pair complementary to
-   * `accepted` / `dropped` / `pending` rather than a restatement of
-   * `total`.
+   * Counting basis is the rows that will actually be imported. Dropped rows
+   * and rows the gate holds back are excluded, so these two numbers
+   * describe the transactions that will reach the budget, not the contents
+   * of the file. They therefore move as the user accepts, drops and
+   * overrides, which is what makes the pair complementary to `accepted` /
+   * `dropped` / `pending` rather than a restatement of `total`.
    *
    * Derived from `effectiveAmountCents`, so a user-signed amount edit is
    * reflected. A zero amount counts as neither.
@@ -334,43 +364,116 @@ export function withTrustLevel(
 }
 
 /**
- * Pure: return decision + trust-bucket counts.
+ * Pure: what the gate says about every row in the state, keyed by the row's
+ * key.
  *
- * Decisions are counted per row. Buckets are computed via `gateByTrustLevel`
- * against the rows' current flag set; an accepted row's flags still count
- * toward buckets (the user accepted the resolution, not the flag itself).
+ * The key is the same one `rowKey` produces, so a caller can look a row's
+ * evaluation up without rebuilding the key.
+ *
+ * It lives here rather than in `gating.ts` because it needs `rowKey`, and
+ * `gating.ts` imports this module's types: keeping the dependency one way
+ * avoids a cycle.
+ */
+export function evaluateRows(
+  state: ImportPreviewState,
+  opts: GateOpts = {},
+): ReadonlyMap<string, RowEvaluation> {
+  const evaluations = new Map<string, RowEvaluation>();
+  for (const row of state.rows) {
+    evaluations.set(rowKey(row), evaluateRow(row, state.trustLevel, opts));
+  }
+  return evaluations;
+}
+
+/**
+ * Pure: return decision + gate counts.
+ *
+ * The two counts answer different questions and are counted separately.
+ *
+ * The DECISION counts (`accepted`, `dropped`, `pending`, `overridden`) say
+ * what the user did. They partition the rows: a row is accepted, dropped,
+ * or still pending.
+ *
+ * The GATE counts (`blocked`, `skipped`, `warned`) say what the trust level
+ * is doing to the rows. They overlap with the decision counts on purpose: a
+ * row the user accepted while the level was permissive is counted as
+ * accepted AND held back when the level is raised. That overlap is the
+ * point. It is what tells the user that their accept did not take effect.
+ *
+ * A DROPPED row is in none of the gate counts: the user threw it away,
+ * which is a stronger statement than the gate.
+ *
+ * The gate counts are computed from the rows' EFFECTIVE flags, so a flag
+ * the user has already fixed no longer holds a row back.
+ *
+ * The evaluations can be passed in, so a caller that already has them (the
+ * UI does, for the badges) does not pay for them twice.
  *
  * Also returns the inflow/outflow split. Direction is derived from the
  * effective amount's SIGN, not from any stored direction field: the sign is
  * what the apply step writes to the budget.
  */
-export function summarize(state: ImportPreviewState): PreviewSummary {
+export function summarize(
+  state: ImportPreviewState,
+  evaluations?: ReadonlyMap<string, RowEvaluation>,
+): PreviewSummary {
+  const rows = evaluations ?? evaluateRows(state);
+
   let accepted = 0;
   let dropped = 0;
   let pending = 0;
+  let overridden = 0;
+  let blocked = 0;
+  let skipped = 0;
+  let warned = 0;
   let inflowCount = 0;
   let outflowCount = 0;
-  const allRows: ResolvedRow[] = [];
+
   for (const row of state.rows) {
-    if (row.decision === 'accept') accepted += 1;
-    else if (row.decision === 'drop') dropped += 1;
-    else pending += 1;
-    // Dropped rows are excluded: these counts describe what will land in the
-    // budget, not what the file contained.
-    if (row.decision !== 'drop') {
+    if (row.decision === 'accept' || row.decision === 'accept-override') {
+      accepted += 1;
+    } else if (row.decision === 'drop') {
+      dropped += 1;
+    } else {
+      pending += 1;
+    }
+
+    const evaluation =
+      rows.get(rowKey(row)) ?? evaluateRow(row, state.trustLevel);
+    const isDropped = row.decision === 'drop';
+
+    // Only rows the gate is ACTUALLY holding back are counted, and only
+    // rows that are still in the review: a dropped row was thrown away by
+    // the user, which is a stronger statement than the gate.
+    if (!isDropped) {
+      if (evaluation.held) {
+        if (evaluation.gate === 'block') blocked += 1;
+        else if (evaluation.gate === 'skip') skipped += 1;
+      }
+      if (evaluation.gate === 'warn') warned += 1;
+    }
+
+    // An override only counts when it is in effect: a hard-blocked row the
+    // user overrode is still held back, so it is counted as blocked, not as
+    // overridden.
+    if (evaluation.overridden && evaluation.willImport) overridden += 1;
+
+    // Only rows that will land are counted: these numbers describe what
+    // reaches the budget, not what the file contained.
+    if (evaluation.willImport) {
       const cents = effectiveAmountCents(row);
       if (cents > 0) inflowCount += 1;
       else if (cents < 0) outflowCount += 1;
     }
-    allRows.push(row);
   }
-  const gate = gateByTrustLevel(allRows, state.trustLevel);
+
   return Object.freeze({
-    total: allRows.length,
-    blocked: gate.blocked.length,
-    skipped: gate.skipped.length,
-    warned: gate.warned.length,
+    total: state.rows.length,
+    blocked,
+    skipped,
+    warned,
     accepted,
+    overridden,
     dropped,
     pending,
     inflowCount,

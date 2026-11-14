@@ -42,7 +42,9 @@
 import {
   effectiveAmountCents,
   effectiveTransferAccountId,
+  evaluateRow,
   isSplitRow,
+  normalizePayeeName,
   rowKey,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type { ImportPreviewState } from '@actual-app/core/server/transactions/import/review/index';
@@ -102,19 +104,70 @@ function findPayeeIdByName(
 }
 
 /**
- * Pure: build the `transactions-import` payload for the review's rows.
+ * Pure: build the `transactions-import` payload the review sends to
+ * Actual's IMPORT PREVIEW.
  *
- * Rows that are still pending are included: they are what the user has not
- * yet rejected, and the apply step is the terminal decision point. Rows the
- * user dropped are sent with `skipTransaction` so Actual's matching is
- * unaffected.
+ * The preview asks Actual one question: which of these rows match a
+ * transaction that is already in the budget? The answer comes back in
+ * `updatedPreview`, and it is what lets a user's edit to an
+ * already-imported transaction be applied in place.
+ *
+ * So the preview payload marks NOTHING with `skipTransaction`. Actual skips
+ * a marked row BEFORE it reports the match, so a marked row would come back
+ * with no correlation at all, and any later edit to it could never be
+ * applied in place. The cost of sending every row is that the preview also
+ * reports matches for rows the user has dropped; the review simply ignores
+ * them.
+ *
+ * A row that is updated in place is excluded, because the import's update
+ * path would undo that edit.
  */
-export function buildImportPayload(
+export function buildPreviewPayload(
   state: ImportPreviewState,
   opts: BuildPayloadOpts,
 ): ImportReviewTransaction[] {
+  return buildPayload(state, opts, { markSkipped: false });
+}
+
+/**
+ * Pure: build the `transactions-import` payload the review sends when the
+ * user applies the import.
+ *
+ * Every row is sent, including the ones that must not land. A row that will
+ * not be imported is marked with `skipTransaction`, which makes Actual skip
+ * it while still letting it take part in the matching pass. That matters:
+ * omitting a row would change what the other rows match against, and the
+ * import would not agree with the preview the user reviewed.
+ *
+ * A row is marked when the gate holds it back:
+ *
+ *   - the user dropped it,
+ *   - the trust level holds it back, and the user did not override that, or
+ *   - it is hard-blocked, in which case an override cannot release it
+ *     either, because its data is broken.
+ *
+ * A row the ENGINE cannot accept is not sent at all, in either payload: a
+ * row whose date the file did not supply makes the whole import throw,
+ * because the matching pass does `subDays(trans.date, 7)` before it looks
+ * at `skipTransaction`.
+ */
+export function buildApplyPayload(
+  state: ImportPreviewState,
+  opts: BuildPayloadOpts,
+): ImportReviewTransaction[] {
+  return buildPayload(state, opts, { markSkipped: true });
+}
+
+function buildPayload(
+  state: ImportPreviewState,
+  opts: BuildPayloadOpts,
+  config: { markSkipped: boolean },
+): ImportReviewTransaction[] {
   const liveCategoryIds = new Set(opts.categories.map(c => c.id));
   const updated = opts.updatedRowKeys ?? new Set<string>();
+  const livePayeeNames = new Set(
+    opts.payees.map(p => normalizePayeeName(p.name)),
+  );
 
   const out: ImportReviewTransaction[] = [];
 
@@ -124,7 +177,13 @@ export function buildImportPayload(
     // notes and undo the edit.
     if (updated.has(rowKey(row))) continue;
 
-    const isDropped = row.decision === 'drop';
+    // A row the engine cannot accept is not sent AT ALL. A row whose date
+    // the file did not supply makes the whole import throw, because
+    // Actual's matching pass does `subDays(trans.date, 7)` before it looks
+    // at `skipTransaction`. Marking the row is not enough: the throw
+    // happens first.
+    const evaluation = evaluateRow(row, state.trustLevel, { livePayeeNames });
+    if (!evaluation.willSend) continue;
 
     // The payee the user ended up with. A transfer target wins over the
     // ordinary payee: a transfer row is not a payee row.
@@ -226,7 +285,9 @@ export function buildImportPayload(
       });
     }
 
-    if (isDropped) {
+    // A row that must not land is marked rather than omitted, so the
+    // matching pass still sees it.
+    if (config.markSkipped && !evaluation.willImport) {
       payload.skipTransaction = true;
     }
 
@@ -291,12 +352,19 @@ export type PendingUpdate = {
  * date are always included because `transaction-update` takes a whole
  * transaction, but a row whose ONLY change is the amount still has to be
  * sent — comparing the update's own keys would drop it.
+ *
+ * A row the gate holds back is not updated either: an update would write
+ * the row the trust level is refusing to import, which would put it in the
+ * budget by the back door.
  */
 export function buildUpdatePayload(
   state: ImportPreviewState,
   opts: BuildUpdateOpts,
 ): BuildUpdateResult {
   const liveCategoryIds = new Set(opts.categories.map(c => c.id));
+  const livePayeeNames = new Set(
+    opts.payees.map(p => normalizePayeeName(p.name)),
+  );
   const updates: PendingUpdate[] = [];
 
   for (const row of state.rows) {
@@ -307,7 +375,11 @@ export function buildUpdatePayload(
     // Without the matched transaction's id we cannot update it in place,
     // and forcing an add would duplicate it. Leave it to the import.
     if (!transactionId) continue;
-    if (row.decision === 'drop') continue;
+
+    // The gate holds the row back, so the row does not land. Updating it
+    // would put it in the budget anyway.
+    const evaluation = evaluateRow(row, state.trustLevel, { livePayeeNames });
+    if (!evaluation.willImport) continue;
 
     // What the user actually changed, compared against the original row.
     // Each edit is read into a local so the type narrows, rather than

@@ -273,4 +273,36 @@ describe('the import engine update path', () => {
       ]),
     ).rejects.toThrow(/does not exist on table/);
   });
+
+  test('a row with an unusable date makes the whole import throw', async () => {
+    // The reason the review OMITS a row whose date the file did not
+    // supply, rather than marking it with `skipTransaction`: the throw
+    // happens BEFORE the row is looked at for `skipTransaction`.
+    //
+    // Actual's matching pass does `subDays(trans.date, 7)` while it looks
+    // for a fuzzy match, and that is an invalid date operation. One broken
+    // row takes the whole file down with it.
+    await setup();
+
+    await expect(
+      reconcileTransactions(ACCOUNT, [
+        {
+          date: '2026-09-07',
+          amount: -2500,
+          payee_name: 'Demo Vendor',
+          imported_payee: 'Demo Vendor',
+          imported_id: 'FITID-1',
+        },
+        {
+          date: 'Invalid Date',
+          amount: -1000,
+          payee_name: 'Demo Broken',
+          imported_payee: 'Demo Broken',
+          imported_id: 'FITID-2',
+          // Marking it as skipped does NOT save the import.
+          skipTransaction: true,
+        },
+      ]),
+    ).rejects.toThrow(/Invalid time value/);
+  });
 });

@@ -16,7 +16,11 @@ export {
 } from './open-import-modal';
 export type { ImportModalDescriptor } from './open-import-modal';
 
-export { buildImportPayload, buildUpdatePayload } from './build-payload';
+export {
+  buildApplyPayload,
+  buildPreviewPayload,
+  buildUpdatePayload,
+} from './build-payload';
 export type { BuildPayloadOpts } from './build-payload';
 
 export { useImportReviewCommand } from './command';

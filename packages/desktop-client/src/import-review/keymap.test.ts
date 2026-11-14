@@ -47,6 +47,17 @@ describe('KEYMAP', () => {
     expect(actions).toContain('drop-all');
   });
 
+  it('binds the override key', () => {
+    // The override has a binding of its own: `ctrl+a` already means "accept
+    // this row without moving on", and a binding whose meaning depends on
+    // the row under the cursor is one the user cannot predict.
+    const actions = KEYMAP.map(binding => binding.action);
+    expect(actions).toContain('accept-override');
+    expect(
+      KEYMAP.find(binding => binding.action === 'accept-override')?.keys,
+    ).toBe('ctrl+shift+a');
+  });
+
   it('binds the apply and close keys', () => {
     const actions = KEYMAP.map(binding => binding.action);
     expect(actions).toContain('apply');
@@ -114,6 +125,15 @@ describe('actionForHotkey', () => {
     expect(actionForHotkey('ctrl+a')).toBe('accept-confirm');
     expect(actionForHotkey('shift+a')).toBe('accept-all');
     expect(actionForHotkey('ctrl+a')).not.toBe(actionForHotkey('shift+a'));
+  });
+
+  it('tells the override from every other accept', () => {
+    // The override is its own binding, so it is never confused with the
+    // plain accept, the confirm, or the bulk accept.
+    expect(actionForHotkey('ctrl+shift+a')).toBe('accept-override');
+    expect(actionForHotkey('a')).toBe('accept');
+    expect(actionForHotkey('ctrl+a')).toBe('accept-confirm');
+    expect(actionForHotkey('shift+a')).toBe('accept-all');
   });
 
   it('does not bind a character the library cannot match', () => {

@@ -46,6 +46,25 @@ test.describe('Keyboard import review', () => {
     await fileChooser.setFiles(join(__dirname, 'data/demo-import.ofx'));
   }
 
+  /**
+   * Import the fixture with two rows the trust level holds back.
+   *
+   * The second transaction has no payee name at all: a vendor string that
+   * cannot be matched and cannot be canonicalised into anything is an
+   * unknown payee, which the trust level holds back at `cautious` and only
+   * warns about at `trusted`.
+   *
+   * The third one repeats the first one's FITID, so it is a duplicate: the
+   * trust level skips it at `cautious` and only warns about it at
+   * `trusted`.
+   */
+  async function importBlockedOfx() {
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(join(__dirname, 'data/demo-import-blocked.ofx'));
+  }
+
   test('opens the keyboard review for an OFX file when it is enabled', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review',
@@ -243,5 +262,142 @@ test.describe('Keyboard import review', () => {
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'pending');
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test('a row the trust level holds back is not imported', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Held Back',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The second transaction has no payee name at all, so it is an
+    // unknown payee: held back at the default trust level.
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'block');
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
+    // The first one is only flagged: the budget has no payee for it yet,
+    // so the import will create one.
+    await expect(rows.nth(0)).toHaveAttribute('data-held', 'false');
+    // The third one repeats the first one's FITID, so it is a duplicate:
+    // skipped at the default trust level.
+    await expect(rows.nth(2)).toHaveAttribute('data-gate', 'skip');
+    await expect(rows.nth(2)).toHaveAttribute('data-held', 'true');
+    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+    await expect(dialog.getByText('Skipped: 1')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // Only the row that was not held back landed.
+    const imported = accountPage.transactionTableRow;
+    await expect(imported).toHaveCount(1);
+    await expect(
+      imported.filter({ hasText: 'Demo Grocery Store' }),
+    ).toHaveCount(1);
+  });
+
+  test('a plain accept does not release a held-back row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Held Accept',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // `a` accepts the row, but the trust level still holds it back.
+    await page.keyboard.press('j');
+    await page.keyboard.press('a');
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
+    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+  });
+
+  test('ctrl+shift+a overrides the trust level', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Override',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('j');
+    await page.keyboard.press('Control+Shift+a');
+    await expect(rows.nth(1)).toHaveAttribute(
+      'data-decision',
+      'accept-override',
+    );
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
+    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+    await expect(dialog.getByText('Overridden: 1')).toBeVisible();
+
+    // The overridden row lands. The duplicate is still skipped.
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(2);
+  });
+
+  test('the trusted trust level holds nothing back that it can', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Trusted',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'block');
+
+    // `tab` cycles the trust level: cautious -> trusted. The unknown payee
+    // and the duplicate are only warned about now, so they land.
+    await page.keyboard.press('Tab');
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'warn');
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
+    await expect(rows.nth(2)).toHaveAttribute('data-gate', 'warn');
+    await expect(rows.nth(2)).toHaveAttribute('data-held', 'false');
+    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+    await expect(dialog.getByText('Skipped: 0')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // All three rows land. Actual's matching is against the budget, not
+    // within the file, so a repeated FITID is a second transaction here -
+    // which is exactly what the duplicate flag is there to warn about.
+    await expect(accountPage.transactionTableRow).toHaveCount(3);
   });
 });

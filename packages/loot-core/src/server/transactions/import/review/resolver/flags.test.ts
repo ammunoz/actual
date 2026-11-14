@@ -2,10 +2,11 @@ import type {
   Flag,
   FlagKind,
   ResolvedRow,
+  ReviewRowInput,
   TrustLevel,
 } from '#server/transactions/import/review/types';
 
-import { flagFor, gateByTrustLevel, outcomeFor } from './flags';
+import { flagDuplicateFitids, flagFor, isHardBlock, outcomeFor } from './flags';
 
 function mkRow(overrides: Partial<ResolvedRow> = {}): ResolvedRow {
   return {
@@ -120,18 +121,19 @@ describe('outcomeFor (matrix lookup)', () => {
       cautious: 'block',
       trusted: 'warn',
     },
+    // The two hard blocks: broken data is blocked at every trust level.
     'amount-mismatch': {
       paranoid: 'block',
       cautious: 'block',
-      trusted: 'warn',
+      trusted: 'block',
     },
     'date-out-of-range': {
       paranoid: 'block',
       cautious: 'block',
-      trusted: 'warn',
+      trusted: 'block',
     },
     'needs-review': { paranoid: 'block', cautious: 'warn', trusted: 'warn' },
-    duplicate: { paranoid: 'block', cautious: 'skip', trusted: 'skip' },
+    duplicate: { paranoid: 'block', cautious: 'skip', trusted: 'warn' },
     'fuzzy-payee-match': {
       paranoid: 'block',
       cautious: 'warn',
@@ -158,163 +160,88 @@ describe('outcomeFor (matrix lookup)', () => {
   }
 });
 
-describe('gateByTrustLevel', () => {
-  it('returns empty buckets for empty input', () => {
-    const out = gateByTrustLevel([], 'cautious');
-    expect(out).toEqual({ blocked: [], skipped: [], warned: [] });
+describe('isHardBlock', () => {
+  it('treats the two data-level kinds as hard blocks', () => {
+    // A row whose date or amount the file did not supply cannot be
+    // imported correctly at any trust level, so it cannot be overridden.
+    expect(isHardBlock('amount-mismatch')).toBe(true);
+    expect(isHardBlock('date-out-of-range')).toBe(true);
   });
 
-  it('puts a row with no flags in `warned`', () => {
-    const row = mkRow();
-    const out = gateByTrustLevel([row], 'paranoid');
-    expect(out.blocked).toEqual([]);
-    expect(out.skipped).toEqual([]);
-    expect(out.warned).toEqual([row]);
+  it('does not treat a judgement flag as a hard block', () => {
+    expect(isHardBlock('unknown-payee')).toBe(false);
+    expect(isHardBlock('duplicate')).toBe(false);
+    expect(isHardBlock('fuzzy-payee-match')).toBe(false);
+    expect(isHardBlock('payee-rule-conflict')).toBe(false);
+    expect(isHardBlock('needs-review')).toBe(false);
+    expect(isHardBlock('would-create-payee')).toBe(false);
+    expect(isHardBlock('transfer-detected')).toBe(false);
+  });
+});
+
+describe('flagDuplicateFitids', () => {
+  function mkInput(importedId?: string): ReviewRowInput & {
+    flags?: readonly Flag[];
+  } {
+    return {
+      accountId: 'a-1',
+      importedId,
+      date: '2026-09-07',
+      amountCents: -2500,
+      payeeRaw: 'Demo Vendor',
+    };
+  }
+
+  it('leaves a file with no repeats alone', () => {
+    const rows = [mkInput('FITID-1'), mkInput('FITID-2')];
+    const out = flagDuplicateFitids(rows);
+    expect(out.every(r => r.flags === undefined)).toBe(true);
   });
 
-  it('paranoid blocks every kind', () => {
-    const KINDS: readonly FlagKind[] = [
-      'unknown-payee',
-      'payee-rule-conflict',
-      'amount-mismatch',
-      'date-out-of-range',
-      'needs-review',
-      'duplicate',
-    ];
-    const rows = KINDS.map(k =>
-      flagFor(mkRow({ importedId: `t-${k}` }), k, 'PAYEE-UNK-001'),
-    );
-    const out = gateByTrustLevel(rows, 'paranoid');
-    expect(out.blocked).toHaveLength(6);
-    expect(out.skipped).toHaveLength(0);
-    expect(out.warned).toHaveLength(0);
-  });
-
-  it('cautious: duplicate -> skip, others block or warn', () => {
-    const dupRow = flagFor(
-      mkRow({ importedId: 't-dup' }),
-      'duplicate',
-      'FITID-DUP-002',
-    );
-    const unkRow = flagFor(
-      mkRow({ importedId: 't-unk' }),
-      'unknown-payee',
-      'PAYEE-UNK-001',
-    );
-    const revRow = flagFor(
-      mkRow({ importedId: 't-rev' }),
-      'needs-review',
-      'AMT-MISMATCH-001',
-    );
-    const out = gateByTrustLevel([dupRow, unkRow, revRow], 'cautious');
-    expect(out.skipped.map(r => r.importedId)).toEqual(['t-dup']);
-    expect(out.blocked.map(r => r.importedId)).toEqual(['t-unk']);
-    expect(out.warned.map(r => r.importedId)).toEqual(['t-rev']);
-  });
-
-  it('trusted: duplicate -> skip, every other kind -> warn', () => {
-    const dupRow = flagFor(
-      mkRow({ importedId: 't-dup' }),
-      'duplicate',
-      'FITID-DUP-002',
-    );
-    const amtRow = flagFor(
-      mkRow({ importedId: 't-amt' }),
-      'amount-mismatch',
-      'AMT-MISMATCH-001',
-    );
-    const unkRow = flagFor(
-      mkRow({ importedId: 't-unk' }),
-      'unknown-payee',
-      'PAYEE-UNK-001',
-    );
-    const out = gateByTrustLevel([dupRow, amtRow, unkRow], 'trusted');
-    expect(out.skipped.map(r => r.importedId)).toEqual(['t-dup']);
-    expect(out.warned.map(r => r.importedId).sort()).toEqual([
-      't-amt',
-      't-unk',
+  it('flags the repeat, not the first occurrence', () => {
+    // The first row is the one that describes the transaction; the repeat
+    // is the one that would be imported on top of it.
+    const out = flagDuplicateFitids([mkInput('FITID-1'), mkInput('FITID-1')]);
+    expect(out[0].flags).toBeUndefined();
+    expect(out[1].flags).toEqual([
+      { kind: 'duplicate', code: 'FITID-DUP-001' },
     ]);
-    expect(out.blocked).toHaveLength(0);
   });
 
-  it('multi-flag priority: block wins over skip', () => {
-    const row = flagFor(
-      flagFor(mkRow(), 'unknown-payee', 'PAYEE-UNK-001'),
-      'duplicate',
-      'FITID-DUP-001',
-    );
-    const out = gateByTrustLevel([row], 'cautious');
-    expect(out.blocked).toHaveLength(1);
-    expect(out.skipped).toHaveLength(0);
-    expect(out.warned).toHaveLength(0);
+  it('flags every repeat after the first', () => {
+    const out = flagDuplicateFitids([
+      mkInput('FITID-1'),
+      mkInput('FITID-1'),
+      mkInput('FITID-1'),
+    ]);
+    expect(out[0].flags).toBeUndefined();
+    expect(out[1].flags).toHaveLength(1);
+    expect(out[2].flags).toHaveLength(1);
   });
 
-  it('multi-flag priority: skip wins over warn', () => {
-    const row = flagFor(
-      flagFor(mkRow(), 'duplicate', 'FITID-DUP-001'),
-      'amount-mismatch',
-      'AMT-MISMATCH-001',
-    );
-    const out = gateByTrustLevel([row], 'trusted');
-    expect(out.blocked).toHaveLength(0);
-    expect(out.skipped).toHaveLength(1);
-    expect(out.warned).toHaveLength(0);
+  it('never flags a row with no FITID', () => {
+    // There is nothing to repeat.
+    const out = flagDuplicateFitids([mkInput(undefined), mkInput(undefined)]);
+    expect(out.every(r => r.flags === undefined)).toBe(true);
   });
 
-  it('multi-flag: warn + warn -> warned', () => {
-    const row = flagFor(
-      flagFor(mkRow(), 'unknown-payee', 'PAYEE-UNK-001'),
-      'amount-mismatch',
-      'AMT-MISMATCH-001',
-    );
-    const out = gateByTrustLevel([row], 'trusted');
-    expect(out.blocked).toHaveLength(0);
-    expect(out.skipped).toHaveLength(0);
-    expect(out.warned).toHaveLength(1);
+  it('keeps the flags the row already had', () => {
+    const row = {
+      ...mkInput('FITID-1'),
+      flags: [
+        { kind: 'unknown-payee' as const, code: 'PAYEE-UNK-001' as const },
+      ],
+    };
+    const out = flagDuplicateFitids([mkInput('FITID-1'), row]);
+    expect(out[1].flags).toEqual([
+      { kind: 'unknown-payee', code: 'PAYEE-UNK-001' },
+      { kind: 'duplicate', code: 'FITID-DUP-001' },
+    ]);
   });
 
   it('does not mutate the input rows', () => {
-    const row = flagFor(mkRow(), 'unknown-payee', 'PAYEE-UNK-001');
-    const input = [row];
-    gateByTrustLevel(input, 'cautious');
-    expect(input).toHaveLength(1);
-    expect(input[0]).toBe(row);
-  });
-
-  it('returns frozen arrays', () => {
-    const row = flagFor(mkRow(), 'unknown-payee', 'PAYEE-UNK-001');
-    const out = gateByTrustLevel([row], 'cautious');
-    expect(Object.isFrozen(out.blocked)).toBe(true);
-    expect(Object.isFrozen(out.skipped)).toBe(true);
-    expect(Object.isFrozen(out.warned)).toBe(true);
-    expect(Object.isFrozen(out)).toBe(true);
-  });
-
-  it('preserves input order within each bucket', () => {
-    const rows = [
-      mkRow({ importedId: 'a' }),
-      flagFor(mkRow({ importedId: 'b' }), 'unknown-payee', 'PAYEE-UNK-001'),
-      mkRow({ importedId: 'c' }),
-      flagFor(mkRow({ importedId: 'd' }), 'duplicate', 'FITID-DUP-001'),
-      mkRow({ importedId: 'e' }),
-    ];
-    const out = gateByTrustLevel(rows, 'cautious');
-    expect(out.warned.map(r => r.importedId)).toEqual(['a', 'c', 'e']);
-    expect(out.blocked.map(r => r.importedId)).toEqual(['b']);
-    expect(out.skipped.map(r => r.importedId)).toEqual(['d']);
-  });
-
-  it('would-create-payee lands in warned at every trust level', () => {
-    const row = flagFor(
-      mkRow({ importedId: 't-new' }),
-      'would-create-payee',
-      'PAYEE-NEW-001',
-    );
-    for (const trust of ['paranoid', 'cautious', 'trusted'] as const) {
-      const out = gateByTrustLevel([row], trust);
-      expect(out.warned).toHaveLength(1);
-      expect(out.blocked).toHaveLength(0);
-      expect(out.skipped).toHaveLength(0);
-    }
+    const rows = [mkInput('FITID-1'), mkInput('FITID-1')];
+    flagDuplicateFitids(rows);
+    expect(rows[1].flags).toBeUndefined();
   });
 });

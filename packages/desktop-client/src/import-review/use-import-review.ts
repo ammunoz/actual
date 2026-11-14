@@ -13,9 +13,14 @@ import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
   buildPreviewState,
+  evaluateRows,
   filterStaleVendorMapEntries,
+  flagDuplicateFitids,
+  isUsableDate,
+  normalizePayeeName,
   resolvePayees,
   rowKey,
+  summarize,
   updateEdits,
   validateVendorMap,
   withTrustLevel,
@@ -25,17 +30,23 @@ import type {
   ImportPreviewState,
   PreviewDecision,
   PreviewEdits,
+  PreviewSummary,
   ResolvedRow,
   ReviewAccount,
   ReviewCategory,
   ReviewPayee,
   ReviewRowInput,
+  RowEvaluation,
   TrustLevel,
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { amountToInteger } from '@actual-app/core/shared/util';
 
-import { buildImportPayload, buildUpdatePayload } from './build-payload';
+import {
+  buildApplyPayload,
+  buildPreviewPayload,
+  buildUpdatePayload,
+} from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import { VENDOR_MAP_PREF } from './types';
@@ -52,6 +63,25 @@ export type UseImportReviewOpts = {
   onImported: (didChange: boolean) => void;
 };
 
+/**
+ * The summary of a review that has nothing in it yet.
+ *
+ * The counts are all zero rather than undefined, so the UI can render them
+ * without a special case for "the file has not been parsed".
+ */
+export const EMPTY_SUMMARY: PreviewSummary = Object.freeze({
+  total: 0,
+  blocked: 0,
+  skipped: 0,
+  warned: 0,
+  accepted: 0,
+  overridden: 0,
+  dropped: 0,
+  pending: 0,
+  inflowCount: 0,
+  outflowCount: 0,
+});
+
 export type ImportReviewState = {
   status: ReviewStatus;
   error: string | null;
@@ -67,7 +97,17 @@ export type ImportReviewState = {
   accounts: readonly ReviewAccount[];
   /** The live categories, for the category picker. */
   categories: readonly ReviewCategory[];
-  /** The payload the apply step will send. */
+  /**
+   * What the review counts add up to: the decisions the user made, and
+   * what the trust level is doing to the rows.
+   */
+  summary: PreviewSummary;
+  /**
+   * What the gate says about each row, keyed by the row's key.
+   *
+   * The UI reads this to badge the rows and to explain the focused row.
+   */
+  evaluations: ReadonlyMap<string, RowEvaluation>;
   /** Set the decision on a row. */
   decide: (index: number, decision: PreviewDecision) => void;
   /** Replace a row's edits. */
@@ -132,8 +172,10 @@ export function toReviewRows(
     const date = typeof trans.date === 'string' ? trans.date : '';
     const amountIsUsable = Number.isFinite(rawAmount);
     // An empty date would be rejected by the import with a confusing
-    // error, so a row without one is flagged instead of being sent.
-    const dateIsUsable = /^\d{4}-\d{2}-\d{2}$/.test(date);
+    // error, so a row without one is flagged instead of being sent. The
+    // same check the gate uses, so a row is not flagged here and cleared
+    // there.
+    const dateIsUsable = isUsableDate(date);
 
     const flags: Flag[] = [];
     if (!amountIsUsable) {
@@ -282,11 +324,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setAccounts(accountList);
         setCategories(categoryList);
 
-        const raw = toReviewRows(
-          // Safe: the parse handler's loose type is a union of a structured
-          // transaction and a CSV record, and `toReviewRows` reads each
-          // field defensively, checking the type before it uses it.
-          parsed.transactions as Record<string, unknown>[],
+        const raw = flagDuplicateFitids(
+          toReviewRows(
+            // Safe: the parse handler's loose type is a union of a structured
+            // transaction and a CSV record, and `toReviewRows` reads each
+            // field defensively, checking the type before it uses it.
+            parsed.transactions as Record<string, unknown>[],
+          ),
         );
 
         // Actual's own rules cover what a separate rules system would do.
@@ -312,9 +356,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // preview reports the matched transaction's id, which is what lets a
         // user's edit to an already-imported transaction be applied in place
         // (Actual's import UPDATE path keeps the existing payee).
+        //
+        // The PREVIEW payload marks nothing as skipped: Actual skips a
+        // marked row before it reports the match, so a marked row would
+        // come back with no correlation at all.
         const preview = await send('transactions-import', {
           accountId,
-          transactions: buildImportPayload(next, {
+          transactions: buildPreviewPayload(next, {
             accountId,
             payees: payeeRefs(payeeList),
             categories: categoryList.map(c => ({ id: c.id })),
@@ -479,7 +527,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The rows that were just updated are excluded from the import, so
       // the import's update path cannot undo them.
       const updatedRowKeys = new Set(updates.map(u => u.rowKey));
-      const payload = buildImportPayload(state, {
+      const payload = buildApplyPayload(state, {
         accountId,
         payees: payeeRefs(payees),
         categories: categories.map(c => ({ id: c.id })),
@@ -540,17 +588,45 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     onImported(false);
   }, [onImported]);
 
-  const summary = useMemo(() => state?.rows ?? [], [state]);
+  // What the gate says about each row, and what the review adds up to.
+  //
+  // Both are derived from the state, the trust level and the live payees,
+  // so they are recomputed whenever any of those change. They are NOT
+  // stored: the gate is a property of the rows, not a thing the review
+  // keeps.
+  const { summary, evaluations } = useMemo(() => {
+    if (!state) {
+      return {
+        summary: EMPTY_SUMMARY,
+        evaluations: new Map<string, RowEvaluation>(),
+      };
+    }
+
+    // The gate needs the live payee names to tell whether a payee the user
+    // picked still has to be created.
+    const livePayeeNames = new Set(payees.map(p => normalizePayeeName(p.name)));
+    const opts = { livePayeeNames };
+
+    // The rows are evaluated ONCE: the summary reads the same evaluations
+    // the badges do.
+    const map = evaluateRows(state, opts);
+
+    return { summary: summarize(state, map), evaluations: map };
+  }, [state, payees]);
+
+  const rows = state?.rows ?? [];
 
   return {
     status,
     error,
     state,
-    focusedIndex: Math.min(focusedIndex, Math.max(0, summary.length - 1)),
+    focusedIndex: Math.min(focusedIndex, Math.max(0, rows.length - 1)),
     trustLevel,
     payees,
     accounts,
     categories,
+    summary,
+    evaluations,
     decide,
     edit,
     focus,

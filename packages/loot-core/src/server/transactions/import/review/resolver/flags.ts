@@ -1,6 +1,6 @@
 /**
- * Flag pipeline: helpers for attaching flags to rows and bucketing them by
- * trust level.
+ * Flag pipeline: helpers for attaching flags to rows, and the trust-level
+ * matrix that says what each flag does at each trust level.
  *
  * Trust-level gating matrix:
  *
@@ -8,17 +8,29 @@
  *     |----------------------|----------|----------|---------|
  *     | unknown-payee        | block    | block    | warn    |
  *     | payee-rule-conflict  | block    | block    | warn    |
- *     | amount-mismatch      | block    | block    | warn    |
- *     | date-out-of-range    | block    | block    | warn    |
+ *     | amount-mismatch      | block    | block    | block   |
+ *     | date-out-of-range    | block    | block    | block   |
  *     | needs-review         | block    | warn     | warn    |
- *     | duplicate            | block    | skip     | skip    |
+ *     | duplicate            | block    | skip     | warn    |
  *     | fuzzy-payee-match    | block    | warn     | warn    |
  *     | would-create-payee   | warn     | warn     | warn    |
  *     | transfer-detected    | warn     | warn     | warn    |
  *
  * Multi-flag priority is `block > skip > warn`. A single block on any flag
- * puts the row in `blocked` even if another flag says `skip`. Rows with no
- * flags land in `warned`.
+ * puts the row in `blocked` even if another flag says `skip`. A row with no
+ * flags is not gated at all.
+ *
+ * Two deliberate differences from the TUI matrix this was ported from:
+ *
+ *   - `amount-mismatch` and `date-out-of-range` block at EVERY level,
+ *     including `trusted`. They are not a matter of trust: a row whose date
+ *     the file did not supply is rejected by the import, and a row whose
+ *     amount was unusable would be written as a real $0 transaction. No
+ *     amount of trust makes broken data importable. See `isHardBlock`.
+ *
+ *   - `duplicate` degrades to `warn` at `trusted`, so `trusted` really does
+ *     mean "hold nothing back". A trust level that still holds rows back is
+ *     not a trust level the user can reason about.
  *
  * Flag kinds and codes are generic across vendors; no bank-specific labels.
  * Codes are intentionally stable strings so log messages, UI badges, and
@@ -29,17 +41,11 @@ import type {
   Flag,
   FlagCode,
   FlagKind,
-  ResolvedRow,
+  ReviewRowInput,
   TrustLevel,
 } from '#server/transactions/import/review/types';
 
 export type GateOutcome = 'block' | 'skip' | 'warn';
-
-export type GateResult = {
-  blocked: readonly ResolvedRow[];
-  skipped: readonly ResolvedRow[];
-  warned: readonly ResolvedRow[];
-};
 
 const OUTCOME_MATRIX: Readonly<
   Record<FlagKind, Readonly<Record<TrustLevel, GateOutcome>>>
@@ -54,15 +60,17 @@ const OUTCOME_MATRIX: Readonly<
     cautious: 'block',
     trusted: 'warn',
   }),
+  // The two hard blocks: the row's data is broken, so it cannot be
+  // imported correctly at any trust level. See `isHardBlock`.
   'amount-mismatch': Object.freeze({
     paranoid: 'block',
     cautious: 'block',
-    trusted: 'warn',
+    trusted: 'block',
   }),
   'date-out-of-range': Object.freeze({
     paranoid: 'block',
     cautious: 'block',
-    trusted: 'warn',
+    trusted: 'block',
   }),
   'needs-review': Object.freeze({
     paranoid: 'block',
@@ -72,7 +80,7 @@ const OUTCOME_MATRIX: Readonly<
   duplicate: Object.freeze({
     paranoid: 'block',
     cautious: 'skip',
-    trusted: 'skip',
+    trusted: 'warn',
   }),
   'fuzzy-payee-match': Object.freeze({
     paranoid: 'block',
@@ -95,17 +103,38 @@ const OUTCOME_MATRIX: Readonly<
   }),
 });
 
-const SEVERITY: Readonly<Record<GateOutcome, number>> = Object.freeze({
-  block: 3,
-  skip: 2,
-  warn: 1,
-});
+/**
+ * The flag kinds that describe BROKEN DATA rather than a matter of trust.
+ *
+ * A hard block is not a policy the user can relax: the row cannot be
+ * imported correctly at all.
+ *
+ *   - `amount-mismatch`: the file supplied no usable amount, so the row
+ *     would be written as a real $0 transaction.
+ *   - `date-out-of-range`: the file supplied no usable date, and the import
+ *     rejects a row without one.
+ *
+ * A hard-blocked row can still be made importable — by FIXING it, which
+ * clears the flag — but it cannot be waved through by overriding the gate.
+ * See `canOverride`.
+ */
+const HARD_BLOCKS: ReadonlySet<FlagKind> = Object.freeze(
+  new Set<FlagKind>(['amount-mismatch', 'date-out-of-range']),
+);
+
+/**
+ * Pure: whether this flag kind is a hard block — one the user cannot
+ * override, only fix.
+ */
+export function isHardBlock(kind: FlagKind): boolean {
+  return HARD_BLOCKS.has(kind);
+}
 
 /**
  * Pure: return a new row with `flags` extended by one. The input row is
  * spread, not mutated.
  */
-export function flagFor<T extends ResolvedRow>(
+export function flagFor<T extends { flags?: readonly Flag[] }>(
   row: T,
   kind: FlagKind,
   code: FlagCode,
@@ -117,33 +146,31 @@ export function flagFor<T extends ResolvedRow>(
 }
 
 /**
- * Pure: bucket rows by their worst-severity flag outcome under the given
- * trust level. Severity: `block > skip > warn`. Rows with no flags land in
- * `warned`.
+ * Pure: flag the rows whose FITID repeats one that came earlier in the
+ * file.
+ *
+ * The FIRST occurrence is left alone. A file that repeats a transaction
+ * still describes one transaction, and the first row is the one that
+ * describes it: the repeat is the problem, and the repeat is the row that
+ * would be imported on top of the first.
+ *
+ * A row with no FITID is never flagged: there is nothing to repeat.
+ *
+ * This is the only flag that maps to `skip`, so without it the `skip`
+ * branch of the matrix would be unreachable.
  */
-export function gateByTrustLevel(
-  rows: readonly ResolvedRow[],
-  trustLevel: TrustLevel,
-): GateResult {
-  const blocked: ResolvedRow[] = [];
-  const skipped: ResolvedRow[] = [];
-  const warned: ResolvedRow[] = [];
-
-  for (const row of rows) {
-    const outcome = worstOutcome(row, trustLevel);
-    if (outcome === 'block') {
-      blocked.push(row);
-    } else if (outcome === 'skip') {
-      skipped.push(row);
-    } else {
-      warned.push(row);
+export function flagDuplicateFitids<
+  T extends ReviewRowInput & { flags?: readonly Flag[] },
+>(rows: readonly T[]): readonly (T & { flags?: readonly Flag[] })[] {
+  const seen = new Set<string>();
+  return rows.map(row => {
+    const id = row.importedId;
+    if (id === undefined || id === '') return row;
+    if (!seen.has(id)) {
+      seen.add(id);
+      return row;
     }
-  }
-
-  return Object.freeze({
-    blocked: Object.freeze(blocked) as readonly ResolvedRow[],
-    skipped: Object.freeze(skipped) as readonly ResolvedRow[],
-    warned: Object.freeze(warned) as readonly ResolvedRow[],
+    return flagFor(row, 'duplicate', 'FITID-DUP-001');
   });
 }
 
@@ -155,14 +182,4 @@ export function outcomeFor(
   trustLevel: TrustLevel,
 ): GateOutcome {
   return OUTCOME_MATRIX[kind][trustLevel];
-}
-
-function worstOutcome(row: ResolvedRow, trustLevel: TrustLevel): GateOutcome {
-  if (!row.flags || row.flags.length === 0) return 'warn';
-  let worst: GateOutcome = 'warn';
-  for (const flag of row.flags) {
-    const outcome = OUTCOME_MATRIX[flag.kind][trustLevel];
-    if (SEVERITY[outcome] > SEVERITY[worst]) worst = outcome;
-  }
-  return worst;
 }
