@@ -310,20 +310,24 @@ export function buildUpdatePayload(
     if (row.decision === 'drop') continue;
 
     // What the user actually changed, compared against the original row.
+    // Each edit is read into a local so the type narrows, rather than
+    // being re-read with a cast.
+    const editedAmount = row.edits.amountCents;
     const amountChanged =
-      row.edits.amountCents !== undefined &&
-      row.edits.amountCents !== row.amountCents;
-    const dateChanged =
-      row.edits.date !== undefined && row.edits.date !== row.date;
-    const payeeChanged = row.edits.payeeCanonical !== undefined;
-    const categoryChanged = row.edits.categoryId !== undefined;
-    const memoChanged = row.edits.memo !== undefined;
+      editedAmount !== undefined && editedAmount !== row.amountCents;
+    const editedDate = row.edits.date;
+    const dateChanged = editedDate !== undefined && editedDate !== row.date;
+    const editedPayee = row.edits.payeeCanonical;
+    const payeeChanged = editedPayee !== undefined;
+    const editedCategory = row.edits.categoryId;
+    const editedMemo = row.edits.memo;
+    const memoChanged = editedMemo !== undefined;
 
     // A category the user chose that no longer exists cannot be applied.
     // If that was the only change, there is nothing to write.
     const liveCategoryId =
-      categoryChanged && liveCategoryIds.has(row.edits.categoryId as string)
-        ? (row.edits.categoryId as string)
+      editedCategory !== undefined && liveCategoryIds.has(editedCategory)
+        ? editedCategory
         : undefined;
 
     const hasChange =
@@ -338,7 +342,7 @@ export function buildUpdatePayload(
       id: transactionId,
       account: opts.accountId,
       amount: effectiveAmountCents(row),
-      date: row.edits.date ?? row.date,
+      date: editedDate ?? row.date,
     };
 
     let payeeNameToCreate: string | undefined;
@@ -350,18 +354,15 @@ export function buildUpdatePayload(
 
     if (transferPayeeId) {
       update.payee = transferPayeeId;
-    } else if (payeeChanged) {
+    } else if (editedPayee !== undefined) {
       // The user chose a payee. If an existing payee has that name, use
       // its id; otherwise the payee has to be created first, which is the
       // caller's job.
-      const payeeId = findPayeeIdByName(
-        row.edits.payeeCanonical as string,
-        opts.payees,
-      );
+      const payeeId = findPayeeIdByName(editedPayee, opts.payees);
       if (payeeId) {
         update.payee = payeeId;
       } else {
-        payeeNameToCreate = row.edits.payeeCanonical;
+        payeeNameToCreate = editedPayee;
       }
     }
 
@@ -369,8 +370,8 @@ export function buildUpdatePayload(
       update.category = liveCategoryId;
     }
 
-    if (memoChanged) {
-      update.notes = row.edits.memo;
+    if (editedMemo !== undefined) {
+      update.notes = editedMemo;
     }
 
     updates.push({

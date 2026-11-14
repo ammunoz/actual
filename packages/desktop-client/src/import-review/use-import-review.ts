@@ -200,6 +200,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const trustLevelRef = useRef(trustLevel);
   trustLevelRef.current = trustLevel;
 
+  // Guards against a second apply starting while one is running.
+  const applyingRef = useRef(false);
+
   // Load the budget's data and parse the file, in ONE pass.
   //
   // They are a single effect on purpose. Splitting them meant the parse
@@ -402,8 +405,17 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, []);
 
   const apply = useCallback(async (): Promise<boolean> => {
+    // Reentrancy guard. The Import button is disabled while applying, but
+    // the `ctrl+s` hotkey is not, so a second press would start a second
+    // apply. Two concurrent imports would write the rows twice, and a row
+    // without a FITID has no dedup key to protect it.
+    if (applyingRef.current) return false;
+    applyingRef.current = true;
+
     setStatus('applying');
     setError(null);
+
+    let didChange = false;
 
     try {
       // Rows the user edited AND that matched an existing transaction are
@@ -435,6 +447,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           }
         }
         await send('transaction-update', update);
+        didChange = true;
       }
 
       // The rows that were just updated are excluded from the import, so
@@ -446,13 +459,26 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         categories: categories.map(c => ({ id: c.id })),
         updatedRowKeys,
       });
+
       if (payload.length === 0) {
+        // Every row was updated in place. The updates above were written,
+        // so this is a SUCCESS, not a failure with nothing to do.
         setStatus('reviewing');
-        setError('There is nothing to import');
-        return false;
+        if (didChange) {
+          onImported(true);
+        }
+        return didChange;
       }
 
-      const { errors } = await send('transactions-import', {
+      // The updates above are already written by the time the import runs,
+      // so the two are not atomic: if the import fails, the updates stay.
+      // That is deliberate — the updates are the user's explicit edits and
+      // re-sending them would be a no-op — but it is worth knowing.
+      const {
+        errors,
+        added = [],
+        updated = [],
+      } = await send('transactions-import', {
         accountId,
         transactions: payload,
         isPreview: false,
@@ -462,15 +488,24 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setError(errors[0].message);
         return false;
       }
+
+      // Whether anything actually changed, from what the server reports —
+      // not from the absence of errors. A payload of only dropped rows
+      // imports nothing.
+      didChange = didChange || added.length > 0 || updated.length > 0;
     } catch (err) {
       setStatus('reviewing');
       setError(err instanceof Error ? err.message : 'Import failed');
       return false;
+    } finally {
+      applyingRef.current = false;
     }
 
     setStatus('reviewing');
-    onImported(true);
-    return true;
+    if (didChange) {
+      onImported(true);
+    }
+    return didChange;
   }, [accountId, buildUpdates, state, payees, categories, onImported]);
 
   const close = useCallback(() => {

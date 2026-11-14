@@ -54,10 +54,11 @@ export type KeyBinding = {
  * The bindings, in the order they appear in the help overlay.
  *
  * The key strings are in `react-hotkeys-hook`'s own syntax, and the library
- * matches on the NORMALIZED key code — `Digit4` becomes `4` — so a
- * character like `$` can never match. The amount editor is therefore bound
- * to `shift+4`, which is `$` on a US layout and is a real key the library
- * can match.
+ * matches on the NORMALIZED key code — `Digit4` becomes `4`, and `Slash`
+ * becomes `slash` — so a character like `$` or `?` can never match. The
+ * amount editor is therefore bound to `shift+4`, which is `$` on a US
+ * layout, and the help overlay to `shift+slash`, which is `?`. Both are
+ * real keys the library can match.
  *
  * `h`/`l` (switch OFX source account) is deliberately absent: Actual's OFX
  * parser discards `ACCTID`, so a multi-account OFX file cannot be addressed
@@ -163,7 +164,12 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     label: 'Discard and close',
     showInHelp: true,
   },
-  { keys: '?', action: 'help', label: 'Show this help', showInHelp: true },
+  {
+    keys: 'shift+slash',
+    action: 'help',
+    label: 'Show this help',
+    showInHelp: true,
+  },
 ]);
 
 /**

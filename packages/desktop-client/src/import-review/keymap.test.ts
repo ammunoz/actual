@@ -108,6 +108,21 @@ describe('actionForHotkey', () => {
     expect(actionForHotkey('shift+r')).toBe('drop-all');
   });
 
+  it('tells accept-confirm from accept-all', () => {
+    // They are different bindings: one confirms the focused row, the other
+    // accepts every row. `ctrl+a` must not resolve to the bulk action.
+    expect(actionForHotkey('ctrl+a')).toBe('accept-confirm');
+    expect(actionForHotkey('shift+a')).toBe('accept-all');
+    expect(actionForHotkey('ctrl+a')).not.toBe(actionForHotkey('shift+a'));
+  });
+
+  it('does not bind a character the library cannot match', () => {
+    // The library matches on the normalized key code, so `Slash` becomes
+    // `slash` and `?` can never fire.
+    expect(actionForHotkey('?')).toBeUndefined();
+    expect(actionForHotkey('shift+slash')).toBe('help');
+  });
+
   it('resolves each key of a multi-key binding', () => {
     expect(actionForHotkey('j')).toBe('move-next');
     expect(actionForHotkey('down')).toBe('move-next');

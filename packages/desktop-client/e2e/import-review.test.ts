@@ -219,4 +219,29 @@ test.describe('Keyboard import review', () => {
       imported.filter({ hasText: 'Demo Grocery Store' }),
     ).toHaveCount(1);
   });
+
+  test('ctrl+a confirms the focused row only', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Confirm',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // `ctrl+a` confirms the FOCUSED row. It is a different binding from
+    // `shift+a` (accept every row), so it must not accept the whole file.
+    await page.keyboard.press('Control+a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'pending');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+  });
 });

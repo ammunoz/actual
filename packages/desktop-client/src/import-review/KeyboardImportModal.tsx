@@ -14,6 +14,7 @@ import { useModalState } from '#hooks/useModalState';
 
 import { actionForHotkey, KEYMAP } from './keymap';
 import type { ReviewAction } from './keymap';
+import type { TrustLevel } from './types';
 import { useImportReview } from './use-import-review';
 
 export type KeyboardImportModalProps = {
@@ -37,6 +38,21 @@ export function KeyboardImportModal({
   const { t } = useTranslation();
   const { onClose } = useModalState();
   const review = useImportReview({ accountId, filename, onImported });
+
+  // The trust level is a domain value, so it is translated at the point it
+  // is shown rather than translated inside the domain layer.
+  const trustLevelLabel = (level: TrustLevel): string => {
+    switch (level) {
+      case 'paranoid':
+        return t('paranoid');
+      case 'cautious':
+        return t('cautious');
+      case 'trusted':
+        return t('trusted');
+      default:
+        return t('cautious');
+    }
+  };
 
   const rows = review.state?.rows ?? [];
   const focused = rows[review.focusedIndex];
@@ -62,6 +78,14 @@ export function KeyboardImportModal({
         }
         break;
       case 'accept-confirm':
+        // Confirms the FOCUSED row. It must not fall through to
+        // `accept-all`: the two are different bindings, and bulk-accepting
+        // the whole file when the user meant to confirm one row would be
+        // very destructive.
+        if (focused) {
+          review.decide(review.focusedIndex, 'accept');
+        }
+        break;
       case 'accept-all':
         review.state?.rows.forEach((row, index) => {
           if (row.decision === 'pending') review.decide(index, 'accept');
@@ -166,7 +190,7 @@ export function KeyboardImportModal({
               style={{ flexDirection: 'row', gap: 16, alignItems: 'center' }}
             >
               <Text style={styles.tnum}>
-                <Trans>Trust level</Trans>: {review.trustLevel}
+                <Trans>Trust level</Trans>: {trustLevelLabel(review.trustLevel)}
               </Text>
               <Text style={styles.tnum}>
                 <Trans>Rows</Trans>: {rows.length}
