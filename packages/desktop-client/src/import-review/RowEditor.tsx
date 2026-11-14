@@ -126,7 +126,6 @@ export function RowEditor({
   const initialCategoryName =
     categorySuggestions.find(suggestion => suggestion.id === categoryId)
       ?.name ?? '';
-
   // The date the row would be imported with, which is not the date the
   // file supplied once the user has changed it.
   const effectiveDate = row.edits.date ?? row.date;
@@ -182,9 +181,13 @@ export function RowEditor({
           onPick={(suggestion, _text) => {
             onCommit({
               ...row.edits,
-              // An empty name clears the category: the row is imported
+              // An empty name CLEARS the category: the row is imported
               // without one and Actual's rules decide.
-              categoryId: suggestion ? suggestion.id : undefined,
+              //
+              // It cannot be `undefined`, which means "the user has not
+              // picked one" — and the payload builder falls back to the
+              // category the resolver found for that.
+              categoryId: suggestion ? suggestion.id : '',
             });
           }}
         />
@@ -230,7 +233,7 @@ export function RowEditor({
         />
       ) : null}
 
-      <Text style={{ color: theme.warningText }}>
+      <Text style={{ color: theme.pageTextSubdued }}>
         {t('Enter to confirm · Escape to cancel')}
       </Text>
     </View>

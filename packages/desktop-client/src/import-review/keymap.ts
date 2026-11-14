@@ -152,9 +152,17 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 't',
     action: 'edit-transfer',
-    showInHelp: true,
+    // The transfer editor is not part of this slice, so the help does not
+    // advertise it: a key the overlay lists and the review ignores is a
+    // key the user cannot trust.
+    showInHelp: false,
   },
-  { keys: 's', action: 'edit-split', showInHelp: true },
+  {
+    keys: 's',
+    action: 'edit-split',
+    // The split editor is not part of this slice either.
+    showInHelp: false,
+  },
   {
     keys: 'tab',
     action: 'cycle-flag',

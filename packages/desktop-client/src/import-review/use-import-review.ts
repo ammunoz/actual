@@ -72,6 +72,17 @@ export type EditOptions = {
 };
 
 /**
+ * A payee the user chose for a row, remembered so the vendor map can
+ * record it.
+ */
+type VendorChoice = {
+  /** The raw vendor string the row carried. */
+  raw: string;
+  /** The payee the user chose. */
+  payeeId: string;
+};
+
+/**
  * A snapshot of the review, taken before a change so it can be undone.
  */
 type UndoSnapshot = {
@@ -85,7 +96,7 @@ type UndoSnapshot = {
    * undo the choice, not just the row: a map that remembered a choice the
    * user took back would decide the next import on their behalf.
    */
-  vendorChoices: ReadonlyMap<string, string>;
+  vendorChoices: ReadonlyMap<string, VendorChoice>;
 };
 
 /**
@@ -301,7 +312,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // The vendor-map entries the user earned by picking a payee, keyed by the
   // raw vendor string they picked it for. They are written when the import
   // succeeds, not while the review is open.
-  const vendorChoices = useRef<Map<string, string>>(new Map());
+  const vendorChoices = useRef<Map<string, VendorChoice>>(new Map());
 
   // The rows the user explicitly edited, so the apply step can update them
   // in place.
@@ -498,18 +509,31 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * open: writing the preference re-parses the file, which would throw
    * away the very decisions that produced the entries.
    */
-  const writeVendorMap = useCallback(() => {
-    const choices = vendorChoices.current;
-    if (choices.size === 0) return;
+  const writeVendorMap = useCallback(
+    (review: ImportPreviewState) => {
+      const choices = vendorChoices.current;
+      if (choices.size === 0) return;
 
-    const now = new Date().toISOString();
-    let map = readVendorMap(vendorMapRawRef.current) ?? emptyVendorMap(now);
-    for (const [raw, payeeId] of choices) {
-      if (raw.length === 0 || payeeId.length === 0) continue;
-      map = upsertVendorMapEntry(map, raw, payeeId, now);
-    }
-    setVendorMapRaw(JSON.stringify(map));
-  }, [setVendorMapRaw]);
+      // A row the user THREW AWAY says nothing about how the vendor
+      // string should be resolved: they did not want that transaction. The
+      // choice is only remembered for the rows they kept.
+      const dropped = new Set(
+        review.rows
+          .filter(row => row.decision === 'drop')
+          .map(row => rowKey(row)),
+      );
+
+      const now = new Date().toISOString();
+      let map = readVendorMap(vendorMapRawRef.current) ?? emptyVendorMap(now);
+      for (const [rowKey, choice] of choices) {
+        if (dropped.has(rowKey)) continue;
+        if (choice.raw.length === 0 || choice.payeeId.length === 0) continue;
+        map = upsertVendorMapEntry(map, choice.raw, choice.payeeId, now);
+      }
+      setVendorMapRaw(JSON.stringify(map));
+    },
+    [setVendorMapRaw],
+  );
 
   /**
    * Record the state as it is NOW, so the change that follows can be
@@ -596,7 +620,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
             raw.length > 0 &&
             normalizePayeeName(raw) !== normalizePayeeName(payee.name)
           ) {
-            vendorChoices.current.set(raw, chosenId);
+            vendorChoices.current.set(rowKey(row), { raw, payeeId: chosenId });
           }
         }
 
@@ -710,7 +734,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // so this is a SUCCESS, not a failure with nothing to do.
         setStatus('reviewing');
         if (didChange) {
-          writeVendorMap();
+          writeVendorMap(state);
           onImported(true);
         } else {
           setError('There is nothing to import');
@@ -757,7 +781,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The map is written HERE and not while the review is open: writing
       // the preference re-parses the file and throws away the very
       // decisions that produced the entries.
-      writeVendorMap();
+      writeVendorMap(state);
       onImported(true);
     }
     return didChange;

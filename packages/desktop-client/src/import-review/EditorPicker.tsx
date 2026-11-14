@@ -131,9 +131,10 @@ export function EditorPicker({
         // from the field, so a screen reader says which suggestion is
         // about to be picked.
         role="combobox"
+        aria-label={label}
         aria-autocomplete="list"
         aria-expanded={matches.length > 0}
-        aria-controls={listboxId}
+        aria-controls={matches.length > 0 ? listboxId : undefined}
         aria-activedescendant={highlight >= 0 ? optionId(highlight) : undefined}
         data-testid="import-review-editor-input"
         onChangeValue={value => {

@@ -55,7 +55,7 @@ export function HelpOverlay() {
           <Text>{HELP_LABELS[binding.action]}</Text>
         </View>
       ))}
-      <Text style={{ color: theme.warningText }}>
+      <Text style={{ color: theme.pageTextSubdued }}>
         {t('Press ? again or Escape to close')}
       </Text>
     </View>

@@ -2,6 +2,7 @@ import {
   buildPreviewState,
   resolvePayees,
   rowKey,
+  updateEdits,
 } from '@actual-app/core/server/transactions/import/review/index';
 
 import {
@@ -529,6 +530,46 @@ describe('buildApplyPayload — the trust-level gate', () => {
     });
     expect(updates).toHaveLength(1);
     expect(updates[0].update.payee).toBe('p-two');
+  });
+});
+
+describe('buildApplyPayload — a cleared category', () => {
+  it('sends the category the resolver found when the user has not picked one', () => {
+    const state = buildPreviewState(
+      buildState([mkRow()]).rows.map(row => ({
+        ...row,
+        matchedCategoryId: 'c-groceries',
+      })),
+      'cautious',
+    );
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].category).toBe('c-groceries');
+  });
+
+  it('omits the category when the user cleared it', () => {
+    // `undefined` means "the user has not picked one", so it falls back to
+    // the resolver's category. An EMPTY string is how the user says "no
+    // category", and it has to be spelled out.
+    const built = buildPreviewState(
+      buildState([mkRow()]).rows.map(row => ({
+        ...row,
+        matchedCategoryId: 'c-groceries',
+      })),
+      'cautious',
+    );
+    const state = updateEdits(built, rowKey(built.rows[0]), {
+      categoryId: '',
+    });
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].category).toBeUndefined();
   });
 });
 

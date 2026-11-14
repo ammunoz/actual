@@ -376,6 +376,41 @@ describe('useImportReview', () => {
     expect(setPref).not.toHaveBeenCalled();
   });
 
+  it('does not remember a payee choice for a row the user dropped', async () => {
+    // A row the user threw away says nothing about how the vendor string
+    // should be resolved.
+    const setPref = vi.fn();
+    prefMock.mockReturnValue([undefined, setPref]);
+
+    const { result } = await renderReview();
+    act(() => {
+      result.current.edit(
+        0,
+        { payeeCanonical: 'Demo Grocery Store' },
+        { chosenPayeeId: 'p-1' },
+      );
+    });
+    act(() => {
+      result.current.decide(0, 'drop');
+    });
+    act(() => {
+      result.current.edit(
+        1,
+        { payeeCanonical: 'Demo Grocery Store' },
+        { chosenPayeeId: 'p-1' },
+      );
+    });
+
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    expect(setPref).toHaveBeenCalledTimes(1);
+    const written = JSON.parse(setPref.mock.calls[0][0]);
+    expect(written.entries['Demo Other']).toBe('p-1');
+    expect(written.entries['Demo Vendor']).toBeUndefined();
+  });
+
   it('forgets a vendor map entry the user undid', async () => {
     const setPref = vi.fn();
     prefMock.mockReturnValue([undefined, setPref]);
