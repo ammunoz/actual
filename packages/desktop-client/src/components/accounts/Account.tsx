@@ -78,6 +78,8 @@ import {
   SPECIAL_VIEW_IDS,
   useTransactionTableColumns,
 } from '#hooks/useTransactionTableColumns';
+import { useOpenImportModalFor } from '#import-review';
+import type { ImportModalDescriptor } from '#import-review';
 import {
   openAccountCloseModal,
   pushModal,
@@ -222,6 +224,15 @@ type AccountInternalProps = {
     | 'offbudget'
     | 'uncategorized'
     | undefined;
+  /**
+   * Builds the descriptor for the import modal. Injected so the import
+   * experience can be chosen without this component knowing about it.
+   */
+  openImportModalFor: (
+    accountId: string,
+    filename: string,
+    onImported: (didChange: boolean) => void,
+  ) => ImportModalDescriptor;
   filterConditions: RuleConditionEntity[];
   showBalances?: boolean;
   showNetWorthChart: boolean;
@@ -687,18 +698,15 @@ class AccountInternal extends PureComponent<
         if (accountId && res?.length > 0) {
           this.props.dispatch(
             pushModal({
-              modal: {
-                name: 'import-transactions',
-                options: {
-                  accountId,
-                  filename: res[0],
-                  onImported: (didChange: boolean) => {
-                    if (didChange) {
-                      this.fetchTransactions();
-                    }
-                  },
+              modal: this.props.openImportModalFor(
+                accountId,
+                res[0],
+                (didChange: boolean) => {
+                  if (didChange) {
+                    this.fetchTransactions();
+                  }
                 },
-              },
+              ),
             }),
           );
         }
@@ -2086,6 +2094,7 @@ type AccountHackProps = Omit<
   AccountInternalProps,
   | 'dispatch'
   | 'splitsExpandedDispatch'
+  | 'openImportModalFor'
   | 'onBatchEdit'
   | 'onBatchDuplicate'
   | 'onBatchLinkSchedule'
@@ -2106,10 +2115,13 @@ function AccountHack(props: AccountHackProps) {
     onSetTransfer,
   } = useTransactionBatchActions();
 
+  const openImportModalFor = useOpenImportModalFor();
+
   return (
     <AccountInternal
       dispatch={dispatch}
       splitsExpandedDispatch={splitsExpandedDispatch}
+      openImportModalFor={openImportModalFor}
       onBatchEdit={onBatchEdit}
       onBatchDuplicate={onBatchDuplicate}
       onBatchLinkSchedule={onBatchLinkSchedule}

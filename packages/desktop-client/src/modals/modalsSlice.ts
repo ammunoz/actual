@@ -56,6 +56,14 @@ export type Modal =
       };
     }
   | {
+      name: 'keyboard-import-transactions';
+      options: {
+        accountId: string;
+        filename: string;
+        onImported: (didChange: boolean) => void;
+      };
+    }
+  | {
       name: 'add-account';
       options: {
         upgradingAccountId?: string;

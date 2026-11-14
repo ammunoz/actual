@@ -17,6 +17,7 @@
     },
     "#account-groups": "./src/account-groups/index.ts",
     "#accounts": "./src/accounts/index.ts",
+    "#import-review": "./src/import-review/index.ts",
     "#budget": "./src/budget/index.ts",
     "#payees": "./src/payees/index.ts",
     "#queries": "./src/queries/index.ts",
