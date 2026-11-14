@@ -188,7 +188,10 @@ export function KeyboardImportModal({
                 );
                 return (
                   <View
-                    key={row.importedId ?? row.previewKey ?? String(index)}
+                    key={row.previewKey ?? row.importedId ?? String(index)}
+                    data-testid="import-review-row"
+                    data-focused={isFocused ? 'true' : 'false'}
+                    data-decision={row.decision}
                     style={{
                       flexDirection: 'row',
                       gap: 12,

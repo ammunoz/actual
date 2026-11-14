@@ -78,6 +78,14 @@ describe('KEYMAP', () => {
       }
     }
   });
+
+  it('does not bind a character the library cannot match', () => {
+    // The library matches on the NORMALIZED key code — `Digit4` becomes
+    // `4` — so a character like `$` can never fire.
+    const keys = KEYMAP.map(binding => binding.keys);
+    expect(keys).not.toContain('$');
+    expect(keys).toContain('shift+4');
+  });
 });
 
 describe('actionForHotkey', () => {

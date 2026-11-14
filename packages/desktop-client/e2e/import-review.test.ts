@@ -117,4 +117,106 @@ test.describe('Keyboard import review', () => {
       1,
     );
   });
+
+  test('the keyboard drives the review', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Keys',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The first row is focused to begin with.
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'false');
+
+    // `j` moves down.
+    await page.keyboard.press('j');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'false');
+
+    // `k` moves back up.
+    await page.keyboard.press('k');
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+
+    // `a` accepts the focused row and advances.
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+
+    // `r` drops the focused row and advances.
+    await page.keyboard.press('r');
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'drop');
+    await expect(rows.nth(2)).toHaveAttribute('data-focused', 'true');
+
+    // `u` undoes the last decision.
+    await page.keyboard.press('u');
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test('shift+a accepts every row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Accept All',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // `shift+a` is a DIFFERENT hotkey from `a`: the library lowercases the
+    // key string, so without the explicit shift modifier the two would be
+    // the same binding.
+    await page.keyboard.press('Shift+a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test('a dropped row is not imported', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Drop',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // Drop the first row, then import the rest.
+    await page.keyboard.press('r');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'drop');
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    const imported = accountPage.transactionTableRow;
+    await expect(imported.filter({ hasText: 'PURCHASE' })).toHaveCount(0);
+    await expect(
+      imported.filter({ hasText: 'Demo Grocery Store' }),
+    ).toHaveCount(1);
+  });
 });
