@@ -33,7 +33,14 @@ export type ReviewAction =
   | 'help';
 
 export type KeyBinding = {
-  /** The key as `react-hotkeys-hook` spells it. */
+  /**
+   * The keys, in `react-hotkeys-hook`'s own syntax, comma separated.
+   *
+   * The library lowercases the whole string, so `'A'` and `'a'` are the SAME
+   * hotkey to it — `'A'` would silently behave as plain `'a'`. The
+   * uppercase variants are therefore spelled `'shift+a'` and `'shift+r'`,
+   * which the library matches against the shift modifier.
+   */
   keys: string;
   /** What the key does. */
   action: ReviewAction;
@@ -51,7 +58,12 @@ export type KeyBinding = {
  * without a change to upstream's `ofx2json.ts`.
  */
 export const KEYMAP: readonly KeyBinding[] = Object.freeze([
-  { keys: 'j, down', action: 'move-next', label: 'Next row', showInHelp: true },
+  {
+    keys: 'j, down',
+    action: 'move-next',
+    label: 'Next row',
+    showInHelp: true,
+  },
   {
     keys: 'k, up',
     action: 'move-prev',
@@ -59,7 +71,12 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     showInHelp: true,
   },
   { keys: 'g', action: 'move-first', label: 'First row', showInHelp: true },
-  { keys: 'G', action: 'move-last', label: 'Last row', showInHelp: true },
+  {
+    keys: 'shift+g',
+    action: 'move-last',
+    label: 'Last row',
+    showInHelp: true,
+  },
   {
     keys: 'a',
     action: 'accept',
@@ -78,8 +95,18 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     label: 'Drop row and advance',
     showInHelp: true,
   },
-  { keys: 'u', action: 'undo', label: 'Undo last decision', showInHelp: true },
-  { keys: 'e', action: 'edit-payee', label: 'Edit payee', showInHelp: true },
+  {
+    keys: 'u',
+    action: 'undo',
+    label: 'Undo last decision',
+    showInHelp: true,
+  },
+  {
+    keys: 'e',
+    action: 'edit-payee',
+    label: 'Edit payee',
+    showInHelp: true,
+  },
   {
     keys: 'c',
     action: 'edit-category',
@@ -102,12 +129,17 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     showInHelp: true,
   },
   {
-    keys: 'A',
+    keys: 'shift+a',
     action: 'accept-all',
     label: 'Accept every row',
     showInHelp: true,
   },
-  { keys: 'R', action: 'drop-all', label: 'Drop every row', showInHelp: true },
+  {
+    keys: 'shift+r',
+    action: 'drop-all',
+    label: 'Drop every row',
+    showInHelp: true,
+  },
   {
     keys: 'ctrl+s',
     action: 'apply',
@@ -122,6 +154,28 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   },
   { keys: '?', action: 'help', label: 'Show this help', showInHelp: true },
 ]);
+
+/**
+ * The action a hotkey string refers to.
+ *
+ * `react-hotkeys-hook` splits a comma-separated key list into separate
+ * hotkeys and reports the one that matched as `hotkey`. A binding of
+ * `'j, down'` therefore registers two hotkeys, `'j'` and `'down'`, and the
+ * lookup has to consider each of them.
+ *
+ * The comparison is on the hotkey string, not on the parsed key list: for
+ * `ctrl+a` and `a` the parsed key list is `['a']` in both cases, so it
+ * cannot tell them apart.
+ */
+export function actionForHotkey(hotkey: string): ReviewAction | undefined {
+  const lower = hotkey.toLowerCase();
+  for (const binding of KEYMAP) {
+    if (binding.keys.split(', ').some(keys => keys.toLowerCase() === lower)) {
+      return binding.action;
+    }
+  }
+  return undefined;
+}
 
 /**
  * The actions that end the review, in the order they are offered.

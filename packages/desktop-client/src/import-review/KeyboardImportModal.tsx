@@ -12,7 +12,7 @@ import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { useModalState } from '#hooks/useModalState';
 
-import { KEYMAP } from './keymap';
+import { actionForHotkey, KEYMAP } from './keymap';
 import type { ReviewAction } from './keymap';
 import { useImportReview } from './use-import-review';
 
@@ -107,9 +107,8 @@ export function KeyboardImportModal({
     }
   };
 
-  // One binding for the whole keymap. `react-hotkeys-hook` matches the key
-  // list it is given and hands the callback the keys that matched, so the
-  // action is resolved from the keymap rather than guessed.
+  // One binding for the whole keymap. `react-hotkeys-hook` reports the
+  // hotkey that matched, and the action is resolved from it.
   const allKeys = KEYMAP.map(binding => binding.keys).join(', ');
 
   useHotkeys(
@@ -120,14 +119,12 @@ export function KeyboardImportModal({
         const tag = event.target.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       }
+      // The matched hotkey, not the parsed key list: for `ctrl+a` and `a`
+      // the parsed key list is `['a']` in both cases.
+      const action = actionForHotkey(handler.hotkey);
+      if (!action) return;
       event.preventDefault();
-      // `react-hotkeys-hook` reports the matched keys as an array.
-      const matchedKey = handler.keys?.[0];
-      if (!matchedKey) return;
-      const matched = KEYMAP.find(binding =>
-        binding.keys.split(', ').some(keys => keys === matchedKey),
-      );
-      if (matched) dispatch(matched.action);
+      dispatch(action);
     },
     { scopes: ['keyboard-import-transactions'] },
   );

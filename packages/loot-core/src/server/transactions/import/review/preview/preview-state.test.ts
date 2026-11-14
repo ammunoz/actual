@@ -14,6 +14,7 @@ import {
   rowKey,
   summarize,
   updateEdits,
+  withTrustLevel,
 } from './preview-state';
 
 function mkRow(overrides: Partial<ResolvedRow> = {}): ResolvedRow {
@@ -53,16 +54,29 @@ describe('buildPreviewState', () => {
 });
 
 describe('rowKey', () => {
-  it('prefers importedId', () => {
+  it('prefers the previewKey', () => {
+    // The FITID is not unique — some files omit it and a malformed file can
+    // repeat one — so it cannot identify a row inside the review.
     expect(rowKey(mkRow({ importedId: 'fit-1', previewKey: 'k-1' }))).toBe(
+      'k-1',
+    );
+  });
+
+  it('falls back to importedId when there is no previewKey', () => {
+    expect(rowKey(mkRow({ importedId: 'fit-1', previewKey: undefined }))).toBe(
       'fit-1',
     );
   });
 
-  it('falls back to previewKey when importedId is absent', () => {
-    expect(rowKey(mkRow({ importedId: undefined, previewKey: 'k-1' }))).toBe(
-      'k-1',
+  it('gives two rows with the same FITID different keys', () => {
+    const state = buildPreviewState(
+      [
+        mkRow({ importedId: 'same', previewKey: 'k-1' }),
+        mkRow({ importedId: 'same', previewKey: 'k-2' }),
+      ],
+      'cautious',
     );
+    expect(new Set(state.rows.map(rowKey)).size).toBe(2);
   });
 
   it('returns an empty string when neither is present', () => {
@@ -166,6 +180,44 @@ describe('updateEdits', () => {
   it('throws when the row is not found', () => {
     const state = buildPreviewState([mkRow()], 'cautious');
     expect(() => updateEdits(state, 'nope', {})).toThrow(PreviewStateError);
+  });
+});
+
+describe('a decision only touches one row', () => {
+  it('does not fan out when two rows share a key', () => {
+    // The key has to identify exactly one row. If it ever did not, a single
+    // decision would apply to several rows at once.
+    const state = buildPreviewState(
+      [
+        mkRow({ importedId: 'same', previewKey: 'k-1' }),
+        mkRow({ importedId: 'same', previewKey: 'k-1' }),
+      ],
+      'cautious',
+    );
+    const next = applyDecision(state, 'k-1', 'accept');
+    const accepted = next.rows.filter(r => r.decision === 'accept');
+    expect(accepted).toHaveLength(1);
+  });
+});
+
+describe('withTrustLevel', () => {
+  it('changes the trust level without touching the rows', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = withTrustLevel(state, 'paranoid');
+    expect(next.trustLevel).toBe('paranoid');
+    expect(next.rows).toBe(state.rows);
+  });
+
+  it('returns the same state when the level is unchanged', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    expect(withTrustLevel(state, 'cautious')).toBe(state);
+  });
+
+  it('keeps the decisions when the level changes', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const accepted = applyDecision(state, rowKey(state.rows[0]), 'accept');
+    const next = withTrustLevel(accepted, 'paranoid');
+    expect(next.rows[0].decision).toBe('accept');
   });
 });
 

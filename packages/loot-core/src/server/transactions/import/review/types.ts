@@ -105,7 +105,15 @@ export type ReviewRowInput = {
 export type ReviewPayee = {
   id: string;
   name: string;
-  transferAcct?: string;
+  /**
+   * The account this payee is the transfer payee for, or null/undefined for
+   * an ordinary payee.
+   *
+   * Actual's `payees` column is nullable and the API returns `null` for an
+   * ordinary payee, so this has to accept `null` — a check for `undefined`
+   * alone would treat every ordinary payee as a transfer payee.
+   */
+  transferAcct?: string | null;
 };
 
 /** A budget account, reduced to what the resolver and the UI need. */

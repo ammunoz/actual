@@ -25,7 +25,12 @@ export type {
   UseImportReviewCommand,
 } from './command';
 
-export { KEYMAP, nextTrustLevel, TRUST_LEVELS } from './keymap';
+export {
+  KEYMAP,
+  actionForHotkey,
+  nextTrustLevel,
+  TRUST_LEVELS,
+} from './keymap';
 export type { KeyBinding, ReviewAction } from './keymap';
 
 export { useImportReview } from './use-import-review';

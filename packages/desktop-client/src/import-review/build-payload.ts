@@ -64,6 +64,15 @@ export type BuildPayloadOpts = {
   payees: readonly ReviewPayeeRef[];
   /** Live categories, used to drop a stale category id. */
   categories: readonly { id: string }[];
+  /**
+   * The rows that are updated in place, keyed by the row's key.
+   *
+   * These rows are EXCLUDED from the import payload. The import's update
+   * path keeps the existing payee, category and notes, so sending them
+   * again would undo the edit that was just applied through
+   * `transaction-update`.
+   */
+  updatedRowKeys?: ReadonlySet<string>;
 };
 
 /**
@@ -105,10 +114,16 @@ export function buildImportPayload(
   opts: BuildPayloadOpts,
 ): ImportReviewTransaction[] {
   const liveCategoryIds = new Set(opts.categories.map(c => c.id));
+  const updated = opts.updatedRowKeys ?? new Set<string>();
 
   const out: ImportReviewTransaction[] = [];
 
   for (const row of state.rows) {
+    // A row that is updated in place is not sent to the import: the
+    // import's update path would keep the existing payee, category and
+    // notes and undo the edit.
+    if (updated.has(rowKey(row))) continue;
+
     const isDropped = row.decision === 'drop';
 
     // The payee the user ended up with. A transfer target wins over the
@@ -142,6 +157,14 @@ export function buildImportPayload(
 
     if (row.importedId) {
       payload.imported_id = row.importedId;
+    }
+
+    // The transient row key travels with the payload so the import preview
+    // echoes it back, which is how the review learns which existing
+    // transaction each row matched. The leading underscore is what makes
+    // Actual's insert path ignore it.
+    if (row.previewKey) {
+      payload._previewKey = row.previewKey;
     }
 
     // The payee, in precedence order:
@@ -235,6 +258,8 @@ export type BuildUpdateResult = {
  * An update that is ready to send, plus anything it is waiting on.
  */
 export type PendingUpdate = {
+  /** The key of the row this update belongs to. */
+  rowKey: string;
   /** The update to send to `transaction-update`. */
   update: ImportReviewUpdate;
   /**
@@ -349,6 +374,7 @@ export function buildUpdatePayload(
     }
 
     updates.push({
+      rowKey: key,
       update,
       ...(payeeNameToCreate !== undefined && { payeeNameToCreate }),
     });

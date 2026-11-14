@@ -1,4 +1,9 @@
-import { KEYMAP, nextTrustLevel, TRUST_LEVELS } from './keymap';
+import {
+  actionForHotkey,
+  KEYMAP,
+  nextTrustLevel,
+  TRUST_LEVELS,
+} from './keymap';
 
 describe('KEYMAP', () => {
   it('has no duplicate key combinations', () => {
@@ -52,6 +57,64 @@ describe('KEYMAP', () => {
     for (const binding of KEYMAP) {
       expect(binding.keys).toBe(binding.keys.split(', ').join(', '));
     }
+  });
+
+  it('spells the uppercase variants with the shift modifier', () => {
+    // `react-hotkeys-hook` lowercases the whole key string, so `'A'` and
+    // `'a'` are the SAME hotkey to it. The uppercase variants have to be
+    // spelled with the shift modifier or they would silently behave as
+    // their lowercase counterparts.
+    const keys = KEYMAP.map(binding => binding.keys);
+    expect(keys).toContain('shift+a');
+    expect(keys).toContain('shift+r');
+    expect(keys).not.toContain('A');
+    expect(keys).not.toContain('R');
+  });
+
+  it('does not bind a plain uppercase letter', () => {
+    for (const binding of KEYMAP) {
+      for (const key of binding.keys.split(', ')) {
+        expect(key).toBe(key.toLowerCase());
+      }
+    }
+  });
+});
+
+describe('actionForHotkey', () => {
+  it('resolves a plain key', () => {
+    expect(actionForHotkey('a')).toBe('accept');
+    expect(actionForHotkey('r')).toBe('drop');
+  });
+
+  it('tells a modifier binding from its plain counterpart', () => {
+    // The parsed key list is `['a']` for both of these, so the lookup has
+    // to be on the hotkey string.
+    expect(actionForHotkey('ctrl+a')).toBe('accept-confirm');
+    expect(actionForHotkey('a')).toBe('accept');
+    expect(actionForHotkey('ctrl+s')).toBe('apply');
+    expect(actionForHotkey('s')).toBe('edit-split');
+  });
+
+  it('tells a shift binding from its plain counterpart', () => {
+    expect(actionForHotkey('shift+a')).toBe('accept-all');
+    expect(actionForHotkey('shift+r')).toBe('drop-all');
+  });
+
+  it('resolves each key of a multi-key binding', () => {
+    expect(actionForHotkey('j')).toBe('move-next');
+    expect(actionForHotkey('down')).toBe('move-next');
+    expect(actionForHotkey('k')).toBe('move-prev');
+    expect(actionForHotkey('up')).toBe('move-prev');
+  });
+
+  it('is case-insensitive, because the library lowercases the key string', () => {
+    expect(actionForHotkey('CTRL+A')).toBe('accept-confirm');
+    expect(actionForHotkey('Shift+A')).toBe('accept-all');
+  });
+
+  it('returns undefined for an unknown key', () => {
+    expect(actionForHotkey('q')).toBeUndefined();
+    expect(actionForHotkey('')).toBeUndefined();
   });
 });
 

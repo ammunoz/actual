@@ -161,16 +161,21 @@ export class PreviewStateError extends Error {
 /**
  * The key that identifies a row within the preview state.
  *
- * `importedId` is preferred because it is what the apply step dedups on and
- * it is stable across re-imports. It is NOT always present though: some
- * OFX files omit FITIDs, and a malformed file can repeat one. The
- * `previewKey` assigned at parse time is the fallback, and it is always
- * unique.
+ * This is the transient `previewKey` the parser assigns, NOT the FITID.
+ *
+ * The FITID looks like the obvious choice — it is what the apply step
+ * dedups on — but it is not unique: some OFX files omit FITIDs entirely,
+ * and a malformed file can repeat one. A row key has to identify exactly
+ * one row, or a single decision would fan out across every row that
+ * happens to share a FITID.
+ *
+ * The FITID is carried on the row as `importedId` for the dedup itself; the
+ * `previewKey` only ever identifies a row inside the review.
  */
 export function rowKey(
   row: Pick<PreviewRow, 'importedId' | 'previewKey'>,
 ): string {
-  return row.importedId ?? row.previewKey ?? '';
+  return row.previewKey ?? row.importedId ?? '';
 }
 
 /**
@@ -238,24 +243,25 @@ export function applyDecision(
       'applyDecision requires a non-empty key',
     );
   }
-  let touched = false;
-  const nextRows: PreviewRow[] = state.rows.map(row => {
-    if (rowKey(row) !== key) return row;
-    touched = true;
-    const frozenEdits: PreviewEdits =
-      edits === undefined ? row.edits : freezeEdits(edits);
-    return Object.freeze({
-      ...row,
-      decision,
-      edits: frozenEdits,
-    }) as PreviewRow;
-  });
-  if (!touched) {
+  // Exactly ONE row is updated. The key is unique by construction, but
+  // updating a single row keeps it that way: a duplicated key must never
+  // fan one decision out across several rows.
+  const index = state.rows.findIndex(row => rowKey(row) === key);
+  if (index === -1) {
     throw new PreviewStateError(
       PREVIEW_STATE_NOT_FOUND,
       'applyDecision could not locate the row',
     );
   }
+  const row = state.rows[index];
+  const frozenEdits: PreviewEdits =
+    edits === undefined ? row.edits : freezeEdits(edits);
+  const nextRows = [...state.rows];
+  nextRows[index] = Object.freeze({
+    ...row,
+    decision,
+    edits: frozenEdits,
+  }) as PreviewRow;
   return Object.freeze({
     rows: Object.freeze(nextRows) as readonly PreviewRow[],
     trustLevel: state.trustLevel,
@@ -285,28 +291,45 @@ export function updateEdits(
       'updateEdits requires a non-empty key',
     );
   }
-  let touched = false;
-  const nextRows: PreviewRow[] = state.rows.map(row => {
-    if (rowKey(row) !== key) return row;
-    touched = true;
-    const frozenEdits: PreviewEdits = freezeEdits(newEdits);
-    // `...row` preserves `decision` (and every other field). Only `edits`
-    // is overridden. This is the whole point of the helper: mid-chain edits
-    // must NOT flip the row to `accept`.
-    return Object.freeze({
-      ...row,
-      edits: frozenEdits,
-    }) as PreviewRow;
-  });
-  if (!touched) {
+  // Exactly ONE row is updated; see `applyDecision`.
+  const index = state.rows.findIndex(row => rowKey(row) === key);
+  if (index === -1) {
     throw new PreviewStateError(
       PREVIEW_STATE_NOT_FOUND,
       'updateEdits could not locate the row',
     );
   }
+  const row = state.rows[index];
+  const nextRows = [...state.rows];
+  // `...row` preserves `decision` (and every other field). Only `edits` is
+  // overridden. This is the whole point of the helper: mid-chain edits must
+  // NOT flip the row to `accept`.
+  nextRows[index] = Object.freeze({
+    ...row,
+    edits: freezeEdits(newEdits),
+  }) as PreviewRow;
   return Object.freeze({
     rows: Object.freeze(nextRows) as readonly PreviewRow[],
     trustLevel: state.trustLevel,
+  });
+}
+
+/**
+ * Pure: return a new state with a different trust level.
+ *
+ * The trust level only feeds the gate matrix, which is applied when the
+ * state is summarised. Changing it must NOT re-parse the file: the rows and
+ * the user's decisions on them are still valid, and re-parsing would throw
+ * the decisions away.
+ */
+export function withTrustLevel(
+  state: ImportPreviewState,
+  trustLevel: TrustLevel,
+): ImportPreviewState {
+  if (state.trustLevel === trustLevel) return state;
+  return Object.freeze({
+    rows: state.rows,
+    trustLevel,
   });
 }
 

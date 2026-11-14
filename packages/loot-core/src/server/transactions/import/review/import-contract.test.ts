@@ -225,4 +225,52 @@ describe('the import engine update path', () => {
     expect(updatedPreview[0].existing).toBeTruthy();
     expect(updatedPreview[0].existing.id).toBeTruthy();
   });
+
+  test('a transient underscore-prefixed field is accepted and ignored', async () => {
+    // The review passes a transient row key through the import so the
+    // preview can echo it back. Actual's insert path runs every field
+    // through `conform`, which THROWS on a field the transactions table
+    // does not have - unless the field starts with an underscore. This
+    // test pins that convention down, because getting it wrong breaks the
+    // whole import.
+    await setup();
+
+    const { added } = await reconcileTransactions(ACCOUNT, [
+      {
+        date: '2026-09-07',
+        amount: -2500,
+        payee_name: 'Demo Vendor',
+        imported_payee: 'Demo Vendor',
+        imported_id: 'FITID-1',
+        _previewKey: 'row-0',
+      },
+    ]);
+
+    expect(added.length).toBe(1);
+
+    const rows = await getRows();
+    expect(rows.length).toBe(1);
+    // The transient field is not written to the transaction.
+    expect(rows[0].id).toBeTruthy();
+  });
+
+  test('a transient field WITHOUT the underscore is rejected', async () => {
+    // The counterpart to the test above: it proves the underscore is what
+    // makes the transient field safe, not that unknown fields are ignored
+    // in general.
+    await setup();
+
+    await expect(
+      reconcileTransactions(ACCOUNT, [
+        {
+          date: '2026-09-07',
+          amount: -2500,
+          payee_name: 'Demo Vendor',
+          imported_payee: 'Demo Vendor',
+          imported_id: 'FITID-1',
+          previewKey: 'row-0',
+        },
+      ]),
+    ).rejects.toThrow(/does not exist on table/);
+  });
 });

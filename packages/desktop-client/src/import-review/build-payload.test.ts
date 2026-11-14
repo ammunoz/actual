@@ -1,6 +1,7 @@
 import {
   buildPreviewState,
   resolvePayees,
+  rowKey,
 } from '@actual-app/core/server/transactions/import/review/index';
 
 import { buildImportPayload, buildUpdatePayload } from './build-payload';
@@ -20,6 +21,7 @@ function mkRow(overrides: Record<string, unknown> = {}) {
     date: '2026-09-07',
     amountCents: -2500,
     payeeRaw: 'Demo Coffee Shop',
+    previewKey: 'row-0',
     ...overrides,
   };
 }
@@ -56,6 +58,33 @@ describe('buildImportPayload', () => {
       categories: CATEGORIES,
     });
     expect(payload[0].imported_id).toBe('FITID-0001-X');
+  });
+
+  it('carries the transient row key with a leading underscore', () => {
+    // Actual's insert path throws on a field the transactions table does
+    // not have, unless it starts with an underscore. The preview key has
+    // to travel through the import, so it has to be underscore-prefixed.
+    const state = buildState([mkRow()]);
+    const payload = buildImportPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0]._previewKey).toBeTruthy();
+    expect(payload[0]).not.toHaveProperty('previewKey');
+  });
+
+  it('excludes a row that is updated in place', () => {
+    // The import's update path keeps the existing payee, category and
+    // notes, so sending the row again would undo the edit.
+    const state = buildState([mkRow()]);
+    const payload = buildImportPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      updatedRowKeys: new Set([rowKey(state.rows[0])]),
+    });
+    expect(payload).toEqual([]);
   });
 
   it('sends the RAW vendor string as imported_payee', () => {
@@ -280,7 +309,8 @@ describe('buildImportPayload', () => {
 });
 
 describe('buildUpdatePayload', () => {
-  const MATCHED = new Map([['fit-1', 'trx-1']]);
+  // Keyed by the row's key, which is the transient preview key.
+  const MATCHED = new Map([['row-0', 'trx-1']]);
 
   function buildEditedState(edits: Record<string, unknown>) {
     const state = buildState([mkRow()]);
@@ -314,7 +344,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: new Map(),
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toEqual([]);
   });
@@ -330,7 +360,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toEqual([]);
   });
@@ -342,7 +372,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toHaveLength(1);
     expect(updates[0].update.id).toBe('trx-1');
@@ -358,7 +388,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates[0].update.category).toBe('c-groceries');
   });
@@ -370,7 +400,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toEqual([]);
   });
@@ -382,7 +412,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates[0].update.notes).toBe('a note');
   });
@@ -394,7 +424,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates[0].update.amount).toBe(-2500);
     expect(updates[0].update.date).toBe('2026-09-07');
@@ -411,7 +441,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toHaveLength(1);
     expect(updates[0].update.amount).toBe(-3000);
@@ -424,7 +454,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toHaveLength(1);
     expect(updates[0].update.date).toBe('2026-09-09');
@@ -437,7 +467,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toEqual([]);
   });
@@ -451,7 +481,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates).toHaveLength(1);
     expect(updates[0].update.payee).toBeUndefined();
@@ -465,7 +495,7 @@ describe('buildUpdatePayload', () => {
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
+      editedRowKeys: new Set(['row-0']),
     });
     expect(updates[0].update.payee).toBe('p-two');
     expect(updates[0].payeeNameToCreate).toBeUndefined();

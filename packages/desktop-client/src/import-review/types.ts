@@ -57,6 +57,19 @@ export type ImportReviewTransaction = {
   amount: number;
   imported_id?: string;
   imported_payee?: string;
+  /**
+   * A transient key that identifies this row inside the review.
+   *
+   * It is sent so the import preview echoes it back, which is how the
+   * review learns which existing transaction each row matched.
+   *
+   * The leading underscore is load-bearing: Actual's insert path runs
+   * every field through `conform`, which THROWS on a field the
+   * transactions table does not have. Fields that start with an underscore
+   * are the ones it ignores, so that is how a transient field is passed
+   * through without being written.
+   */
+  _previewKey?: string;
   payee?: string | null;
   /**
    * Only sent when no payee id is known, so that Actual creates the payee.

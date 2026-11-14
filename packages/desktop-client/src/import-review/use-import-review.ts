@@ -18,6 +18,7 @@ import {
   rowKey,
   updateEdits,
   validateVendorMap,
+  withTrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type {
   ImportPreviewState,
@@ -36,7 +37,6 @@ import { amountToInteger } from '@actual-app/core/shared/util';
 import { buildImportPayload, buildUpdatePayload } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
-import type { ImportReviewTransaction } from './types';
 import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
@@ -67,8 +67,7 @@ export type ImportReviewState = {
   /** The live categories, for the category picker. */
   categories: readonly ReviewCategory[];
   /** The payload the apply step will send. */
-  buildPayload: () => ImportReviewTransaction[];
-  /** Set the decision on a row and advance. */
+  /** Set the decision on a row. */
   decide: (index: number, decision: PreviewDecision) => void;
   /** Replace a row's edits. */
   edit: (index: number, edits: PreviewEdits) => void;
@@ -130,15 +129,30 @@ export function toReviewRows(
     const rawAmount =
       typeof trans.amount === 'number' ? trans.amount : Number(trans.amount);
     const date = typeof trans.date === 'string' ? trans.date : '';
+    const amountIsUsable = Number.isFinite(rawAmount);
 
     return {
       accountId: '',
       importedId,
       date,
-      amountCents: Number.isFinite(rawAmount) ? amountToInteger(rawAmount) : 0,
+      // An amount the file did not supply becomes 0 cents, but the row is
+      // FLAGGED so the user sees it rather than importing a silent $0
+      // transaction.
+      amountCents: amountIsUsable ? amountToInteger(rawAmount) : 0,
       payeeRaw: rawPayee,
       memo: typeof trans.notes === 'string' ? trans.notes : undefined,
       previewKey: `row-${index}`,
+      ...(amountIsUsable
+        ? {}
+        : {
+            flags: [
+              {
+                kind: 'amount-mismatch' as const,
+                code: 'AMT-MISMATCH-001' as const,
+                note: 'the file did not supply a usable amount',
+              },
+            ],
+          }),
     };
   });
 }
@@ -180,146 +194,149 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // already-imported transaction be applied in place.
   const matchedTransactionIds = useRef<ReadonlyMap<string, string>>(new Map());
 
-  // Load the budget's payees, accounts and categories once per account.
-  useEffect(() => {
-    let cancelled = false;
+  // The trust level the review started with. It is read by the parse effect
+  // but is deliberately not one of its dependencies: changing it must not
+  // re-parse the file and discard the user's decisions.
+  const trustLevelRef = useRef(trustLevel);
+  trustLevelRef.current = trustLevel;
 
-    async function load() {
-      const [payeeEntities, accountEntities, categoryEntities] =
-        await Promise.all([
-          send('payees-get'),
-          send('accounts-get'),
-          send('get-categories'),
-        ]);
-      if (cancelled) return;
-      setPayees(
-        payeeEntities.map(p => ({
-          id: p.id,
-          name: p.name,
-          transferAcct: p.transfer_acct,
-        })),
-      );
-      setAccounts(
-        accountEntities.map(a => ({
-          id: a.id,
-          name: a.name,
-          offbudget: a.offbudget === 1,
-          closed: a.closed === 1,
-        })),
-      );
-      setCategories(
-        categoryEntities.list.map(c => ({
-          id: c.id,
-          name: c.name,
-          hidden: c.hidden,
-          isIncome: c.is_income,
-        })),
-      );
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [accountId]);
-
-  // Parse and resolve.
+  // Load the budget's data and parse the file, in ONE pass.
+  //
+  // They are a single effect on purpose. Splitting them meant the parse
+  // effect ran once with empty payees and accounts — before the first
+  // effect had loaded them — and then again once the data arrived, so the
+  // file was parsed twice and the first pass resolved against nothing.
+  //
+  // The trust level is deliberately NOT a dependency: it only feeds the
+  // gate matrix, which is applied when the state is summarised. Re-parsing
+  // on a trust-level change would throw away every decision the user had
+  // made.
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setStatus('parsing');
       setError(null);
+      // A re-parse starts the review over: the decisions and edits from the
+      // previous parse belong to rows that no longer exist.
+      editedRowKeys.current = new Set();
+      matchedTransactionIds.current = new Map();
 
-      const { errors, transactions = [] } = await send(
-        'transactions-parse-file',
-        { filepath: filename, options: {} },
-      );
+      try {
+        const [payeeEntities, accountEntities, categoryEntities, parsed] =
+          await Promise.all([
+            send('payees-get'),
+            send('accounts-get'),
+            send('get-categories'),
+            send('transactions-parse-file', {
+              filepath: filename,
+              options: {},
+            }),
+          ]);
 
-      if (cancelled) return;
+        if (cancelled) return;
 
-      if (errors && errors.length > 0) {
-        setStatus('idle');
-        setError(errors[0].message);
-        return;
-      }
-
-      const raw = toReviewRows(transactions as Record<string, unknown>[]);
-
-      // Actual's own rules cover what a separate rules system would do.
-      // They run server-side during import, keyed on `imported_payee`, so
-      // there is no second rules system to maintain here.
-      const vendorMap = readVendorMap(vendorMapRaw);
-      const liveMap = vendorMap
-        ? filterStaleVendorMapEntries(vendorMap, payees)
-        : undefined;
-
-      const resolved: readonly ResolvedRow[] = resolvePayees(raw, {
-        existingPayees: payees,
-        accounts,
-        vendorMap: liveMap,
-        fuzzy: { minScore: 0.6, maxResults: 5 },
-      });
-
-      const next = buildPreviewState(resolved, trustLevel);
-      setState(next);
-      setFocusedIndex(0);
-
-      // Ask Actual which of these rows match an existing transaction. The
-      // preview reports the matched transaction's id, which is what lets a
-      // user's edit to an already-imported transaction be applied in place
-      // (Actual's import UPDATE path keeps the existing payee).
-      const preview = await send('transactions-import', {
-        accountId,
-        transactions: buildImportPayload(next, {
-          accountId,
-          payees: payeeRefs(payees),
-          categories: categories.map(c => ({ id: c.id })),
-        }),
-        isPreview: true,
-      });
-
-      if (cancelled) return;
-
-      const matched = new Map<string, string>();
-      preview.updatedPreview?.forEach(entry => {
-        const existing = entry.existing;
-        if (!existing?.id) return;
-        // The preview echoes back the transaction we sent, so the transient
-        // preview key travels with it.
-        const key = (entry.transaction as { previewKey?: string } | undefined)
-          ?.previewKey;
-        if (typeof key === 'string') {
-          matched.set(key, existing.id);
+        if (parsed.errors && parsed.errors.length > 0) {
+          setStatus('idle');
+          setError(parsed.errors[0].message);
+          return;
         }
-      });
-      matchedTransactionIds.current = matched;
 
-      setStatus('reviewing');
+        const payeeList: readonly ReviewPayee[] = payeeEntities.map(p => ({
+          id: p.id,
+          name: p.name,
+          transferAcct: p.transfer_acct,
+        }));
+        const accountList: readonly ReviewAccount[] = accountEntities.map(
+          a => ({
+            id: a.id,
+            name: a.name,
+            offbudget: a.offbudget === 1,
+            closed: a.closed === 1,
+          }),
+        );
+        const categoryList: readonly ReviewCategory[] =
+          categoryEntities.list.map(c => ({
+            id: c.id,
+            name: c.name,
+            hidden: c.hidden,
+            isIncome: c.is_income,
+          }));
+
+        setPayees(payeeList);
+        setAccounts(accountList);
+        setCategories(categoryList);
+
+        const raw = toReviewRows(
+          // Safe: the parse handler's loose type is a union of a structured
+          // transaction and a CSV record, and `toReviewRows` reads each
+          // field defensively, checking the type before it uses it.
+          parsed.transactions as Record<string, unknown>[],
+        );
+
+        // Actual's own rules cover what a separate rules system would do.
+        // They run server-side during import, keyed on `imported_payee`, so
+        // there is no second rules system to maintain here.
+        const vendorMap = readVendorMap(vendorMapRaw);
+        const liveMap = vendorMap
+          ? filterStaleVendorMapEntries(vendorMap, payeeList)
+          : undefined;
+
+        const resolved: readonly ResolvedRow[] = resolvePayees(raw, {
+          existingPayees: payeeList,
+          accounts: accountList,
+          vendorMap: liveMap,
+          fuzzy: { minScore: 0.7, maxResults: 5 },
+        });
+
+        const next = buildPreviewState(resolved, trustLevelRef.current);
+        setState(next);
+        setFocusedIndex(0);
+
+        // Ask Actual which of these rows match an existing transaction. The
+        // preview reports the matched transaction's id, which is what lets a
+        // user's edit to an already-imported transaction be applied in place
+        // (Actual's import UPDATE path keeps the existing payee).
+        const preview = await send('transactions-import', {
+          accountId,
+          transactions: buildImportPayload(next, {
+            accountId,
+            payees: payeeRefs(payeeList),
+            categories: categoryList.map(c => ({ id: c.id })),
+          }),
+          isPreview: true,
+        });
+
+        if (cancelled) return;
+
+        const matched = new Map<string, string>();
+        preview.updatedPreview?.forEach(entry => {
+          const existing = entry.existing;
+          if (!existing?.id) return;
+          // The preview echoes back the transaction we sent, so the transient
+          // preview key travels with it.
+          const key = (
+            entry.transaction as { _previewKey?: string } | undefined
+          )?._previewKey;
+          if (typeof key === 'string') {
+            matched.set(key, existing.id);
+          }
+        });
+        matchedTransactionIds.current = matched;
+
+        setStatus('reviewing');
+      } catch (err) {
+        if (cancelled) return;
+        setStatus('idle');
+        setError(err instanceof Error ? err.message : 'Import failed');
+      }
     }
 
     void load();
     return () => {
       cancelled = true;
     };
-  }, [
-    filename,
-    vendorMapRaw,
-    payees,
-    accounts,
-    categories,
-    accountId,
-    trustLevel,
-  ]);
-
-  const buildPayload = useCallback(() => {
-    if (!state) return [];
-    return buildImportPayload(state, {
-      accountId,
-      payees: payeeRefs(payees),
-      categories: categories.map(c => ({ id: c.id })),
-    });
-  }, [state, accountId, payees, categories]);
+  }, [filename, vendorMapRaw, accountId]);
 
   const buildUpdates = useCallback(() => {
     if (!state) return { updates: [] };
@@ -373,12 +390,18 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, []);
 
   const cycleTrustLevel = useCallback(() => {
-    setTrustLevel(current => nextTrustLevel(current));
+    setTrustLevel(current => {
+      const next = nextTrustLevel(current);
+      // The trust level only feeds the gate matrix, so it is applied to the
+      // existing state. Re-parsing would discard the user's decisions.
+      setState(currentState =>
+        currentState ? withTrustLevel(currentState, next) : currentState,
+      );
+      return next;
+    });
   }, []);
 
   const apply = useCallback(async (): Promise<boolean> => {
-    const payload = buildPayload();
-    if (payload.length === 0) return false;
     setStatus('applying');
     setError(null);
 
@@ -414,6 +437,21 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         await send('transaction-update', update);
       }
 
+      // The rows that were just updated are excluded from the import, so
+      // the import's update path cannot undo them.
+      const updatedRowKeys = new Set(updates.map(u => u.rowKey));
+      const payload = buildImportPayload(state!, {
+        accountId,
+        payees: payeeRefs(payees),
+        categories: categories.map(c => ({ id: c.id })),
+        updatedRowKeys,
+      });
+      if (payload.length === 0) {
+        setStatus('reviewing');
+        setError('There is nothing to import');
+        return false;
+      }
+
       const { errors } = await send('transactions-import', {
         accountId,
         transactions: payload,
@@ -433,7 +471,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     setStatus('reviewing');
     onImported(true);
     return true;
-  }, [accountId, buildPayload, buildUpdates, onImported]);
+  }, [accountId, buildUpdates, state, payees, categories, onImported]);
 
   const close = useCallback(() => {
     onImported(false);
@@ -450,7 +488,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     payees,
     accounts,
     categories,
-    buildPayload,
     decide,
     edit,
     focus,

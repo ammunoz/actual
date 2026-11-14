@@ -93,7 +93,13 @@ type CompiledRule = ReviewPayeeRule & {
 };
 
 const MIN_PREFIX_LEN_BOUNDARY_FREE = 4;
-const DEFAULT_FUZZY_MIN_SCORE = 0.6;
+// The minimum score for a fuzzy match to be kept.
+//
+// This matches the fuzzy module's own default. A lower threshold admits
+// clearly wrong matches: "Demo Grocery Store" against "Online store" scores
+// 0.667, and "Demo Payroll Deposit" against "Home Depot" scores 0.600, while
+// a real typo like "Demo Cofee Shop" against "Demo Coffee Shop" scores 0.968.
+const DEFAULT_FUZZY_MIN_SCORE = 0.7;
 const DEFAULT_FUZZY_MAX_RESULTS = 5;
 
 /**
@@ -241,7 +247,9 @@ function resolved(
     ...row,
     payeeCanonical: canonical,
     payeeMatchSource: source,
-    flags: row.flags ?? [],
+    // Copied, not aliased: the caller's array must not stay reachable from
+    // the returned row.
+    flags: row.flags ? [...row.flags] : [],
   };
   if (matchedPayeeId !== undefined) out.matchedPayeeId = matchedPayeeId;
   if (matchedCategoryId !== undefined) {
@@ -257,13 +265,29 @@ function resolved(
 function compileRules(
   rules: readonly ReviewPayeeRule[],
 ): readonly CompiledRule[] {
-  return [...rules]
+  // A rule whose pattern is not a valid regular expression is skipped
+  // rather than thrown: the pattern comes from the user's own rules, and one
+  // broken rule must not abort the whole import.
+  const compiled: CompiledRule[] = [];
+  const ordered = [...rules]
     .filter(r => r.enabled)
-    .sort((a, b) => b.pattern.length - a.pattern.length)
-    .map(r => {
-      if (r.patternKind !== 'regex') return r;
-      return { ...r, _re: new RegExp(r.pattern, r.patternFlags ?? '') };
-    });
+    .sort((a, b) => b.pattern.length - a.pattern.length);
+  for (const rule of ordered) {
+    if (rule.patternKind !== 'regex') {
+      compiled.push(rule);
+      continue;
+    }
+    try {
+      compiled.push({
+        ...rule,
+        _re: new RegExp(rule.pattern, rule.patternFlags ?? ''),
+      });
+    } catch {
+      // An invalid pattern: the rule cannot match, so it is skipped.
+      continue;
+    }
+  }
+  return compiled;
 }
 
 function buildExistingIndex(
@@ -275,7 +299,12 @@ function buildExistingIndex(
       // excluded from prefix/fuzzy matching entirely: their display name IS
       // the account name, so letting a vendor string prefix- or fuzzy-match
       // them would silently convert ordinary transactions into transfers.
-      .filter(p => p.transferAcct === undefined)
+      //
+      // The check has to be nullish, not `=== undefined`: Actual's `payees`
+      // column is nullable and the API returns `null` for an ordinary payee,
+      // so `=== undefined` would exclude every ordinary payee and leave the
+      // prefix and fuzzy layers with nothing to match against.
+      .filter(p => p.transferAcct == null)
       .map(p => ({
         id: p.id,
         lower: p.name.toLowerCase(),

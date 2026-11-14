@@ -61,6 +61,7 @@ export {
   rowKey,
   summarize,
   updateEdits,
+  withTrustLevel,
 } from './preview/preview-state';
 export type {
   ImportPreviewState,
