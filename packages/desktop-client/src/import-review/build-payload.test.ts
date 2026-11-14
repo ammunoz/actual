@@ -7,6 +7,7 @@ import { buildImportPayload, buildUpdatePayload } from './build-payload';
 
 const PAYEES = [
   { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
+  { id: 'p-two', name: 'Demo Payee Two', transfer_acct: null },
   { id: 'p-transfer', name: 'Demo Checking', transfer_acct: 'a-checking' },
 ];
 
@@ -294,7 +295,7 @@ describe('buildUpdatePayload', () => {
 
   it('produces no update for a row the user did not edit', () => {
     const state = buildState([mkRow()]);
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
@@ -308,7 +309,7 @@ describe('buildUpdatePayload', () => {
     // Without the matched transaction's id we cannot update in place, and
     // forcing an add would duplicate the transaction.
     const state = buildEditedState({ payeeCanonical: 'Demo Payee Two' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: new Map(),
       payees: PAYEES,
@@ -324,7 +325,7 @@ describe('buildUpdatePayload', () => {
       ...state,
       rows: state.rows.map(row => ({ ...row, decision: 'drop' as const })),
     };
-    const updates = buildUpdatePayload(dropped, {
+    const { updates } = buildUpdatePayload(dropped, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
@@ -336,7 +337,7 @@ describe('buildUpdatePayload', () => {
 
   it('updates the matched transaction when the user changed the payee', () => {
     const state = buildEditedState({ payeeCanonical: 'Demo Payee Two' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
@@ -344,26 +345,27 @@ describe('buildUpdatePayload', () => {
       editedRowKeys: new Set(['fit-1']),
     });
     expect(updates).toHaveLength(1);
-    expect(updates[0].id).toBe('trx-1');
-    expect(updates[0].account).toBe('a-1');
-    expect(updates[0].payee).toBe('p-coffee');
+    expect(updates[0].update.id).toBe('trx-1');
+    expect(updates[0].update.account).toBe('a-1');
+    // The payee the USER chose, not the one the resolver matched.
+    expect(updates[0].update.payee).toBe('p-two');
   });
 
   it('updates the category when the user changed it', () => {
     const state = buildEditedState({ categoryId: 'c-groceries' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
       editedRowKeys: new Set(['fit-1']),
     });
-    expect(updates[0].category).toBe('c-groceries');
+    expect(updates[0].update.category).toBe('c-groceries');
   });
 
   it('drops a stale category from the update', () => {
     const state = buildEditedState({ categoryId: 'c-deleted' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
@@ -375,26 +377,151 @@ describe('buildUpdatePayload', () => {
 
   it('updates the notes when the user changed them', () => {
     const state = buildEditedState({ memo: 'a note' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
       editedRowKeys: new Set(['fit-1']),
     });
-    expect(updates[0].notes).toBe('a note');
+    expect(updates[0].update.notes).toBe('a note');
   });
 
   it('always carries the amount and date, because the handler takes a whole transaction', () => {
     const state = buildEditedState({ memo: 'a note' });
-    const updates = buildUpdatePayload(state, {
+    const { updates } = buildUpdatePayload(state, {
       accountId: 'a-1',
       matchedTransactionIds: MATCHED,
       payees: PAYEES,
       categories: CATEGORIES,
       editedRowKeys: new Set(['fit-1']),
     });
-    expect(updates[0].amount).toBe(-2500);
-    expect(updates[0].date).toBe('2026-09-07');
+    expect(updates[0].update.amount).toBe(-2500);
+    expect(updates[0].update.date).toBe('2026-09-07');
+  });
+
+  it('sends an update when the ONLY change is the amount', () => {
+    // The amount and the date are always on the update, because
+    // `transaction-update` takes a whole transaction. Comparing the
+    // update's own keys would make this row look unchanged and drop the
+    // edit.
+    const state = buildEditedState({ amountCents: -3000 });
+    const { updates } = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.amount).toBe(-3000);
+  });
+
+  it('sends an update when the ONLY change is the date', () => {
+    const state = buildEditedState({ date: '2026-09-09' });
+    const { updates } = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.date).toBe('2026-09-09');
+  });
+
+  it('does NOT send an update when the edit equals the original value', () => {
+    const state = buildEditedState({ amountCents: -2500 });
+    const { updates } = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('reports the payee to create when the user named a new one', () => {
+    // `transaction-update` cannot create a payee from a name, so the
+    // caller has to create it first.
+    const state = buildEditedState({ payeeCanonical: 'Demo Brand New Payee' });
+    const { updates } = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.payee).toBeUndefined();
+    expect(updates[0].payeeNameToCreate).toBe('Demo Brand New Payee');
+  });
+
+  it('uses the id of an existing payee when the user named one', () => {
+    const state = buildEditedState({ payeeCanonical: 'Demo Payee Two' });
+    const { updates } = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates[0].update.payee).toBe('p-two');
+    expect(updates[0].payeeNameToCreate).toBeUndefined();
+  });
+});
+
+describe('buildImportPayload — a user payee edit beats the resolver match', () => {
+  const PAYEES = [
+    { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
+    { id: 'p-two', name: 'Demo Payee Two', transfer_acct: null },
+  ];
+
+  function buildStateWithEdit(edits: Record<string, unknown>) {
+    const state = buildState([mkRow()]);
+    return {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, ...edits },
+      })),
+    };
+  }
+
+  it('uses the payee the user chose, not the one the resolver matched', () => {
+    // The resolver matched 'p-coffee' from the raw vendor string. The user
+    // then chose 'Demo Payee Two', and their choice has to win.
+    const state = buildStateWithEdit({ payeeCanonical: 'Demo Payee Two' });
+    const payload = buildImportPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBe('p-two');
+    expect(payload[0].payee_name).toBeUndefined();
+  });
+
+  it('sends the name when the user chose a payee that does not exist', () => {
+    const state = buildStateWithEdit({
+      payeeCanonical: 'Demo Brand New Payee',
+    });
+    const payload = buildImportPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBeUndefined();
+    expect(payload[0].payee_name).toBe('Demo Brand New Payee');
+  });
+
+  it('still uses the resolver match when the user did not choose a payee', () => {
+    const state = buildState([mkRow()]);
+    const payload = buildImportPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBe('p-coffee');
   });
 });

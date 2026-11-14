@@ -10,7 +10,7 @@
  *     the bank said and Actual's rule engine (which is keyed on
  *     `imported_payee`) matches against what the bank said.
  *   - `payee` carries the resolved payee ID. It overrides Actual's own
- *     name-based lookup, so the payee we resolved is the payee that lands.
+ *     name-based lookup.
  *   - `payee_name` is sent ONLY when we have no payee id, because it is the
  *     only way Actual will create a payee (`resolvePayee` looks the name up
  *     and creates it when the id is absent). When we DO have an id, sending
@@ -45,25 +45,25 @@ import {
   isSplitRow,
   rowKey,
 } from '@actual-app/core/server/transactions/import/review/index';
-import type {
-  ImportPreviewState,
-  PreviewRow,
-} from '@actual-app/core/server/transactions/import/review/index';
+import type { ImportPreviewState } from '@actual-app/core/server/transactions/import/review/index';
 
 import type { ImportReviewTransaction, ImportReviewUpdate } from './types';
+
+/** A budget payee, as the payload builder needs it. */
+export type ReviewPayeeRef = {
+  id: string;
+  name: string;
+  /** Set for the hidden per-account payee Actual keeps for transfers. */
+  transfer_acct?: string | null;
+};
 
 export type BuildPayloadOpts = {
   /** The budget account the rows are imported into. */
   accountId: string;
-  /** Live payees, used to resolve a transfer account to its transfer payee. */
-  payees: readonly { id: string; transfer_acct?: string | null }[];
+  /** Live payees, used to resolve a transfer account and a typed payee name. */
+  payees: readonly ReviewPayeeRef[];
   /** Live categories, used to drop a stale category id. */
   categories: readonly { id: string }[];
-  /**
-   * The transaction each row matched, keyed by the row's key. This is what
-   * the import preview reports.
-   */
-  matchedTransactionIds?: ReadonlyMap<string, string>;
 };
 
 /**
@@ -73,9 +73,23 @@ export type BuildPayloadOpts = {
  */
 function findTransferPayeeId(
   accountId: string,
-  payees: readonly { id: string; transfer_acct?: string | null }[],
+  payees: readonly ReviewPayeeRef[],
 ): string | undefined {
   return payees.find(p => p.transfer_acct === accountId)?.id;
+}
+
+/**
+ * The id of an existing payee with this name, if there is one.
+ *
+ * Used to turn a payee name the user typed into a payee id, so that the
+ * user's choice wins over whatever the resolver matched.
+ */
+function findPayeeIdByName(
+  name: string,
+  payees: readonly ReviewPayeeRef[],
+): string | undefined {
+  const lower = name.trim().toLowerCase();
+  return payees.find(p => p.name.trim().toLowerCase() === lower)?.id;
 }
 
 /**
@@ -94,7 +108,7 @@ export function buildImportPayload(
 
   const out: ImportReviewTransaction[] = [];
 
-  for (const row of state.rows as readonly PreviewRow[]) {
+  for (const row of state.rows) {
     const isDropped = row.decision === 'drop';
 
     // The payee the user ended up with. A transfer target wins over the
@@ -130,12 +144,38 @@ export function buildImportPayload(
       payload.imported_id = row.importedId;
     }
 
+    // The payee, in precedence order:
+    //
+    //   1. a transfer target
+    //   2. the payee the USER chose, if they chose one. This has to beat
+    //      the resolver's match: `matchedPayeeId` comes from the original
+    //      raw payee string and says nothing about what the user picked
+    //      afterwards.
+    //   3. the payee the resolver matched
+    //   4. the canonical name, so Actual creates the payee
+    //
+    // If a transfer was detected but the budget has no transfer payee for
+    // the target account, the row falls through to the name path. Actual
+    // creates one payee per account, so this should not happen; when it
+    // does, the row lands under the account's name, which is visible to
+    // the user rather than silently mis-assigned.
+    const userPayeeId =
+      row.edits.payeeCanonical !== undefined
+        ? findPayeeIdByName(row.edits.payeeCanonical, opts.payees)
+        : undefined;
+
     if (transferPayeeId) {
       payload.payee = transferPayeeId;
+    } else if (row.edits.payeeCanonical !== undefined) {
+      if (userPayeeId) {
+        payload.payee = userPayeeId;
+      } else {
+        // No existing payee has this name: Actual creates it.
+        payload.payee_name = row.edits.payeeCanonical;
+      }
     } else if (row.matchedPayeeId) {
       payload.payee = row.matchedPayeeId;
     } else if (userPayee) {
-      // No existing payee matched: Actual creates one from the name.
       payload.payee_name = userPayee;
     }
 
@@ -153,7 +193,7 @@ export function buildImportPayload(
     // payee, date, imported_id and notes; the categories live on the legs.
     if (isSplitRow(row.edits) && row.edits.splits) {
       payload.subtransactions = row.edits.splits.map(leg => {
-        const sub: { amount: number; category?: string; notes?: string } = {
+        const sub: { amount: number; category?: string } = {
           amount: leg.amountCents,
         };
         if (leg.categoryId && liveCategoryIds.has(leg.categoryId)) {
@@ -173,6 +213,41 @@ export function buildImportPayload(
   return out;
 }
 
+export type BuildUpdateOpts = {
+  /** The budget account the rows belong to. */
+  accountId: string;
+  /** The transaction each row matched, keyed by the row's key. */
+  matchedTransactionIds: ReadonlyMap<string, string>;
+  /** Live payees, used to resolve a transfer account and a typed payee name. */
+  payees: readonly ReviewPayeeRef[];
+  /** Live categories, used to drop a stale category id. */
+  categories: readonly { id: string }[];
+  /** The rows the user edited, keyed by the row's key. */
+  editedRowKeys: ReadonlySet<string>;
+};
+
+export type BuildUpdateResult = {
+  /** The updates to send, in row order. */
+  updates: PendingUpdate[];
+};
+
+/**
+ * An update that is ready to send, plus anything it is waiting on.
+ */
+export type PendingUpdate = {
+  /** The update to send to `transaction-update`. */
+  update: ImportReviewUpdate;
+  /**
+   * The name of a payee that has to exist before the update can be sent.
+   *
+   * `transaction-update` cannot create a payee from a name: `payee_name` is
+   * not a column on the transaction, only the import path resolves it. So
+   * when the user names a payee that does not exist yet, the caller has to
+   * create it and put its id on the update.
+   */
+  payeeNameToCreate?: string;
+};
+
 /**
  * Pure: build the direct updates for the rows the user edited and that
  * matched an existing transaction.
@@ -185,28 +260,21 @@ export function buildImportPayload(
  *
  * So a user's edit to an already-imported transaction is applied directly,
  * through `transaction-update`, using the transaction id the import preview
- * reported. Only the fields the user actually changed are sent, so the
- * update touches nothing else.
+ * reported.
+ *
+ * Only the fields the user actually changed are sent. The amount and the
+ * date are always included because `transaction-update` takes a whole
+ * transaction, but a row whose ONLY change is the amount still has to be
+ * sent — comparing the update's own keys would drop it.
  */
 export function buildUpdatePayload(
   state: ImportPreviewState,
-  opts: {
-    /** The budget account the rows belong to. */
-    accountId: string;
-    /** The transaction each row matched, keyed by the row's key. */
-    matchedTransactionIds: ReadonlyMap<string, string>;
-    /** Live payees, used to resolve a transfer account to its transfer payee. */
-    payees: readonly { id: string; transfer_acct?: string | null }[];
-    /** Live categories, used to drop a stale category id. */
-    categories: readonly { id: string }[];
-    /** The rows the user edited, keyed by the row's key. */
-    editedRowKeys: ReadonlySet<string>;
-  },
-): ImportReviewUpdate[] {
+  opts: BuildUpdateOpts,
+): BuildUpdateResult {
   const liveCategoryIds = new Set(opts.categories.map(c => c.id));
-  const out: ImportReviewUpdate[] = [];
+  const updates: PendingUpdate[] = [];
 
-  for (const row of state.rows as readonly PreviewRow[]) {
+  for (const row of state.rows) {
     const key = rowKey(row);
     if (!opts.editedRowKeys.has(key)) continue;
 
@@ -216,14 +284,39 @@ export function buildUpdatePayload(
     if (!transactionId) continue;
     if (row.decision === 'drop') continue;
 
-    // `transaction-update` takes a whole transaction, so the fields the
-    // user did NOT change are sent as they are.
+    // What the user actually changed, compared against the original row.
+    const amountChanged =
+      row.edits.amountCents !== undefined &&
+      row.edits.amountCents !== row.amountCents;
+    const dateChanged =
+      row.edits.date !== undefined && row.edits.date !== row.date;
+    const payeeChanged = row.edits.payeeCanonical !== undefined;
+    const categoryChanged = row.edits.categoryId !== undefined;
+    const memoChanged = row.edits.memo !== undefined;
+
+    // A category the user chose that no longer exists cannot be applied.
+    // If that was the only change, there is nothing to write.
+    const liveCategoryId =
+      categoryChanged && liveCategoryIds.has(row.edits.categoryId as string)
+        ? (row.edits.categoryId as string)
+        : undefined;
+
+    const hasChange =
+      amountChanged ||
+      dateChanged ||
+      payeeChanged ||
+      liveCategoryId !== undefined ||
+      memoChanged;
+    if (!hasChange) continue;
+
     const update: ImportReviewUpdate = {
       id: transactionId,
       account: opts.accountId,
       amount: effectiveAmountCents(row),
       date: row.edits.date ?? row.date,
     };
+
+    let payeeNameToCreate: string | undefined;
 
     const transferAccountId = effectiveTransferAccountId(row);
     const transferPayeeId = transferAccountId
@@ -232,29 +325,34 @@ export function buildUpdatePayload(
 
     if (transferPayeeId) {
       update.payee = transferPayeeId;
-    } else if (row.edits.payeeCanonical !== undefined && row.matchedPayeeId) {
-      update.payee = row.matchedPayeeId;
-    }
-
-    if (row.edits.categoryId !== undefined) {
-      if (liveCategoryIds.has(row.edits.categoryId)) {
-        update.category = row.edits.categoryId;
+    } else if (payeeChanged) {
+      // The user chose a payee. If an existing payee has that name, use
+      // its id; otherwise the payee has to be created first, which is the
+      // caller's job.
+      const payeeId = findPayeeIdByName(
+        row.edits.payeeCanonical as string,
+        opts.payees,
+      );
+      if (payeeId) {
+        update.payee = payeeId;
+      } else {
+        payeeNameToCreate = row.edits.payeeCanonical;
       }
     }
 
-    if (row.edits.memo !== undefined) {
+    if (liveCategoryId !== undefined) {
+      update.category = liveCategoryId;
+    }
+
+    if (memoChanged) {
       update.notes = row.edits.memo;
     }
 
-    // Only the fields the user actually changed are sent, on top of the
-    // ones `transaction-update` requires.
-    const changed = Object.keys(update).filter(
-      k => k !== 'id' && k !== 'account' && k !== 'amount' && k !== 'date',
-    );
-    if (changed.length === 0) continue;
-
-    out.push(update);
+    updates.push({
+      update,
+      ...(payeeNameToCreate !== undefined && { payeeNameToCreate }),
+    });
   }
 
-  return out;
+  return { updates };
 }

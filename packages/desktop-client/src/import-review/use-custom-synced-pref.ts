@@ -26,6 +26,10 @@ import { useDispatch, useSelector } from '#redux';
 
 /**
  * A synced preference key that is not declared in upstream's `SyncedPrefs`.
+ *
+ * Effectively `string`. The `& {}` keeps the literal members of
+ * `SyncedPrefs` autocompleting, so a key that IS declared upstream still
+ * shows up in the editor's suggestions.
  */
 export type CustomSyncedPrefKey = string & {};
 
@@ -43,6 +47,11 @@ export function useCustomSyncedPref(
     (value: string) => {
       void dispatch(
         saveSyncedPrefs({
+          // Safe: `SyncedPrefs` is a closed union of keys, but the server
+          // stores the preferences table as a plain `{id, value}` key-value
+          // store and upstream's own `saveSyncedPrefs` action already
+          // casts the key the same way. Only the compile-time key list is
+          // restrictive.
           prefs: { [prefName]: value } as Partial<SyncedPrefs>,
         }),
       );
@@ -50,6 +59,9 @@ export function useCustomSyncedPref(
     [prefName, dispatch],
   );
   const pref = useSelector(
+    // Safe: the synced prefs state holds whatever keys the server sent
+    // back, and `preferences/get` returns them unfiltered. The cast is
+    // only needed because `SyncedPrefs` narrows the key type.
     (state): string | undefined =>
       (state.prefs.synced as Record<string, string | undefined>)[prefName],
   );

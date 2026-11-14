@@ -68,7 +68,6 @@ export type ImportReviewTransaction = {
   subtransactions?: Array<{
     amount: number;
     category?: string;
-    notes?: string;
   }>;
   /**
    * Set on a row the user explicitly dropped. The row is still sent so it

@@ -34,6 +34,7 @@ import type {
 import { amountToInteger } from '@actual-app/core/shared/util';
 
 import { buildImportPayload, buildUpdatePayload } from './build-payload';
+import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import type { ImportReviewTransaction } from './types';
 import { VENDOR_MAP_PREF } from './types';
@@ -140,6 +141,17 @@ export function toReviewRows(
       previewKey: `row-${index}`,
     };
   });
+}
+
+/**
+ * The budget's payees, in the shape the payload builder needs.
+ */
+function payeeRefs(payees: readonly ReviewPayee[]): readonly ReviewPayeeRef[] {
+  return payees.map(p => ({
+    id: p.id,
+    name: p.name,
+    transfer_acct: p.transferAcct,
+  }));
 }
 
 /**
@@ -261,10 +273,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         accountId,
         transactions: buildImportPayload(next, {
           accountId,
-          payees: payees.map(p => ({
-            id: p.id,
-            transfer_acct: p.transferAcct,
-          })),
+          payees: payeeRefs(payees),
           categories: categories.map(c => ({ id: c.id })),
         }),
         isPreview: true,
@@ -307,23 +316,17 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     if (!state) return [];
     return buildImportPayload(state, {
       accountId,
-      payees: payees.map(p => ({
-        id: p.id,
-        transfer_acct: p.transferAcct,
-      })),
+      payees: payeeRefs(payees),
       categories: categories.map(c => ({ id: c.id })),
     });
   }, [state, accountId, payees, categories]);
 
   const buildUpdates = useCallback(() => {
-    if (!state) return [];
+    if (!state) return { updates: [] };
     return buildUpdatePayload(state, {
       accountId,
       matchedTransactionIds: matchedTransactionIds.current,
-      payees: payees.map(p => ({
-        id: p.id,
-        transfer_acct: p.transferAcct,
-      })),
+      payees: payeeRefs(payees),
       categories: categories.map(c => ({ id: c.id })),
       editedRowKeys: editedRowKeys.current,
     });
@@ -384,8 +387,30 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // updated in place: Actual's import UPDATE path keeps the existing
       // payee and category, so an edit sent through `transactions-import`
       // would be silently discarded.
-      const updates = buildUpdates();
-      for (const update of updates) {
+      const { updates } = buildUpdates();
+
+      // A payee the user named that no existing payee matches has to be
+      // created before the update can point at it: `transaction-update`
+      // cannot create a payee from a name, because `payee_name` is not a
+      // column on the transaction.
+      const createdPayeeIds = new Map<string, string>();
+
+      for (const { update, payeeNameToCreate } of updates) {
+        if (payeeNameToCreate !== undefined) {
+          let payeeId = createdPayeeIds.get(payeeNameToCreate);
+          if (!payeeId) {
+            const created = await send('payee-create', {
+              name: payeeNameToCreate,
+            });
+            if (typeof created === 'string') {
+              payeeId = created;
+              createdPayeeIds.set(payeeNameToCreate, payeeId);
+            }
+          }
+          if (payeeId) {
+            update.payee = payeeId;
+          }
+        }
         await send('transaction-update', update);
       }
 

@@ -12,20 +12,36 @@
  * an upstream user's experience does not change at all.
  */
 
+import { useCallback } from 'react';
+
 import { KEYBOARD_MODE_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
 /** The file extensions the keyboard review handles. */
 const OFX_EXTENSIONS = ['.ofx', '.qfx'];
 
-export type ImportModalDescriptor = {
-  name: 'import-transactions' | 'keyboard-import-transactions';
-  options: {
-    accountId: string;
-    filename: string;
-    onImported: (didChange: boolean) => void;
-  };
-};
+/**
+ * The modal descriptor, as a discriminated union so that a consumer can
+ * narrow on `name` and get the right `options` type. It has to be assignable
+ * to Actual's own `Modal` union, which is discriminated the same way.
+ */
+export type ImportModalDescriptor =
+  | {
+      name: 'import-transactions';
+      options: {
+        accountId: string;
+        filename: string;
+        onImported: (didChange: boolean) => void;
+      };
+    }
+  | {
+      name: 'keyboard-import-transactions';
+      options: {
+        accountId: string;
+        filename: string;
+        onImported: (didChange: boolean) => void;
+      };
+    };
 
 /**
  * Pure: whether the keyboard review should handle this file.
@@ -76,6 +92,18 @@ export function useOpenImportModalFor(): (
 ) => ImportModalDescriptor {
   const [keyboardMode] = useCustomSyncedPref(KEYBOARD_MODE_PREF);
 
-  return (accountId, filename, onImported) =>
-    buildImportModal(accountId, filename, onImported, keyboardMode === 'true');
+  return useCallback(
+    (
+      accountId: string,
+      filename: string,
+      onImported: (didChange: boolean) => void,
+    ) =>
+      buildImportModal(
+        accountId,
+        filename,
+        onImported,
+        keyboardMode === 'true',
+      ),
+    [keyboardMode],
+  );
 }
