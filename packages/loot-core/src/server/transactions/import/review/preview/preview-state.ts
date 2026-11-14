@@ -407,7 +407,10 @@ export function evaluateRows(
  * the user has already fixed no longer holds a row back.
  *
  * The evaluations can be passed in, so a caller that already has them (the
- * UI does, for the badges) does not pay for them twice.
+ * UI does, for the badges) does not pay for them twice. A caller that does
+ * not pass them gets the evaluations computed WITHOUT the live payee names,
+ * which only matters for the `would-create-payee` flag: that flag only
+ * warns, so the difference is a badge, not a transaction.
  *
  * Also returns the inflow/outflow split. Direction is derived from the
  * effective amount's SIGN, not from any stored direction field: the sign is
@@ -438,8 +441,15 @@ export function summarize(
       pending += 1;
     }
 
-    const evaluation =
-      rows.get(rowKey(row)) ?? evaluateRow(row, state.trustLevel);
+    const evaluation = rows.get(rowKey(row));
+    if (!evaluation) {
+      // The map covers every row of the state it was built from, so this
+      // means the caller passed a map for a DIFFERENT state.
+      throw new PreviewStateError(
+        PREVIEW_STATE_NOT_FOUND,
+        'summarize could not locate the row',
+      );
+    }
     const isDropped = row.decision === 'drop';
 
     // Only rows the gate is ACTUALLY holding back are counted, and only

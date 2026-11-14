@@ -41,7 +41,7 @@ function buildState(rows: readonly Record<string, unknown>[]) {
   return buildPreviewState(resolved, 'cautious');
 }
 
-describe('buildImportPayload', () => {
+describe('buildApplyPayload', () => {
   it('sends the account, date and amount', () => {
     const state = buildState([mkRow()]);
     const payload = buildApplyPayload(state, {
@@ -375,14 +375,19 @@ describe('buildApplyPayload — the trust-level gate', () => {
   });
 
   it('marks a hard-blocked row even when the user overrode it', () => {
-    // Its data is broken, so an override cannot release it.
+    // Its amount is broken, so an override cannot release it.
+    //
+    // The amount is 0 cents, which is a whole number, so the ENGINE can
+    // accept the row: it is sent, but marked so it does not land. A row
+    // the engine cannot accept at all is omitted instead.
     const state = buildPreviewState(
       buildState([mkRow()]).rows.map(row => ({
         ...row,
+        amountCents: 0,
         flags: [
           {
-            kind: 'date-out-of-range' as const,
-            code: 'DATE-RANGE-001' as const,
+            kind: 'amount-mismatch' as const,
+            code: 'AMT-MISMATCH-001' as const,
           },
         ],
       })),

@@ -116,7 +116,7 @@ const OUTCOME_MATRIX: Readonly<
  *
  * A hard-blocked row can still be made importable — by FIXING it, which
  * clears the flag — but it cannot be waved through by overriding the gate.
- * See `canOverride`.
+ * See `RowEvaluation.overridable` (`preview/gating.ts`).
  */
 const HARD_BLOCKS: ReadonlySet<FlagKind> = Object.freeze(
   new Set<FlagKind>(['amount-mismatch', 'date-out-of-range']),
@@ -153,6 +153,10 @@ export function flagFor<T extends { flags?: readonly Flag[] }>(
  * still describes one transaction, and the first row is the one that
  * describes it: the repeat is the problem, and the repeat is the row that
  * would be imported on top of the first.
+ *
+ * The flag describes the FILE, not what the user did with the rows. If the
+ * user drops the first occurrence, the repeat is still a repeat: the trust
+ * level still skips it, and the user can override it deliberately.
  *
  * A row with no FITID is never flagged: there is nothing to repeat.
  *

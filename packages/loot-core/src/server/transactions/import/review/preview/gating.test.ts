@@ -89,6 +89,7 @@ describe('effectiveFlags', () => {
 
   it('clears date-out-of-range once the user committed a usable date', () => {
     const row = mkRow({
+      date: 'Invalid Date',
       flags: [flag('date-out-of-range')],
       edits: { date: '2026-09-09' },
     });
@@ -97,10 +98,27 @@ describe('effectiveFlags', () => {
 
   it('keeps date-out-of-range when the user committed an unusable date', () => {
     const row = mkRow({
+      date: 'Invalid Date',
       flags: [flag('date-out-of-range')],
       edits: { date: 'not-a-date' },
     });
     expect(effectiveFlags(row)).toHaveLength(1);
+  });
+
+  it('flags a row whose date the user has just broken', () => {
+    // The flag describes the date that would be SENT, so an edit that
+    // breaks it is flagged too.
+    const row = mkRow({ edits: { date: 'not-a-date' } });
+    expect(effectiveFlags(row)).toEqual([
+      { kind: 'date-out-of-range', code: 'DATE-RANGE-001' },
+    ]);
+  });
+
+  it('flags a row whose amount the user has just broken', () => {
+    const row = mkRow({ edits: { amountCents: 12.5 } });
+    expect(effectiveFlags(row)).toEqual([
+      { kind: 'amount-mismatch', code: 'AMT-MISMATCH-001' },
+    ]);
   });
 
   it('clears transfer-detected once the user confirmed the transfer', () => {
@@ -204,7 +222,10 @@ describe('gateRow', () => {
   });
 
   it('blocks a broken date at every trust level', () => {
-    const row = mkRow({ flags: [flag('date-out-of-range')] });
+    const row = mkRow({
+      date: 'Invalid Date',
+      flags: [flag('date-out-of-range')],
+    });
     expect(gateRow(row, 'paranoid')).toBe('block');
     expect(gateRow(row, 'cautious')).toBe('block');
     expect(gateRow(row, 'trusted')).toBe('block');
@@ -221,7 +242,10 @@ describe('gateRow', () => {
 
 describe('override eligibility', () => {
   it('is false for a hard-blocked row', () => {
-    const row = mkRow({ flags: [flag('date-out-of-range')] });
+    const row = mkRow({
+      date: 'Invalid Date',
+      flags: [flag('date-out-of-range')],
+    });
     expect(evaluateRow(row, 'cautious').overridable).toBe(false);
   });
 
@@ -236,6 +260,7 @@ describe('override eligibility', () => {
 
   it('becomes true once the user fixes a hard block', () => {
     const row = mkRow({
+      date: 'Invalid Date',
       flags: [flag('date-out-of-range')],
       edits: { date: '2026-09-09' },
     });
@@ -289,6 +314,7 @@ describe('evaluateRow', () => {
   it('does NOT release a hard-blocked row, even when overridden', () => {
     const evaluation = evaluateRow(
       mkRow({
+        date: 'Invalid Date',
         flags: [flag('date-out-of-range')],
         decision: 'accept-override',
       }),

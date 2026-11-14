@@ -77,7 +77,10 @@ export function KeyboardImportModal({
     evaluation: RowEvaluation,
   ): string | null => {
     if (row.decision === 'drop') return t('Dropped');
-    if (evaluation.overridden) return t('Overridden');
+    // An override that is in EFFECT. A hard-blocked row the user tried to
+    // override is still blocked, so it is badged as blocked, the same way
+    // the summary counts it.
+    if (evaluation.overridden && evaluation.willImport) return t('Overridden');
     if (evaluation.gate === 'block') return t('Blocked');
     if (evaluation.gate === 'skip') return t('Skipped');
     if (evaluation.gate === 'warn') return t('Flagged');

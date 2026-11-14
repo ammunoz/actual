@@ -103,6 +103,10 @@ export type RowEvaluation = {
    *
    * So such a row is not sent at all — not even marked as skipped. Marking
    * it is not enough: the engine throws before it gets that far.
+   *
+   * A row that is not sent is also not in the import preview, so it never
+   * learns which transaction it matched. Fixing it therefore imports it as
+   * a NEW transaction rather than updating the one it repeats.
    */
   willSend: boolean;
   /**
@@ -160,6 +164,19 @@ export function isUsableDate(date: string | undefined): boolean {
  * doing something about it, not by the row happening to look a certain way.
  * A value-based rule would clear `unknown-payee` on a row that merely has a
  * payee name, which is not the same thing as the user having chosen one.
+ *
+ * The two DATA-LEVEL flags are handled differently, and the difference
+ * matters:
+ *
+ *   - `date-out-of-range` is DERIVED from the row's effective date. A date
+ *     is either usable or it is not, so the flag is a property of the value
+ *     that would be sent. That way a row whose date the user has just
+ *     broken is as broken as one the file broke, and a row whose date the
+ *     user has just fixed is no longer broken at all.
+ *   - `amount-mismatch` is NOT derived, because a row whose amount is 0
+ *     cents is not necessarily broken: it is only broken if the FILE said
+ *     so. It is cleared by the user committing an amount, and added again
+ *     if the amount they committed is not a whole number of cents.
  */
 export function effectiveFlags(
   row: PreviewRow,
@@ -172,9 +189,8 @@ export function effectiveFlags(
   const userPickedPayee =
     chosenPayee !== undefined && chosenPayee.trim() !== '';
   const userPickedAmount = row.edits.amountCents !== undefined;
-  const userPickedDate = row.edits.date !== undefined;
 
-  return flags.filter(flag => {
+  const kept = flags.filter(flag => {
     switch (flag.kind) {
       case 'unknown-payee':
         // The user gave the row a payee, so it is not unknown any more.
@@ -197,17 +213,20 @@ export function effectiveFlags(
       case 'amount-mismatch':
         // The user committed an amount, so the file's unusable one no
         // longer matters.
+        //
+        // Unlike the date, this flag is NOT derived from the effective
+        // amount: a row whose amount is 0 cents is not necessarily broken,
+        // it is only broken if the FILE said so.
         return !userPickedAmount;
-
-      case 'date-out-of-range':
-        // The user committed a date — and it has to be one the import
-        // would accept, or the row is still broken.
-        return !(userPickedDate && isUsableDate(row.edits.date));
 
       case 'transfer-detected':
         // The row stops being an unconfirmed transfer when the user
         // confirms it, or replaces it with an ordinary payee.
         return !(row.edits.transferAccountId !== undefined || userPickedPayee);
+
+      case 'date-out-of-range':
+        // Decided below, from the date that would actually be sent.
+        return false;
 
       case 'duplicate':
       case 'payee-rule-conflict':
@@ -218,6 +237,20 @@ export function effectiveFlags(
         return true;
     }
   });
+
+  // The data-level flags describe the EFFECTIVE values, so they are
+  // derived rather than kept or dropped.
+  const effectiveDate = row.edits.date ?? row.date;
+  const effectiveAmount = row.edits.amountCents ?? row.amountCents;
+
+  if (!isUsableDate(effectiveDate)) {
+    kept.push({ kind: 'date-out-of-range', code: 'DATE-RANGE-001' });
+  }
+  if (!Number.isInteger(effectiveAmount)) {
+    kept.push({ kind: 'amount-mismatch', code: 'AMT-MISMATCH-001' });
+  }
+
+  return kept;
 }
 
 /**
