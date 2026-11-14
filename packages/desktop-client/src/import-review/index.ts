@@ -16,8 +16,14 @@ export {
 } from './open-import-modal';
 export type { ImportModalDescriptor } from './open-import-modal';
 
-export { buildImportPayload } from './build-payload';
+export { buildImportPayload, buildUpdatePayload } from './build-payload';
 export type { BuildPayloadOpts } from './build-payload';
+
+export { useImportReviewCommand } from './command';
+export type {
+  ImportReviewCommandItem,
+  UseImportReviewCommand,
+} from './command';
 
 export { KEYMAP, nextTrustLevel, TRUST_LEVELS } from './keymap';
 export type { KeyBinding, ReviewAction } from './keymap';

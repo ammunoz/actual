@@ -10,6 +10,7 @@ import { integerToAmount } from '@actual-app/core/shared/util';
 
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
+import { useModalState } from '#hooks/useModalState';
 
 import { KEYMAP } from './keymap';
 import type { ReviewAction } from './keymap';
@@ -34,6 +35,7 @@ export function KeyboardImportModal({
   onImported,
 }: KeyboardImportModalProps) {
   const { t } = useTranslation();
+  const { onClose } = useModalState();
   const review = useImportReview({ accountId, filename, onImported });
 
   const rows = review.state?.rows ?? [];
@@ -83,10 +85,13 @@ export function KeyboardImportModal({
         review.cycleTrustLevel();
         break;
       case 'apply':
-        void review.apply();
+        void review.apply().then(didChange => {
+          if (didChange) onClose();
+        });
         break;
       case 'close':
         review.close();
+        onClose();
         break;
       case 'help':
       case 'edit-payee':
@@ -143,7 +148,11 @@ export function KeyboardImportModal({
             rightContent={
               <Button
                 variant="primary"
-                onPress={() => void review.apply()}
+                onPress={() => {
+                  void review.apply().then(didChange => {
+                    if (didChange) onClose();
+                  });
+                }}
                 isDisabled={isLoading || rows.length === 0}
               >
                 <Trans>Import</Trans>

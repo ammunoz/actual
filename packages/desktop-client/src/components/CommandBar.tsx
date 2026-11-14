@@ -25,6 +25,7 @@ import { useModalState } from '#hooks/useModalState';
 import { useNavigate } from '#hooks/useNavigate';
 import { useReports } from '#hooks/useReports';
 import { useSidebarMenu } from '#hooks/useSidebarMenu';
+import { useImportReviewCommand } from '#import-review';
 import type { Binding, SheetFields, SheetNames } from '#spreadsheet';
 import {
   accountBalance,
@@ -101,6 +102,7 @@ export function CommandBar() {
 
   const { availableItems: menuItems } = useSidebarMenu();
   const menuItemDetails = useSidebarMenuItemDetails();
+  const importReviewCommand = useImportReviewCommand();
 
   const navigationItems = useMemo(
     () => [
@@ -229,6 +231,15 @@ export function CommandBar() {
         Icon: SvgNotesPaperText,
       })),
       onSelect: ({ id }) => handleNavigate(`/reports/custom/${id}`),
+    },
+    {
+      key: 'import-review',
+      heading: t('Import'),
+      items: [importReviewCommand.item],
+      onSelect: () => {
+        setOpen(false);
+        importReviewCommand.toggle();
+      },
     },
     {
       key: 'help',

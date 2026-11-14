@@ -31,6 +31,7 @@ import type {
   TrustLevel,
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
+import { amountToInteger } from '@actual-app/core/shared/util';
 
 import { buildImportPayload, buildUpdatePayload } from './build-payload';
 import { nextTrustLevel } from './keymap';
@@ -78,8 +79,8 @@ export type ImportReviewState = {
   undo: () => void;
   /** Cycle the trust level. */
   cycleTrustLevel: () => void;
-  /** Apply the import. */
-  apply: () => Promise<void>;
+  /** Apply the import. Resolves to whether the import went through. */
+  apply: () => Promise<boolean>;
   /** Discard and close. */
   close: () => void;
 };
@@ -102,9 +103,13 @@ export function readVendorMap(raw: string | undefined): VendorMap | undefined {
  * Pure: turn Actual's parsed transactions into review rows.
  *
  * Actual's parser returns `imported_payee` (the raw vendor string), `amount`
- * (integer cents), `date` and `notes`. The `imported_id` is the bank's FITID,
- * which Actual's OFX parser sets even though the loose parse type does not
- * declare it — it is read defensively here.
+ * (in the currency's major units, e.g. -120.50), `date` and `notes`. The
+ * import API wants integer cents, so the amount is converted here — the
+ * same conversion Actual's own import modal does.
+ *
+ * The `imported_id` is the bank's FITID, which Actual's OFX parser sets even
+ * though the loose parse type does not declare it — it is read defensively
+ * here.
  *
  * A transient `previewKey` is assigned so every row has a unique key even
  * when the file has no FITIDs or repeats one.
@@ -121,7 +126,7 @@ export function toReviewRows(
         : typeof trans.payee_name === 'string'
           ? trans.payee_name
           : '';
-    const amount =
+    const rawAmount =
       typeof trans.amount === 'number' ? trans.amount : Number(trans.amount);
     const date = typeof trans.date === 'string' ? trans.date : '';
 
@@ -129,7 +134,7 @@ export function toReviewRows(
       accountId: '',
       importedId,
       date,
-      amountCents: Number.isFinite(amount) ? amount : 0,
+      amountCents: Number.isFinite(rawAmount) ? amountToInteger(rawAmount) : 0,
       payeeRaw: rawPayee,
       memo: typeof trans.notes === 'string' ? trans.notes : undefined,
       previewKey: `row-${index}`,
@@ -368,32 +373,41 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     setTrustLevel(current => nextTrustLevel(current));
   }, []);
 
-  const apply = useCallback(async () => {
+  const apply = useCallback(async (): Promise<boolean> => {
     const payload = buildPayload();
-    if (payload.length === 0) return;
+    if (payload.length === 0) return false;
     setStatus('applying');
+    setError(null);
 
-    // Rows the user edited AND that matched an existing transaction are
-    // updated in place: Actual's import UPDATE path keeps the existing
-    // payee and category, so an edit sent through `transactions-import`
-    // would be silently discarded.
-    const updates = buildUpdates();
-    for (const update of updates) {
-      await send('transaction-update', update);
-    }
+    try {
+      // Rows the user edited AND that matched an existing transaction are
+      // updated in place: Actual's import UPDATE path keeps the existing
+      // payee and category, so an edit sent through `transactions-import`
+      // would be silently discarded.
+      const updates = buildUpdates();
+      for (const update of updates) {
+        await send('transaction-update', update);
+      }
 
-    const { errors } = await send('transactions-import', {
-      accountId,
-      transactions: payload,
-      isPreview: false,
-    });
-    if (errors && errors.length > 0) {
+      const { errors } = await send('transactions-import', {
+        accountId,
+        transactions: payload,
+        isPreview: false,
+      });
+      if (errors && errors.length > 0) {
+        setStatus('reviewing');
+        setError(errors[0].message);
+        return false;
+      }
+    } catch (err) {
       setStatus('reviewing');
-      setError(errors[0].message);
-      return;
+      setError(err instanceof Error ? err.message : 'Import failed');
+      return false;
     }
+
     setStatus('reviewing');
     onImported(true);
+    return true;
   }, [accountId, buildPayload, buildUpdates, onImported]);
 
   const close = useCallback(() => {

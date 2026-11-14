@@ -50,8 +50,20 @@ describe('toReviewRows', () => {
     expect(rows[0].previewKey).not.toBe(rows[1].previewKey);
   });
 
-  it('keeps the amount as integer cents', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: -2500 }]);
+  it('converts the amount from major units to integer cents', () => {
+    // Actual's OFX parser returns the amount in the currency's major units
+    // (e.g. -120.50). The import API wants integer cents.
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -120.5 }]);
+    expect(rows[0].amountCents).toBe(-12050);
+  });
+
+  it('rounds a fractional amount to the nearest cent', () => {
+    const rows = toReviewRows([{ date: '2026-09-07', amount: 1.005 }]);
+    expect(Number.isInteger(rows[0].amountCents)).toBe(true);
+  });
+
+  it('keeps a whole amount intact', () => {
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -25 }]);
     expect(rows[0].amountCents).toBe(-2500);
   });
 
