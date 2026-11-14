@@ -32,7 +32,7 @@ import type {
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
 
-import { buildImportPayload } from './build-payload';
+import { buildImportPayload, buildUpdatePayload } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import type { ImportReviewTransaction } from './types';
 import { VENDOR_MAP_PREF } from './types';
@@ -154,9 +154,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
   const [vendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
 
-  // The rows the user explicitly edited, so the apply step can force the
-  // add path for them.
+  // The rows the user explicitly edited, so the apply step can update them
+  // in place.
   const editedRowKeys = useRef<ReadonlySet<string>>(new Set());
+
+  // The transaction each row matched, keyed by the row's key. The import
+  // preview reports this, and it is what lets a user's edit to an
+  // already-imported transaction be applied in place.
+  const matchedTransactionIds = useRef<ReadonlyMap<string, string>>(new Map());
 
   // Load the budget's payees, accounts and categories once per account.
   useEffect(() => {
@@ -239,8 +244,43 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         fuzzy: { minScore: 0.6, maxResults: 5 },
       });
 
-      setState(buildPreviewState(resolved, trustLevel));
+      const next = buildPreviewState(resolved, trustLevel);
+      setState(next);
       setFocusedIndex(0);
+
+      // Ask Actual which of these rows match an existing transaction. The
+      // preview reports the matched transaction's id, which is what lets a
+      // user's edit to an already-imported transaction be applied in place
+      // (Actual's import UPDATE path keeps the existing payee).
+      const preview = await send('transactions-import', {
+        accountId,
+        transactions: buildImportPayload(next, {
+          accountId,
+          payees: payees.map(p => ({
+            id: p.id,
+            transfer_acct: p.transferAcct,
+          })),
+          categories: categories.map(c => ({ id: c.id })),
+        }),
+        isPreview: true,
+      });
+
+      if (cancelled) return;
+
+      const matched = new Map<string, string>();
+      preview.updatedPreview?.forEach(entry => {
+        const existing = entry.existing;
+        if (!existing?.id) return;
+        // The preview echoes back the transaction we sent, so the transient
+        // preview key travels with it.
+        const key = (entry.transaction as { previewKey?: string } | undefined)
+          ?.previewKey;
+        if (typeof key === 'string') {
+          matched.set(key, existing.id);
+        }
+      });
+      matchedTransactionIds.current = matched;
+
       setStatus('reviewing');
     }
 
@@ -248,12 +288,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     return () => {
       cancelled = true;
     };
-  }, [filename, vendorMapRaw, payees, accounts, trustLevel]);
+  }, [
+    filename,
+    vendorMapRaw,
+    payees,
+    accounts,
+    categories,
+    accountId,
+    trustLevel,
+  ]);
 
   const buildPayload = useCallback(() => {
     if (!state) return [];
     return buildImportPayload(state, {
       accountId,
+      payees: payees.map(p => ({
+        id: p.id,
+        transfer_acct: p.transferAcct,
+      })),
+      categories: categories.map(c => ({ id: c.id })),
+    });
+  }, [state, accountId, payees, categories]);
+
+  const buildUpdates = useCallback(() => {
+    if (!state) return [];
+    return buildUpdatePayload(state, {
+      accountId,
+      matchedTransactionIds: matchedTransactionIds.current,
       payees: payees.map(p => ({
         id: p.id,
         transfer_acct: p.transferAcct,
@@ -277,6 +338,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       if (!current) return current;
       const row = current.rows[index];
       if (!row) return current;
+      // Remember that the user touched this row, so the apply step can
+      // update the matched transaction in place.
+      editedRowKeys.current = new Set([...editedRowKeys.current, rowKey(row)]);
       return updateEdits(current, rowKey(row), edits);
     });
   }, []);
@@ -308,6 +372,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     const payload = buildPayload();
     if (payload.length === 0) return;
     setStatus('applying');
+
+    // Rows the user edited AND that matched an existing transaction are
+    // updated in place: Actual's import UPDATE path keeps the existing
+    // payee and category, so an edit sent through `transactions-import`
+    // would be silently discarded.
+    const updates = buildUpdates();
+    for (const update of updates) {
+      await send('transaction-update', update);
+    }
+
     const { errors } = await send('transactions-import', {
       accountId,
       transactions: payload,
@@ -320,7 +394,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     }
     setStatus('reviewing');
     onImported(true);
-  }, [accountId, buildPayload, onImported]);
+  }, [accountId, buildPayload, buildUpdates, onImported]);
 
   const close = useCallback(() => {
     onImported(false);

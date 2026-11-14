@@ -76,15 +76,32 @@ export type ImportReviewTransaction = {
    * would let a later row match against it and change the outcome.
    */
   skipTransaction?: boolean;
-  /**
-   * Set on a row whose payee or category the user explicitly changed.
-   *
-   * Actual's update path uses `existing.payee || trans.payee`, so on a
-   * re-import of an already-applied transaction the *existing* value wins
-   * and the user's edit would be discarded. Forcing the add path makes
-   * the user's value the one that is written.
-   */
-  forceAddTransaction?: boolean;
+};
+
+/**
+ * A direct update to a transaction that already exists in the budget.
+ *
+ * Sent through `transaction-update` rather than `transactions-import`,
+ * because Actual's import UPDATE path prefers the existing value
+ * (`existing.payee || trans.payee`) and would discard the user's edit.
+ *
+ * `transaction-update` takes a `TransactionEntity`, but the server only
+ * reads `id`, `payee`, `category`, `amount`, `date` and `notes` from it,
+ * so the remaining fields are sent as the transaction already had them:
+ * the account, and the amount and date the user did NOT change.
+ */
+export type ImportReviewUpdate = {
+  /** The transaction to update. */
+  id: string;
+  /** The account the transaction belongs to. */
+  account: string;
+  /** The amount, in integer cents. */
+  amount: number;
+  /** The date, `YYYY-MM-DD`. */
+  date: string;
+  payee?: string;
+  category?: string;
+  notes?: string;
 };
 
 /**

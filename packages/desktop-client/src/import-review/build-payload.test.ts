@@ -3,7 +3,7 @@ import {
   resolvePayees,
 } from '@actual-app/core/server/transactions/import/review/index';
 
-import { buildImportPayload } from './build-payload';
+import { buildImportPayload, buildUpdatePayload } from './build-payload';
 
 const PAYEES = [
   { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
@@ -124,25 +124,17 @@ describe('buildImportPayload', () => {
     expect(payload[0].skipTransaction).toBeUndefined();
   });
 
-  it('sets forceAddTransaction on a row the user edited', () => {
-    const state = buildState([mkRow()]);
-    const payload = buildImportPayload(state, {
-      accountId: 'a-1',
-      payees: PAYEES,
-      categories: CATEGORIES,
-      editedRowKeys: new Set(['fit-1']),
-    });
-    expect(payload[0].forceAddTransaction).toBe(true);
-  });
-
-  it('does not set forceAddTransaction on an unedited row', () => {
+  it('does NOT set forceAddTransaction on any row', () => {
+    // `forceAddTransaction` routes a row down Actual's ADD path, which
+    // creates a SECOND transaction. It is not a way to change an existing
+    // transaction's payee.
     const state = buildState([mkRow()]);
     const payload = buildImportPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
       categories: CATEGORIES,
     });
-    expect(payload[0].forceAddTransaction).toBeUndefined();
+    expect(payload[0]).not.toHaveProperty('forceAddTransaction');
   });
 
   it('resolves a transfer account to its transfer payee id', () => {
@@ -283,5 +275,126 @@ describe('buildImportPayload', () => {
       categories: CATEGORIES,
     });
     expect(payload).toEqual([]);
+  });
+});
+
+describe('buildUpdatePayload', () => {
+  const MATCHED = new Map([['fit-1', 'trx-1']]);
+
+  function buildEditedState(edits: Record<string, unknown>) {
+    const state = buildState([mkRow()]);
+    return {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, ...edits },
+      })),
+    };
+  }
+
+  it('produces no update for a row the user did not edit', () => {
+    const state = buildState([mkRow()]);
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('produces no update when the row matched nothing', () => {
+    // Without the matched transaction's id we cannot update in place, and
+    // forcing an add would duplicate the transaction.
+    const state = buildEditedState({ payeeCanonical: 'Demo Payee Two' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: new Map(),
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('produces no update for a dropped row', () => {
+    const state = buildState([mkRow()]);
+    const dropped = {
+      ...state,
+      rows: state.rows.map(row => ({ ...row, decision: 'drop' as const })),
+    };
+    const updates = buildUpdatePayload(dropped, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('updates the matched transaction when the user changed the payee', () => {
+    const state = buildEditedState({ payeeCanonical: 'Demo Payee Two' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].id).toBe('trx-1');
+    expect(updates[0].account).toBe('a-1');
+    expect(updates[0].payee).toBe('p-coffee');
+  });
+
+  it('updates the category when the user changed it', () => {
+    const state = buildEditedState({ categoryId: 'c-groceries' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates[0].category).toBe('c-groceries');
+  });
+
+  it('drops a stale category from the update', () => {
+    const state = buildEditedState({ categoryId: 'c-deleted' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates).toEqual([]);
+  });
+
+  it('updates the notes when the user changed them', () => {
+    const state = buildEditedState({ memo: 'a note' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates[0].notes).toBe('a note');
+  });
+
+  it('always carries the amount and date, because the handler takes a whole transaction', () => {
+    const state = buildEditedState({ memo: 'a note' });
+    const updates = buildUpdatePayload(state, {
+      accountId: 'a-1',
+      matchedTransactionIds: MATCHED,
+      payees: PAYEES,
+      categories: CATEGORIES,
+      editedRowKeys: new Set(['fit-1']),
+    });
+    expect(updates[0].amount).toBe(-2500);
+    expect(updates[0].date).toBe('2026-09-07');
   });
 });

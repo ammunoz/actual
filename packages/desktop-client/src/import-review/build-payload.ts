@@ -18,10 +18,22 @@
  *   - A dropped duplicate is sent with `skipTransaction`, not omitted, so it
  *     keeps taking part in Actual's matching pass. Omitting it would let a
  *     later row match against it and change the outcome.
- *   - A row whose payee or category the user changed is sent with
- *     `forceAddTransaction`, because Actual's update path prefers the
- *     existing value (`existing.payee || trans.payee`) and would discard
- *     the edit otherwise.
+ *   - A row the user edited is NOT sent with `forceAddTransaction`. That flag
+ *     routes the row down Actual's ADD path, which creates a SECOND
+ *     transaction rather than updating the first. It is how Actual's own
+ *     import modal implements "keep both the old and the new transaction",
+ *     so it is the wrong tool for "change this transaction's payee".
+ *
+ *     On the UPDATE path Actual computes `payee: existing.payee ||
+ *     trans.payee` and `category: existing.category || trans.category`, so
+ *     the EXISTING value wins and the incoming one is discarded. A user's
+ *     edit to an already-imported transaction therefore cannot be honoured
+ *     through `transactions-import` at all.
+ *
+ *     The review handles that case separately: the import preview reports
+ *     which transaction each row matched, and a row the user edited is
+ *     updated directly through `transaction-update`, using that id. See
+ *     `buildUpdatePayload`.
  *
  * Pure: it takes the review state and the budget's payee/category lists and
  * returns payloads. No I/O, no React.
@@ -38,7 +50,7 @@ import type {
   PreviewRow,
 } from '@actual-app/core/server/transactions/import/review/index';
 
-import type { ImportReviewTransaction } from './types';
+import type { ImportReviewTransaction, ImportReviewUpdate } from './types';
 
 export type BuildPayloadOpts = {
   /** The budget account the rows are imported into. */
@@ -47,8 +59,11 @@ export type BuildPayloadOpts = {
   payees: readonly { id: string; transfer_acct?: string | null }[];
   /** Live categories, used to drop a stale category id. */
   categories: readonly { id: string }[];
-  /** Rows the user explicitly edited (payee or category). */
-  editedRowKeys?: ReadonlySet<string>;
+  /**
+   * The transaction each row matched, keyed by the row's key. This is what
+   * the import preview reports.
+   */
+  matchedTransactionIds?: ReadonlyMap<string, string>;
 };
 
 /**
@@ -76,12 +91,10 @@ export function buildImportPayload(
   opts: BuildPayloadOpts,
 ): ImportReviewTransaction[] {
   const liveCategoryIds = new Set(opts.categories.map(c => c.id));
-  const edited = opts.editedRowKeys ?? new Set<string>();
 
   const out: ImportReviewTransaction[] = [];
 
   for (const row of state.rows as readonly PreviewRow[]) {
-    const key = rowKey(row);
     const isDropped = row.decision === 'drop';
 
     // The payee the user ended up with. A transfer target wins over the
@@ -154,13 +167,93 @@ export function buildImportPayload(
       payload.skipTransaction = true;
     }
 
-    // The user explicitly changed this row's payee or category. Actual's
-    // update path would keep the existing value, so force the add path.
-    if (edited.has(key)) {
-      payload.forceAddTransaction = true;
+    out.push(payload);
+  }
+
+  return out;
+}
+
+/**
+ * Pure: build the direct updates for the rows the user edited and that
+ * matched an existing transaction.
+ *
+ * Actual's import UPDATE path computes `payee: existing.payee ||
+ * trans.payee` and `category: existing.category || trans.category`, so the
+ * existing value wins and the user's edit is discarded. `forceAddTransaction`
+ * does not help either: it routes the row down the ADD path and creates a
+ * SECOND transaction.
+ *
+ * So a user's edit to an already-imported transaction is applied directly,
+ * through `transaction-update`, using the transaction id the import preview
+ * reported. Only the fields the user actually changed are sent, so the
+ * update touches nothing else.
+ */
+export function buildUpdatePayload(
+  state: ImportPreviewState,
+  opts: {
+    /** The budget account the rows belong to. */
+    accountId: string;
+    /** The transaction each row matched, keyed by the row's key. */
+    matchedTransactionIds: ReadonlyMap<string, string>;
+    /** Live payees, used to resolve a transfer account to its transfer payee. */
+    payees: readonly { id: string; transfer_acct?: string | null }[];
+    /** Live categories, used to drop a stale category id. */
+    categories: readonly { id: string }[];
+    /** The rows the user edited, keyed by the row's key. */
+    editedRowKeys: ReadonlySet<string>;
+  },
+): ImportReviewUpdate[] {
+  const liveCategoryIds = new Set(opts.categories.map(c => c.id));
+  const out: ImportReviewUpdate[] = [];
+
+  for (const row of state.rows as readonly PreviewRow[]) {
+    const key = rowKey(row);
+    if (!opts.editedRowKeys.has(key)) continue;
+
+    const transactionId = opts.matchedTransactionIds.get(key);
+    // Without the matched transaction's id we cannot update it in place,
+    // and forcing an add would duplicate it. Leave it to the import.
+    if (!transactionId) continue;
+    if (row.decision === 'drop') continue;
+
+    // `transaction-update` takes a whole transaction, so the fields the
+    // user did NOT change are sent as they are.
+    const update: ImportReviewUpdate = {
+      id: transactionId,
+      account: opts.accountId,
+      amount: effectiveAmountCents(row),
+      date: row.edits.date ?? row.date,
+    };
+
+    const transferAccountId = effectiveTransferAccountId(row);
+    const transferPayeeId = transferAccountId
+      ? findTransferPayeeId(transferAccountId, opts.payees)
+      : undefined;
+
+    if (transferPayeeId) {
+      update.payee = transferPayeeId;
+    } else if (row.edits.payeeCanonical !== undefined && row.matchedPayeeId) {
+      update.payee = row.matchedPayeeId;
     }
 
-    out.push(payload);
+    if (row.edits.categoryId !== undefined) {
+      if (liveCategoryIds.has(row.edits.categoryId)) {
+        update.category = row.edits.categoryId;
+      }
+    }
+
+    if (row.edits.memo !== undefined) {
+      update.notes = row.edits.memo;
+    }
+
+    // Only the fields the user actually changed are sent, on top of the
+    // ones `transaction-update` requires.
+    const changed = Object.keys(update).filter(
+      k => k !== 'id' && k !== 'account' && k !== 'amount' && k !== 'date',
+    );
+    if (changed.length === 0) continue;
+
+    out.push(update);
   }
 
   return out;
