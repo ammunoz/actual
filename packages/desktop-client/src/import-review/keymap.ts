@@ -24,6 +24,7 @@ export type ReviewAction =
   | 'edit-category'
   | 'edit-memo'
   | 'edit-amount'
+  | 'edit-date'
   | 'edit-transfer'
   | 'edit-split'
   | 'cycle-flag'
@@ -45,15 +46,25 @@ export type KeyBinding = {
   keys: string;
   /** What the key does. */
   action: ReviewAction;
-  /** Label for the help overlay. */
   /**
-   * The i18n key for the help overlay label. It is a KEY, not display
-   * text: whoever renders the overlay has to translate it.
+   * Whether the binding should be shown in the help overlay.
+   *
+   * The overlay's LABELS do not live here: they are translated text, and
+   * a dynamic `t(binding.labelKey)` cannot be seen by the extractor, so the
+   * strings would never reach the translations. They live in
+   * `help-labels.tsx`, keyed by action, where the extractor finds them.
    */
-  labelKey: string;
-  /** Whether the binding should be shown in the help overlay. */
   showInHelp?: boolean;
 };
+
+/**
+ * The hotkey scope the review's own bindings live in.
+ *
+ * It is the same name as the modal, because upstream's `Modal` component
+ * enables the scope named after it: that is how the review's keys stop
+ * firing once the modal is closed.
+ */
+export const REVIEW_SCOPE = 'keyboard-import-transactions';
 
 /**
  * The bindings, in the order they appear in the help overlay.
@@ -79,112 +90,99 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 'j, down',
     action: 'move-next',
-    labelKey: 'Next row',
     showInHelp: true,
   },
   {
     keys: 'k, up',
     action: 'move-prev',
-    labelKey: 'Previous row',
     showInHelp: true,
   },
-  { keys: 'g', action: 'move-first', labelKey: 'First row', showInHelp: true },
+  { keys: 'g', action: 'move-first', showInHelp: true },
   {
     keys: 'shift+g',
     action: 'move-last',
-    labelKey: 'Last row',
     showInHelp: true,
   },
   {
     keys: 'a',
     action: 'accept',
-    labelKey: 'Accept row and advance',
     showInHelp: true,
   },
   {
     keys: 'ctrl+a',
     action: 'accept-confirm',
-    labelKey: 'Accept row (confirm)',
     showInHelp: true,
   },
   {
     keys: 'ctrl+shift+a',
     action: 'accept-override',
-    labelKey: 'Accept row despite its flags',
     showInHelp: true,
   },
   {
     keys: 'r',
     action: 'drop',
-    labelKey: 'Drop row and advance',
     showInHelp: true,
   },
   {
     keys: 'u',
     action: 'undo',
-    labelKey: 'Undo last decision',
     showInHelp: true,
   },
   {
     keys: 'e',
     action: 'edit-payee',
-    labelKey: 'Edit payee',
     showInHelp: true,
   },
   {
     keys: 'c',
     action: 'edit-category',
-    labelKey: 'Edit category',
     showInHelp: true,
   },
-  { keys: 'm', action: 'edit-memo', labelKey: 'Edit notes', showInHelp: true },
+  { keys: 'm', action: 'edit-memo', showInHelp: true },
   {
     keys: 'shift+4',
     action: 'edit-amount',
-    labelKey: 'Edit amount',
+    showInHelp: true,
+  },
+  {
+    keys: 'd',
+    action: 'edit-date',
     showInHelp: true,
   },
   {
     keys: 't',
     action: 'edit-transfer',
-    labelKey: 'Set transfer target',
     showInHelp: true,
   },
-  { keys: 's', action: 'edit-split', labelKey: 'Edit split', showInHelp: true },
+  { keys: 's', action: 'edit-split', showInHelp: true },
   {
     keys: 'tab',
     action: 'cycle-flag',
-    labelKey: 'Cycle trust level',
     showInHelp: true,
   },
   {
     keys: 'shift+a',
     action: 'accept-all',
-    labelKey: 'Accept every row',
     showInHelp: true,
   },
   {
     keys: 'shift+r',
     action: 'drop-all',
-    labelKey: 'Drop every row',
     showInHelp: true,
   },
   {
     keys: 'ctrl+s',
     action: 'apply',
-    labelKey: 'Apply the import',
     showInHelp: true,
   },
   {
     keys: 'escape',
     action: 'close',
-    labelKey: 'Discard and close',
     showInHelp: true,
   },
   {
     keys: 'shift+slash',
     action: 'help',
-    labelKey: 'Show this help',
     showInHelp: true,
   },
 ]);

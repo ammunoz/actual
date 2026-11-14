@@ -1,0 +1,63 @@
+import { useTranslation } from 'react-i18next';
+
+import { Text } from '@actual-app/components/text';
+import { theme } from '@actual-app/components/theme';
+import { View } from '@actual-app/components/view';
+
+import { HELP_LABELS } from './help-labels';
+import { KEYMAP } from './keymap';
+
+/**
+ * The keys as they are shown to the user.
+ *
+ * The keymap spells a binding the way `react-hotkeys-hook` wants it
+ * (`'j, down'`); the user reads it as two keys.
+ */
+function formatKeys(keys: string): string {
+  return keys
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part.length > 0)
+    .join(' / ');
+}
+
+/**
+ * The help overlay: every key the review understands.
+ *
+ * It is rendered from the KEYMAP, so a binding cannot be added without
+ * showing up here.
+ */
+export function HelpOverlay() {
+  const { t } = useTranslation();
+
+  const bindings = KEYMAP.filter(binding => binding.showInHelp !== false);
+
+  return (
+    <View
+      data-testid="import-review-help"
+      style={{
+        gap: 4,
+        padding: 8,
+        border: `1px solid ${theme.tableBorder}`,
+        borderRadius: 6,
+        maxHeight: 320,
+        overflowY: 'auto',
+      }}
+    >
+      {bindings.map(binding => (
+        <View
+          key={binding.keys}
+          style={{ flexDirection: 'row', gap: 12, alignItems: 'baseline' }}
+        >
+          <Text style={{ width: 150, flexShrink: 0 }}>
+            {formatKeys(binding.keys)}
+          </Text>
+          <Text>{HELP_LABELS[binding.action]}</Text>
+        </View>
+      ))}
+      <Text style={{ color: theme.warningText }}>
+        {t('Press ? again or Escape to close')}
+      </Text>
+    </View>
+  );
+}

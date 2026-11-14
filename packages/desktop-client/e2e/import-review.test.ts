@@ -364,6 +364,323 @@ test.describe('Keyboard import review', () => {
     await expect(accountPage.transactionTableRow).toHaveCount(2);
   });
 
+  test('e edits the payee, and the fix releases the row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Edit Payee',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The second row has no payee at all, so the trust level holds it
+    // back.
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
+    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+
+    await page.keyboard.press('j');
+    await page.keyboard.press('e');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    // The editor owns the keyboard: the field has the focus, so what is
+    // typed goes into it.
+    const input = editor.getByTestId('import-review-editor-input');
+    await expect(input).toBeFocused();
+
+    // A name the budget does not have: the import creates the payee.
+    await page.keyboard.type('Demo Edited Vendor');
+    await page.keyboard.press('Enter');
+
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(1)).toHaveText(/Demo Edited Vendor/);
+
+    // And the fix RELEASED the row: the gate has nothing to hold back
+    // now, so the row lands.
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
+    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(2);
+  });
+
+  test('m edits the notes', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Edit Memo',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('m');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'memo');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('a note from the review');
+    await page.keyboard.press('Enter');
+
+    await expect(editor).not.toBeVisible();
+
+    // The note is the row's notes now, and the review says so: an edit
+    // the user cannot see is an edit the user cannot trust.
+    await expect(dialog.getByTestId('import-review-notes')).toContainText(
+      'a note from the review',
+    );
+  });
+
+  test('shift+4 edits the amount', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Edit Amount',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('Shift+4');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'amount');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('-30');
+    await page.keyboard.press('Enter');
+
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveText(/-30/);
+  });
+
+  test('d edits the date', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Edit Date',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('d');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'date');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('2026-09-15');
+    await page.keyboard.press('Enter');
+
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveText(/2026-09-15/);
+  });
+
+  test('an impossible date is refused rather than committed', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Bad Date',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('d');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+
+    // A date that is shaped like one but is not. The gate derives its
+    // date flag from the value that would be sent, so committing this
+    // would flag the row again a moment later.
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('2026-02-31');
+    await page.keyboard.press('Enter');
+
+    // The editor stays open and says why.
+    await expect(editor).toBeVisible();
+    await expect(editor.getByText('That is not a date')).toBeVisible();
+  });
+
+  test('escape closes the editor without changing the row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Escape',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+
+    await page.keyboard.type('Demo Abandoned Vendor');
+    await page.keyboard.press('Escape');
+
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).not.toHaveText(/Demo Abandoned Vendor/);
+    // The review itself is still open: escape cancelled the edit, it did
+    // not discard the review.
+    await expect(dialog.getByText('Review import')).toBeVisible();
+  });
+
+  test('u undoes a decision', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Undo',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    await page.keyboard.press('u');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test('shift+a accepts every row, and one undo takes it all back', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Undo All',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('Shift+a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'accept');
+
+    // One bulk action is one undo.
+    await page.keyboard.press('u');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test("the review owns the keyboard: the app's own keys do not fire", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Own Keys',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    // The account page binds `t` to "add transaction", and the review
+    // binds the same key for the transfer editor. The review owns the
+    // keyboard, so the app's binding must not fire.
+    await page.keyboard.press('t');
+
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await expect(
+      page.getByRole('dialog').getByText('Add transaction'),
+    ).toHaveCount(0);
+  });
+
+  test('the help overlay lists the keys', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Help',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    await page.keyboard.press('Shift+Slash');
+
+    const help = dialog.getByTestId('import-review-help');
+    await expect(help).toBeVisible();
+    await expect(help.getByText('Accept row despite its flags')).toBeVisible();
+    await expect(help.getByText('Cycle trust level')).toBeVisible();
+
+    // Escape closes the overlay, and the review with it.
+    await page.keyboard.press('Escape');
+    await expect(help).not.toBeVisible();
+    await expect(dialog.getByText('Review import')).toBeVisible();
+  });
+
   test('the trusted trust level holds nothing back that it can', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Trusted',

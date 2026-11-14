@@ -33,12 +33,36 @@ export {
   KEYMAP,
   actionForHotkey,
   nextTrustLevel,
+  REVIEW_SCOPE,
   TRUST_LEVELS,
 } from './keymap';
 export type { KeyBinding, ReviewAction } from './keymap';
 
+export {
+  EDITOR_FOR_ACTION,
+  filterSuggestions,
+  initialTextForMode,
+  nextHighlightIndex,
+  parseAmountText,
+  parseDateText,
+} from './editor-mode';
+export type { EditorMode, EditorSuggestion } from './editor-mode';
+
+export { EditorPicker } from './EditorPicker';
+export type { EditorPickerProps } from './EditorPicker';
+
+export { HelpOverlay } from './HelpOverlay';
+export { HELP_LABELS } from './help-labels';
+
+export { RowEditor } from './RowEditor';
+export type { RowEditorProps } from './RowEditor';
+
 export { useImportReview } from './use-import-review';
-export type { ImportReviewState, ReviewStatus } from './use-import-review';
+export type {
+  EditOptions,
+  ImportReviewState,
+  ReviewStatus,
+} from './use-import-review';
 
 export { KEYBOARD_MODE_PREF, VENDOR_MAP_PREF } from './types';
 export type { ImportReviewTransaction } from './types';

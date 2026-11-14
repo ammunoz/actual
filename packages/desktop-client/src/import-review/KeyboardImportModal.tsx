@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { useHotkeys } from 'react-hotkeys-hook';
+import { useEffect, useMemo, useState } from 'react';
+import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -14,6 +14,7 @@ import {
 } from '@actual-app/core/server/transactions/import/review/index';
 import type {
   FlagKind,
+  PreviewEdits,
   RowEvaluation,
   TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
@@ -23,8 +24,12 @@ import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { useModalState } from '#hooks/useModalState';
 
-import { actionForHotkey, KEYMAP, TRUST_LEVELS } from './keymap';
+import { EDITOR_FOR_ACTION } from './editor-mode';
+import type { EditorMode } from './editor-mode';
+import { HelpOverlay } from './HelpOverlay';
+import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
+import { RowEditor } from './RowEditor';
 import { useImportReview } from './use-import-review';
 
 export type KeyboardImportModalProps = {
@@ -32,6 +37,15 @@ export type KeyboardImportModalProps = {
   filename: string;
   onImported: (didChange: boolean) => void;
 };
+
+/**
+ * What the pane below the table is showing.
+ *
+ * The editor and the help overlay are the same pane: they cannot both be
+ * open, because there is only one keyboard and only one of them may have
+ * it.
+ */
+type PaneMode = { kind: 'editor'; field: EditorMode } | { kind: 'help' } | null;
 
 /**
  * The keyboard-driven import review.
@@ -48,6 +62,10 @@ export function KeyboardImportModal({
   const { t } = useTranslation();
   const { onClose } = useModalState();
   const review = useImportReview({ accountId, filename, onImported });
+  const { enableScope, disableScope } = useHotkeysContext();
+
+  // The pane below the table: the editor for a field, or the help.
+  const [pane, setPane] = useState<PaneMode>(null);
 
   // The trust level is a domain value, so it is translated at the point it
   // is shown rather than translated inside the domain layer.
@@ -123,6 +141,10 @@ export function KeyboardImportModal({
     ? review.evaluations.get(rowKey(focused))
     : undefined;
 
+  // The notes the row would be imported with. An empty string means the
+  // user cleared them, so there is nothing to show.
+  const focusedMemo = focused ? (focused.edits.memo ?? focused.memo ?? '') : '';
+
   // The live payee names, so the trust-level chips below agree with the
   // badges: both have to answer the same question about the same row.
   const livePayeeNames = useMemo(
@@ -172,9 +194,7 @@ export function KeyboardImportModal({
         }
         break;
       case 'accept-all':
-        review.state?.rows.forEach((row, index) => {
-          if (row.decision === 'pending') review.decide(index, 'accept');
-        });
+        review.decideAll('accept');
         break;
       case 'drop':
         if (focused) {
@@ -183,9 +203,7 @@ export function KeyboardImportModal({
         }
         break;
       case 'drop-all':
-        review.state?.rows.forEach((row, index) => {
-          if (row.decision === 'pending') review.decide(index, 'drop');
-        });
+        review.decideAll('drop');
         break;
       case 'undo':
         review.undo();
@@ -203,16 +221,20 @@ export function KeyboardImportModal({
         onClose();
         break;
       case 'help':
-      case 'edit-payee':
-      case 'edit-category':
-      case 'edit-memo':
-      case 'edit-amount':
-      case 'edit-transfer':
-      case 'edit-split':
-        // The editing chain and the help overlay are not part of v1.
+        setPane(current =>
+          current?.kind === 'help' ? null : { kind: 'help' },
+        );
         break;
-      default:
+      default: {
+        // The field editors. Each one opens the pane for the field the
+        // action names; an action with no editor yet — the transfer and
+        // split editors, which are their own slice — does nothing.
+        const field = EDITOR_FOR_ACTION[action];
+        if (field && focused) {
+          setPane({ kind: 'editor', field });
+        }
         break;
+      }
     }
   };
 
@@ -235,16 +257,80 @@ export function KeyboardImportModal({
       event.preventDefault();
       dispatch(action);
     },
-    { scopes: ['keyboard-import-transactions'] },
+    {
+      scopes: [REVIEW_SCOPE],
+      // While the pane is open it OWNS the keyboard, and the review's own
+      // bindings are switched off entirely.
+      //
+      // The `enabled` option does that work, not the scope. Switching a
+      // scope off goes through the hotkeys provider, and in this app the
+      // provider's state change does not reach the hook's listener: the
+      // review's keys kept firing after its scope was switched off.
+      // `enabled` is local to the hook, so it cannot fail that way.
+      //
+      // A guard inside the handler would not do either. `tab` would still
+      // cycle the trust level, the arrow keys would still move the row
+      // focus, and `escape` would still discard the whole review — and
+      // `react-hotkeys-hook` listens on the document, so a child
+      // component calling `preventDefault()` does not stop any of them.
+      enabled: pane === null,
+    },
   );
+
+  // The pane's own keys.
+  //
+  // Escape closes the pane. It has to fire while the field has the focus,
+  // which the library does not do by default: a hotkey is skipped when
+  // the key is pressed in an input.
+  useHotkeys(
+    'escape',
+    () => {
+      setPane(null);
+    },
+    { enabled: pane !== null, enableOnFormTags: true },
+  );
+
+  // `?` closes the help. The review's own binding for `?` is off while
+  // the pane is open, so this is the only one that can fire.
+  useHotkeys(
+    'shift+slash',
+    () => {
+      setPane(current => (current?.kind === 'help' ? null : current));
+    },
+    { enabled: pane?.kind === 'help' },
+  );
+
+  // The review owns the keyboard while it is open: the app's own hotkeys
+  // must not fire under it.
+  //
+  // The app binds plain letters too — `t` adds a transaction, `ctrl+a`
+  // selects every transaction — and this review binds the same keys. The
+  // upstream Modal's own comment says it deactivates the "app" scope while
+  // a modal is open, but the code only enables the scope named after the
+  // modal, so the feature does it itself.
+  //
+  // The app scope is the provider's initial scope, so it is always active
+  // while the review is open and putting it back on close restores what
+  // was there.
+  useEffect(() => {
+    disableScope('app');
+    return () => {
+      enableScope('app');
+    };
+  }, [enableScope, disableScope]);
 
   const isLoading = review.status === 'parsing' || review.status === 'applying';
   const summary = review.summary;
 
   return (
     <Modal
-      name="keyboard-import-transactions"
+      name={REVIEW_SCOPE}
       isLoading={isLoading}
+      // While the pane is open it owns the keyboard, and that includes the
+      // escape key: the pane's escape cancels the edit, it must not
+      // discard the review. React Aria dismisses the dialog on escape on
+      // its own, so it has to be told not to.
+      isKeyboardDismissDisabled={pane !== null}
       containerProps={{ style: { width: 900, maxWidth: '100%' } }}
     >
       {() => (
@@ -356,7 +442,9 @@ export function KeyboardImportModal({
                         : 'transparent',
                     }}
                   >
-                    <Text style={{ width: 90 }}>{row.date}</Text>
+                    <Text style={{ width: 90 }}>
+                      {row.edits.date ?? row.date}
+                    </Text>
                     <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
                     <Text style={{ width: 120 }}>
                       {row.edits.payeeCanonical ?? row.payeeCanonical}
@@ -381,53 +469,82 @@ export function KeyboardImportModal({
               })}
             </View>
 
-            {focused &&
-            focusedEvaluation &&
-            focusedEvaluation.flags.length > 0 ? (
-              <View style={{ gap: 4 }}>
-                <Text>
-                  {focusedEvaluation.flags
-                    .map(flag => flagReason(flag.kind))
-                    .join(' · ')}
-                </Text>
-                <Text style={styles.tnum}>
-                  {focusedEvaluation.flags.map(flag => flag.code).join(' · ')}
-                </Text>
-                {focusedEvaluation.held ? (
-                  <Text style={{ color: theme.errorText }}>
-                    {focusedEvaluation.overridable
-                      ? t(
-                          'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
-                        )
-                      : t(
-                          'Held back: this row cannot be imported until its date or amount is fixed.',
-                        )}
+            {focused ? (
+              <View style={{ gap: 4 }} data-testid="import-review-details">
+                {focusedEvaluation && focusedEvaluation.flags.length > 0 ? (
+                  <>
+                    <Text>
+                      {focusedEvaluation.flags
+                        .map(flag => flagReason(flag.kind))
+                        .join(' · ')}
+                    </Text>
+                    <Text style={styles.tnum}>
+                      {focusedEvaluation.flags
+                        .map(flag => flag.code)
+                        .join(' · ')}
+                    </Text>
+                    {focusedEvaluation.held ? (
+                      <Text style={{ color: theme.errorText }}>
+                        {focusedEvaluation.overridable
+                          ? t(
+                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
+                            )
+                          : t(
+                              'Held back: this row cannot be imported until its date or amount is fixed.',
+                            )}
+                      </Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      {TRUST_LEVELS.map(level => {
+                        const gate = gateRow(focused, level, {
+                          livePayeeNames,
+                        });
+                        const label =
+                          gate === 'block'
+                            ? t('Blocked')
+                            : gate === 'skip'
+                              ? t('Skipped')
+                              : gate === 'warn'
+                                ? t('Flagged')
+                                : t('Allowed');
+                        const isCurrent = level === review.trustLevel;
+                        return (
+                          <Text
+                            key={level}
+                            style={
+                              isCurrent ? { fontWeight: 'bold' } : undefined
+                            }
+                          >
+                            {trustLevelLabel(level)}: {label}
+                          </Text>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+
+                {focusedMemo ? (
+                  <Text data-testid="import-review-notes">
+                    <Trans>Notes</Trans>: {focusedMemo}
                   </Text>
                 ) : null}
-                <View style={{ flexDirection: 'row', gap: 12 }}>
-                  {TRUST_LEVELS.map(level => {
-                    const gate = gateRow(focused, level, { livePayeeNames });
-                    const label =
-                      gate === 'block'
-                        ? t('Blocked')
-                        : gate === 'skip'
-                          ? t('Skipped')
-                          : gate === 'warn'
-                            ? t('Flagged')
-                            : t('Allowed');
-                    const isCurrent = level === review.trustLevel;
-                    return (
-                      <Text
-                        key={level}
-                        style={isCurrent ? { fontWeight: 'bold' } : undefined}
-                      >
-                        {trustLevelLabel(level)}: {label}
-                      </Text>
-                    );
-                  })}
-                </View>
               </View>
             ) : null}
+
+            {pane?.kind === 'editor' && focused ? (
+              <RowEditor
+                row={focused}
+                mode={pane.field}
+                payees={review.payees}
+                categories={review.categories}
+                onCommit={(edits: PreviewEdits, chosenPayeeId?: string) => {
+                  review.edit(review.focusedIndex, edits, { chosenPayeeId });
+                  setPane(null);
+                }}
+              />
+            ) : null}
+
+            {pane?.kind === 'help' ? <HelpOverlay /> : null}
           </View>
         </>
       )}

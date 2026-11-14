@@ -1,3 +1,4 @@
+import { HELP_LABELS } from './help-labels';
 import {
   actionForHotkey,
   KEYMAP,
@@ -16,8 +17,12 @@ describe('KEYMAP', () => {
     expect(new Set(actions).size).toBe(actions.length);
   });
 
-  it('every binding has a label', () => {
-    expect(KEYMAP.every(binding => binding.labelKey.length > 0)).toBe(true);
+  it('every binding has a label in the help catalogue', () => {
+    // The labels live outside the keymap so the extractor can find them,
+    // so this is what keeps the two in step.
+    expect(
+      KEYMAP.every(binding => HELP_LABELS[binding.action] !== undefined),
+    ).toBe(true);
   });
 
   it('does NOT bind h/l (Actual OFX parser drops ACCTID)', () => {

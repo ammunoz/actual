@@ -13,6 +13,7 @@ import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
   buildPreviewState,
+  emptyVendorMap,
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
@@ -22,6 +23,7 @@ import {
   rowKey,
   summarize,
   updateEdits,
+  upsertVendorMapEntry,
   validateVendorMap,
   withTrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
@@ -53,6 +55,47 @@ import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
 export type ReviewStatus = 'idle' | 'parsing' | 'reviewing' | 'applying';
+
+/**
+ * What an edit says about the payee the user chose.
+ */
+export type EditOptions = {
+  /**
+   * The id of the payee the user picked, when they picked one that already
+   * exists in the budget.
+   *
+   * The id is what the vendor map records: the raw vendor string is worth
+   * remembering, so the next import of the same file resolves to the same
+   * payee without asking again.
+   */
+  chosenPayeeId?: string;
+};
+
+/**
+ * A snapshot of the review, taken before a change so it can be undone.
+ */
+type UndoSnapshot = {
+  state: ImportPreviewState;
+  editedRowKeys: ReadonlySet<string>;
+  /**
+   * The vendor-map entries the review had earned when the snapshot was
+   * taken.
+   *
+   * They are part of the snapshot because undoing a payee choice has to
+   * undo the choice, not just the row: a map that remembered a choice the
+   * user took back would decide the next import on their behalf.
+   */
+  vendorChoices: ReadonlyMap<string, string>;
+};
+
+/**
+ * How many changes the review remembers.
+ *
+ * The stack holds whole states, and a state is a list of frozen rows, so a
+ * snapshot only costs the row that changed. Fifty is far more than a
+ * review needs and small enough that nobody will notice the ceiling.
+ */
+const MAX_UNDO_STEPS = 50;
 
 export type UseImportReviewOpts = {
   /** The budget account the rows are imported into. */
@@ -110,8 +153,14 @@ export type ImportReviewState = {
   evaluations: ReadonlyMap<string, RowEvaluation>;
   /** Set the decision on a row. */
   decide: (index: number, decision: PreviewDecision) => void;
+  /**
+   * Set the decision on every row that has not been decided yet.
+   *
+   * One bulk action is one undo, not one undo per row.
+   */
+  decideAll: (decision: PreviewDecision) => void;
   /** Replace a row's edits. */
-  edit: (index: number, edits: PreviewEdits) => void;
+  edit: (index: number, edits: PreviewEdits, opts?: EditOptions) => void;
   /** Move the focus to an absolute index. */
   focus: (index: number) => void;
   /** Move the focus by a delta, clamped to the row range. */
@@ -235,11 +284,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [accounts, setAccounts] = useState<readonly ReviewAccount[]>([]);
   const [categories, setCategories] = useState<readonly ReviewCategory[]>([]);
 
-  const [vendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
+  const [vendorMapRaw, setVendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
+
+  // The vendor map as it was when the review opened.
+  //
+  // It is read through a ref on purpose. The parse effect used to depend on
+  // the preference itself, which meant WRITING the map re-parsed the file
+  // and threw away every decision the user had made — and the map is
+  // written as a result of those decisions. A review reads the map once;
+  // the next review sees the updated one.
+  const vendorMapRawRef = useRef(vendorMapRaw);
+  useEffect(() => {
+    vendorMapRawRef.current = vendorMapRaw;
+  }, [vendorMapRaw]);
+
+  // The vendor-map entries the user earned by picking a payee, keyed by the
+  // raw vendor string they picked it for. They are written when the import
+  // succeeds, not while the review is open.
+  const vendorChoices = useRef<Map<string, string>>(new Map());
 
   // The rows the user explicitly edited, so the apply step can update them
   // in place.
   const editedRowKeys = useRef<ReadonlySet<string>>(new Set());
+
+  // The changes the review remembers, so they can be undone. A snapshot is
+  // taken before every change, and holds the whole state: a bulk action is
+  // then one undo rather than one undo per row.
+  const undoStack = useRef<readonly UndoSnapshot[]>([]);
 
   // The transaction each row matched, keyed by the row's key. The import
   // preview reports this, and it is what lets a user's edit to an
@@ -278,6 +349,8 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // previous parse belong to rows that no longer exist.
       editedRowKeys.current = new Set();
       matchedTransactionIds.current = new Map();
+      vendorChoices.current = new Map();
+      undoStack.current = [];
 
       try {
         const [payeeEntities, accountEntities, categoryEntities, parsed] =
@@ -336,7 +409,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // Actual's own rules cover what a separate rules system would do.
         // They run server-side during import, keyed on `imported_payee`, so
         // there is no second rules system to maintain here.
-        const vendorMap = readVendorMap(vendorMapRaw);
+        const vendorMap = readVendorMap(vendorMapRawRef.current);
         const liveMap = vendorMap
           ? filterStaleVendorMapEntries(vendorMap, payeeList)
           : undefined;
@@ -403,7 +476,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     return () => {
       cancelled = true;
     };
-  }, [filename, vendorMapRaw, accountId]);
+    // The vendor map is deliberately NOT a dependency: it is read through a
+    // ref, because a write to it must never re-parse the file.
+  }, [filename, accountId]);
 
   const buildUpdates = useCallback(() => {
     if (!state) return { updates: [] };
@@ -416,26 +491,120 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     });
   }, [state, accountId, payees, categories]);
 
-  const decide = useCallback((index: number, decision: PreviewDecision) => {
-    setState(current => {
-      if (!current) return current;
-      const row = current.rows[index];
-      if (!row) return current;
-      return applyDecision(current, rowKey(row), decision);
-    });
+  /**
+   * Write the vendor-map entries the user's payee choices earned.
+   *
+   * It happens AFTER the import succeeded, and never while the review is
+   * open: writing the preference re-parses the file, which would throw
+   * away the very decisions that produced the entries.
+   */
+  const writeVendorMap = useCallback(() => {
+    const choices = vendorChoices.current;
+    if (choices.size === 0) return;
+
+    const now = new Date().toISOString();
+    let map = readVendorMap(vendorMapRawRef.current) ?? emptyVendorMap(now);
+    for (const [raw, payeeId] of choices) {
+      if (raw.length === 0 || payeeId.length === 0) continue;
+      map = upsertVendorMapEntry(map, raw, payeeId, now);
+    }
+    setVendorMapRaw(JSON.stringify(map));
+  }, [setVendorMapRaw]);
+
+  /**
+   * Record the state as it is NOW, so the change that follows can be
+   * undone.
+   *
+   * The snapshot is skipped when the top of the stack already holds this
+   * state. That is what makes it safe to call from inside a state
+   * updater: an updater that runs twice — React may do that — records the
+   * same change once, because the second run sees the state it just
+   * recorded.
+   */
+  const pushUndo = useCallback((current: ImportPreviewState) => {
+    const stack = undoStack.current;
+    if (stack[stack.length - 1]?.state === current) return;
+    undoStack.current = [
+      ...stack.slice(-(MAX_UNDO_STEPS - 1)),
+      {
+        state: current,
+        editedRowKeys: new Set(editedRowKeys.current),
+        vendorChoices: new Map(vendorChoices.current),
+      },
+    ];
   }, []);
 
-  const edit = useCallback((index: number, edits: PreviewEdits) => {
-    setState(current => {
-      if (!current) return current;
-      const row = current.rows[index];
-      if (!row) return current;
-      // Remember that the user touched this row, so the apply step can
-      // update the matched transaction in place.
-      editedRowKeys.current = new Set([...editedRowKeys.current, rowKey(row)]);
-      return updateEdits(current, rowKey(row), edits);
-    });
-  }, []);
+  const decide = useCallback(
+    (index: number, decision: PreviewDecision) => {
+      setState(current => {
+        if (!current) return current;
+        const row = current.rows[index];
+        if (!row) return current;
+        pushUndo(current);
+        return applyDecision(current, rowKey(row), decision);
+      });
+    },
+    [pushUndo],
+  );
+
+  const decideAll = useCallback(
+    (decision: PreviewDecision) => {
+      setState(current => {
+        if (!current) return current;
+        const pending = current.rows.filter(row => row.decision === 'pending');
+        if (pending.length === 0) return current;
+        // One snapshot for the whole bulk action, so one undo takes it
+        // all back.
+        pushUndo(current);
+        // The domain's `applyDecision` finds its row by key, so applying
+        // it once per row is quadratic in the number of rows. An import
+        // file has hundreds of rows at most, so this is cheap, and going
+        // around the domain helper would mean duplicating its rules here.
+        let next = current;
+        for (const row of pending) {
+          next = applyDecision(next, rowKey(row), decision);
+        }
+        return next;
+      });
+    },
+    [pushUndo],
+  );
+  const edit = useCallback(
+    (index: number, edits: PreviewEdits, opts?: EditOptions) => {
+      setState(current => {
+        if (!current) return current;
+        const row = current.rows[index];
+        if (!row) return current;
+        pushUndo(current);
+        // Remember that the user touched this row, so the apply step can
+        // update the matched transaction in place.
+        editedRowKeys.current = new Set([
+          ...editedRowKeys.current,
+          rowKey(row),
+        ]);
+
+        // The user picked a payee for a vendor string the budget does not
+        // know. Remembering that is what the vendor map is for: the next
+        // import of the same file resolves to the same payee without
+        // asking.
+        const chosenId = opts?.chosenPayeeId;
+        if (chosenId) {
+          const payee = payees.find(candidate => candidate.id === chosenId);
+          const raw = row.payeeRaw.trim();
+          if (
+            payee &&
+            raw.length > 0 &&
+            normalizePayeeName(raw) !== normalizePayeeName(payee.name)
+          ) {
+            vendorChoices.current.set(raw, chosenId);
+          }
+        }
+
+        return updateEdits(current, rowKey(row), edits);
+      });
+    },
+    [pushUndo, payees],
+  );
 
   const focus = useCallback((index: number) => {
     setFocusedIndex(index);
@@ -446,14 +615,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, []);
 
   const undo = useCallback(() => {
-    setState(current => {
-      if (!current) return current;
-      const last = [...current.rows]
-        .reverse()
-        .find(r => r.decision !== 'pending');
-      if (!last) return current;
-      return applyDecision(current, rowKey(last), 'pending');
-    });
+    const stack = undoStack.current;
+    const last = stack[stack.length - 1];
+    if (!last) return;
+    undoStack.current = stack.slice(0, -1);
+    // The set of edited rows is part of the snapshot: undoing an edit back
+    // to nothing has to remove the row again, or the apply step would
+    // write a no-op update for it.
+    editedRowKeys.current = new Set(last.editedRowKeys);
+    vendorChoices.current = new Map(last.vendorChoices);
+    setState(last.state);
   }, []);
 
   const cycleTrustLevel = useCallback(() => {
@@ -539,6 +710,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // so this is a SUCCESS, not a failure with nothing to do.
         setStatus('reviewing');
         if (didChange) {
+          writeVendorMap();
           onImported(true);
         } else {
           setError('There is nothing to import');
@@ -579,10 +751,25 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
     setStatus('reviewing');
     if (didChange) {
+      // The import went through and changed something, so the payee
+      // choices the user made were USED, and they are worth remembering.
+      //
+      // The map is written HERE and not while the review is open: writing
+      // the preference re-parses the file and throws away the very
+      // decisions that produced the entries.
+      writeVendorMap();
       onImported(true);
     }
     return didChange;
-  }, [accountId, buildUpdates, state, payees, categories, onImported]);
+  }, [
+    accountId,
+    buildUpdates,
+    state,
+    payees,
+    categories,
+    onImported,
+    writeVendorMap,
+  ]);
 
   const close = useCallback(() => {
     onImported(false);
@@ -628,6 +815,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     summary,
     evaluations,
     decide,
+    decideAll,
     edit,
     focus,
     moveFocus,
