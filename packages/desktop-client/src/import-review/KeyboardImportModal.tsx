@@ -96,9 +96,12 @@ export function KeyboardImportModal({
       case 'payee-rule-conflict':
         return t('A rule disagrees with the payee for this row');
       case 'amount-mismatch':
-        return t('The file did not supply a usable amount');
+        // The reason describes the ROW, not where the problem came from:
+        // the flag is derived from the value that would be sent, so it may
+        // be the file's fault or an edit's.
+        return t('This row has no usable amount');
       case 'date-out-of-range':
-        return t('The file did not supply a usable date');
+        return t('This row has no usable date');
       case 'needs-review':
         return t('This row needs a look');
       case 'duplicate':

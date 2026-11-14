@@ -121,6 +121,20 @@ describe('effectiveFlags', () => {
     ]);
   });
 
+  it('lets a row the user committed a zero amount through', () => {
+    // Zero cents is a whole number, so the engine can write it. The
+    // amount-mismatch flag says the FILE supplied no usable amount, and
+    // the user has now supplied one: 0 cents. It is a real transaction,
+    // and it is the user's call.
+    const row = mkRow({
+      flags: [flag('amount-mismatch')],
+      edits: { amountCents: 0 },
+    });
+    expect(effectiveFlags(row)).toEqual([]);
+    expect(evaluateRow(row, 'cautious').willImport).toBe(true);
+    expect(evaluateRow(row, 'cautious').willSend).toBe(true);
+  });
+
   it('clears transfer-detected once the user confirmed the transfer', () => {
     const row = mkRow({
       flags: [flag('transfer-detected')],

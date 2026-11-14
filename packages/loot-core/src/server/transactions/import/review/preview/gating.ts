@@ -240,13 +240,25 @@ export function effectiveFlags(
 
   // The data-level flags describe the EFFECTIVE values, so they are
   // derived rather than kept or dropped.
+  //
+  // The derived flags carry no note. The note on the parse-time flag says
+  // WHERE the problem came from ("the file did not supply a usable date"),
+  // which is not true of an edit, and nothing reads it: it is documented as
+  // never being a user-visible value. The UI shows its own reason for the
+  // flag kind.
   const effectiveDate = row.edits.date ?? row.date;
   const effectiveAmount = row.edits.amountCents ?? row.amountCents;
 
   if (!isUsableDate(effectiveDate)) {
     kept.push({ kind: 'date-out-of-range', code: 'DATE-RANGE-001' });
   }
-  if (!Number.isInteger(effectiveAmount)) {
+  // The guard is belt and braces: the parse-time flag is kept when the
+  // user committed no amount, and an amount is only ever unusable if it is
+  // not a whole number of cents.
+  if (
+    !Number.isInteger(effectiveAmount) &&
+    !kept.some(flag => flag.kind === 'amount-mismatch')
+  ) {
     kept.push({ kind: 'amount-mismatch', code: 'AMT-MISMATCH-001' });
   }
 

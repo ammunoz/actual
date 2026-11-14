@@ -758,7 +758,7 @@ describe('buildUpdatePayload', () => {
   });
 });
 
-describe('buildImportPayload — a user payee edit beats the resolver match', () => {
+describe('buildApplyPayload — a user payee edit beats the resolver match', () => {
   const PAYEES = [
     { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
     { id: 'p-two', name: 'Demo Payee Two', transfer_acct: null },
