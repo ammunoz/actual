@@ -17,7 +17,7 @@ describe('KEYMAP', () => {
   });
 
   it('every binding has a label', () => {
-    expect(KEYMAP.every(binding => binding.label.length > 0)).toBe(true);
+    expect(KEYMAP.every(binding => binding.labelKey.length > 0)).toBe(true);
   });
 
   it('does NOT bind h/l (Actual OFX parser drops ACCTID)', () => {

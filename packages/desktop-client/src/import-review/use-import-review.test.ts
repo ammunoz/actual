@@ -72,6 +72,36 @@ describe('toReviewRows', () => {
     expect(rows[0].amountCents).toBe(0);
   });
 
+  it('flags a row whose amount could not be read', () => {
+    const rows = toReviewRows([{ date: '2026-09-07', amount: 'oops' }]);
+    expect(rows[0].flags).toEqual([
+      expect.objectContaining({ kind: 'amount-mismatch' }),
+    ]);
+  });
+
+  it('flags a row whose date could not be read', () => {
+    // An empty date is rejected by the import with a confusing error, so
+    // the row is flagged instead of being sent.
+    const rows = toReviewRows([{ date: 'not-a-date', amount: -100 }]);
+    expect(rows[0].flags).toEqual([
+      expect.objectContaining({ kind: 'date-out-of-range' }),
+    ]);
+  });
+
+  it('flags a row with no date at all', () => {
+    const rows = toReviewRows([{ amount: -100 }]);
+    expect(rows[0].flags).toEqual([
+      expect.objectContaining({ kind: 'date-out-of-range' }),
+    ]);
+  });
+
+  it('does not flag a well-formed row', () => {
+    const rows = toReviewRows([
+      { date: '2026-09-07', amount: -100, imported_payee: 'Demo Vendor' },
+    ]);
+    expect(rows[0].flags).toBeUndefined();
+  });
+
   it('reads the bank memo', () => {
     const rows = toReviewRows([
       { date: '2026-09-07', amount: -1, notes: 'a bank note' },

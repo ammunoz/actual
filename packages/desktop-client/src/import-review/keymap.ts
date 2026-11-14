@@ -45,7 +45,11 @@ export type KeyBinding = {
   /** What the key does. */
   action: ReviewAction;
   /** Label for the help overlay. */
-  label: string;
+  /**
+   * The i18n key for the help overlay label. It is a KEY, not display
+   * text: whoever renders the overlay has to translate it.
+   */
+  labelKey: string;
   /** Whether the binding should be shown in the help overlay. */
   showInHelp?: boolean;
 };
@@ -68,106 +72,106 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 'j, down',
     action: 'move-next',
-    label: 'Next row',
+    labelKey: 'Next row',
     showInHelp: true,
   },
   {
     keys: 'k, up',
     action: 'move-prev',
-    label: 'Previous row',
+    labelKey: 'Previous row',
     showInHelp: true,
   },
-  { keys: 'g', action: 'move-first', label: 'First row', showInHelp: true },
+  { keys: 'g', action: 'move-first', labelKey: 'First row', showInHelp: true },
   {
     keys: 'shift+g',
     action: 'move-last',
-    label: 'Last row',
+    labelKey: 'Last row',
     showInHelp: true,
   },
   {
     keys: 'a',
     action: 'accept',
-    label: 'Accept row and advance',
+    labelKey: 'Accept row and advance',
     showInHelp: true,
   },
   {
     keys: 'ctrl+a',
     action: 'accept-confirm',
-    label: 'Accept row (confirm)',
+    labelKey: 'Accept row (confirm)',
     showInHelp: true,
   },
   {
     keys: 'r',
     action: 'drop',
-    label: 'Drop row and advance',
+    labelKey: 'Drop row and advance',
     showInHelp: true,
   },
   {
     keys: 'u',
     action: 'undo',
-    label: 'Undo last decision',
+    labelKey: 'Undo last decision',
     showInHelp: true,
   },
   {
     keys: 'e',
     action: 'edit-payee',
-    label: 'Edit payee',
+    labelKey: 'Edit payee',
     showInHelp: true,
   },
   {
     keys: 'c',
     action: 'edit-category',
-    label: 'Edit category',
+    labelKey: 'Edit category',
     showInHelp: true,
   },
-  { keys: 'm', action: 'edit-memo', label: 'Edit notes', showInHelp: true },
+  { keys: 'm', action: 'edit-memo', labelKey: 'Edit notes', showInHelp: true },
   {
     keys: 'shift+4',
     action: 'edit-amount',
-    label: 'Edit amount',
+    labelKey: 'Edit amount',
     showInHelp: true,
   },
   {
     keys: 't',
     action: 'edit-transfer',
-    label: 'Set transfer target',
+    labelKey: 'Set transfer target',
     showInHelp: true,
   },
-  { keys: 's', action: 'edit-split', label: 'Edit split', showInHelp: true },
+  { keys: 's', action: 'edit-split', labelKey: 'Edit split', showInHelp: true },
   {
     keys: 'tab',
     action: 'cycle-flag',
-    label: 'Cycle trust level',
+    labelKey: 'Cycle trust level',
     showInHelp: true,
   },
   {
     keys: 'shift+a',
     action: 'accept-all',
-    label: 'Accept every row',
+    labelKey: 'Accept every row',
     showInHelp: true,
   },
   {
     keys: 'shift+r',
     action: 'drop-all',
-    label: 'Drop every row',
+    labelKey: 'Drop every row',
     showInHelp: true,
   },
   {
     keys: 'ctrl+s',
     action: 'apply',
-    label: 'Apply the import',
+    labelKey: 'Apply the import',
     showInHelp: true,
   },
   {
     keys: 'escape',
     action: 'close',
-    label: 'Discard and close',
+    labelKey: 'Discard and close',
     showInHelp: true,
   },
   {
     keys: 'shift+slash',
     action: 'help',
-    label: 'Show this help',
+    labelKey: 'Show this help',
     showInHelp: true,
   },
 ]);

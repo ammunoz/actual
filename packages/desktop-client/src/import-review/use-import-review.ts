@@ -21,6 +21,7 @@ import {
   withTrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type {
+  Flag,
   ImportPreviewState,
   PreviewDecision,
   PreviewEdits,
@@ -130,6 +131,25 @@ export function toReviewRows(
       typeof trans.amount === 'number' ? trans.amount : Number(trans.amount);
     const date = typeof trans.date === 'string' ? trans.date : '';
     const amountIsUsable = Number.isFinite(rawAmount);
+    // An empty date would be rejected by the import with a confusing
+    // error, so a row without one is flagged instead of being sent.
+    const dateIsUsable = /^\d{4}-\d{2}-\d{2}$/.test(date);
+
+    const flags: Flag[] = [];
+    if (!amountIsUsable) {
+      flags.push({
+        kind: 'amount-mismatch',
+        code: 'AMT-MISMATCH-001',
+        note: 'the file did not supply a usable amount',
+      });
+    }
+    if (!dateIsUsable) {
+      flags.push({
+        kind: 'date-out-of-range',
+        code: 'DATE-RANGE-001',
+        note: 'the file did not supply a usable date',
+      });
+    }
 
     return {
       accountId: '',
@@ -142,17 +162,7 @@ export function toReviewRows(
       payeeRaw: rawPayee,
       memo: typeof trans.notes === 'string' ? trans.notes : undefined,
       previewKey: `row-${index}`,
-      ...(amountIsUsable
-        ? {}
-        : {
-            flags: [
-              {
-                kind: 'amount-mismatch' as const,
-                code: 'AMT-MISMATCH-001' as const,
-                note: 'the file did not supply a usable amount',
-              },
-            ],
-          }),
+      ...(flags.length > 0 && { flags }),
     };
   });
 }
@@ -198,7 +208,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // but is deliberately not one of its dependencies: changing it must not
   // re-parse the file and discard the user's decisions.
   const trustLevelRef = useRef(trustLevel);
-  trustLevelRef.current = trustLevel;
+  useEffect(() => {
+    trustLevelRef.current = trustLevel;
+  }, [trustLevel]);
 
   // Guards against a second apply starting while one is running.
   const applyingRef = useRef(false);
