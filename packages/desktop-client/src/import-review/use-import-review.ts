@@ -318,6 +318,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           if (!existing?.id) return;
           // The preview echoes back the transaction we sent, so the transient
           // preview key travels with it.
+          //
+          // Safe: the echo is the transaction we sent, plus whatever the
+          // rule engine added to it. The cast is only needed because the
+          // preview's type does not declare the transient field.
           const key = (
             entry.transaction as { _previewKey?: string } | undefined
           )?._previewKey;
@@ -410,6 +414,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // apply. Two concurrent imports would write the rows twice, and a row
     // without a FITID has no dedup key to protect it.
     if (applyingRef.current) return false;
+    // There is nothing to apply before the file has been parsed, or after
+    // parsing failed.
+    if (!state) return false;
     applyingRef.current = true;
 
     setStatus('applying');
@@ -442,9 +449,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
               createdPayeeIds.set(payeeNameToCreate, payeeId);
             }
           }
-          if (payeeId) {
-            update.payee = payeeId;
+          if (!payeeId) {
+            // The payee could not be created, so the update would go
+            // through WITHOUT the payee the user chose - the edit would be
+            // silently dropped while the apply reported success. Better to
+            // say so.
+            setStatus('reviewing');
+            setError('The payee could not be created');
+            return false;
           }
+          update.payee = payeeId;
         }
         await send('transaction-update', update);
         didChange = true;
@@ -453,7 +467,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The rows that were just updated are excluded from the import, so
       // the import's update path cannot undo them.
       const updatedRowKeys = new Set(updates.map(u => u.rowKey));
-      const payload = buildImportPayload(state!, {
+      const payload = buildImportPayload(state, {
         accountId,
         payees: payeeRefs(payees),
         categories: categories.map(c => ({ id: c.id })),
@@ -466,6 +480,8 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setStatus('reviewing');
         if (didChange) {
           onImported(true);
+        } else {
+          setError('There is nothing to import');
         }
         return didChange;
       }

@@ -1,4 +1,3 @@
-// @ts-strict-ignore
 import { reconcileTransactions } from '#server/accounts/sync';
 import * as db from '#server/db';
 import { runHandler } from '#server/mutators';
@@ -222,8 +221,9 @@ describe('the import engine update path', () => {
     // The preview tells us which transaction the row matched, which is
     // what lets the review update it in place.
     expect(updatedPreview.length).toBe(1);
-    expect(updatedPreview[0].existing).toBeTruthy();
-    expect(updatedPreview[0].existing.id).toBeTruthy();
+    const existing = updatedPreview[0].existing;
+    expect(existing).toBeTruthy();
+    expect(existing?.id).toBeTruthy();
   });
 
   test('a transient underscore-prefixed field is accepted and ignored', async () => {
