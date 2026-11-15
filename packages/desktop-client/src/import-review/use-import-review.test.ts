@@ -18,78 +18,101 @@ vi.mock('./use-custom-synced-pref', () => ({
 
 describe('toReviewRows', () => {
   it('reads the FITID from imported_id', () => {
-    const rows = toReviewRows([
-      { imported_id: 'FITID-1', date: '2026-09-07', amount: -2500 },
-    ]);
+    const rows = toReviewRows(
+      [{ imported_id: 'FITID-1', date: '2026-09-07', amount: -2500 }],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].importedId).toBe('FITID-1');
   });
 
   it('leaves importedId undefined when the file has no FITID', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: -2500 }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -2500 }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].importedId).toBeUndefined();
   });
 
   it('reads the raw vendor string from imported_payee', () => {
-    const rows = toReviewRows([
-      { imported_payee: 'POS PURCHASE 4251', date: '2026-09-07', amount: -1 },
-    ]);
+    const rows = toReviewRows(
+      [{ imported_payee: 'POS PURCHASE 4251', date: '2026-09-07', amount: -1 }],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].payeeRaw).toBe('POS PURCHASE 4251');
   });
 
   it('falls back to payee_name when imported_payee is absent', () => {
-    const rows = toReviewRows([
-      { payee_name: 'Demo Vendor', date: '2026-09-07', amount: -1 },
-    ]);
+    const rows = toReviewRows(
+      [{ payee_name: 'Demo Vendor', date: '2026-09-07', amount: -1 }],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].payeeRaw).toBe('Demo Vendor');
   });
 
   it('uses an empty payee when the file has neither', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: -1 }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -1 }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].payeeRaw).toBe('');
   });
 
   it('assigns a unique previewKey to every row', () => {
-    const rows = toReviewRows([
-      { date: '2026-09-07', amount: -1 },
-      { date: '2026-09-07', amount: -2 },
-      { date: '2026-09-07', amount: -3 },
-    ]);
+    const rows = toReviewRows(
+      [
+        { date: '2026-09-07', amount: -1 },
+        { date: '2026-09-07', amount: -2 },
+        { date: '2026-09-07', amount: -3 },
+      ],
+      { accountId: 'a-1' },
+    );
     const keys = rows.map(r => r.previewKey);
     expect(new Set(keys).size).toBe(3);
   });
 
   it('assigns a previewKey even when the FITIDs repeat', () => {
-    const rows = toReviewRows([
-      { imported_id: 'SAME', date: '2026-09-07', amount: -1 },
-      { imported_id: 'SAME', date: '2026-09-07', amount: -2 },
-    ]);
+    const rows = toReviewRows(
+      [
+        { imported_id: 'SAME', date: '2026-09-07', amount: -1 },
+        { imported_id: 'SAME', date: '2026-09-07', amount: -2 },
+      ],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].previewKey).not.toBe(rows[1].previewKey);
   });
 
   it('converts the amount from major units to integer cents', () => {
     // Actual's OFX parser returns the amount in the currency's major units
     // (e.g. -120.50). The import API wants integer cents.
-    const rows = toReviewRows([{ date: '2026-09-07', amount: -120.5 }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -120.5 }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].amountCents).toBe(-12050);
   });
 
   it('rounds a fractional amount to the nearest cent', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: 1.005 }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: 1.005 }], {
+      accountId: 'a-1',
+    });
     expect(Number.isInteger(rows[0].amountCents)).toBe(true);
   });
 
   it('keeps a whole amount intact', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: -25 }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: -25 }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].amountCents).toBe(-2500);
   });
 
   it('falls back to 0 for a non-numeric amount', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: 'oops' }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: 'oops' }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].amountCents).toBe(0);
   });
 
   it('flags a row whose amount could not be read', () => {
-    const rows = toReviewRows([{ date: '2026-09-07', amount: 'oops' }]);
+    const rows = toReviewRows([{ date: '2026-09-07', amount: 'oops' }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].flags).toEqual([
       expect.objectContaining({ kind: 'amount-mismatch' }),
     ]);
@@ -98,35 +121,39 @@ describe('toReviewRows', () => {
   it('flags a row whose date could not be read', () => {
     // An empty date is rejected by the import with a confusing error, so
     // the row is flagged instead of being sent.
-    const rows = toReviewRows([{ date: 'not-a-date', amount: -100 }]);
+    const rows = toReviewRows([{ date: 'not-a-date', amount: -100 }], {
+      accountId: 'a-1',
+    });
     expect(rows[0].flags).toEqual([
       expect.objectContaining({ kind: 'date-out-of-range' }),
     ]);
   });
 
   it('flags a row with no date at all', () => {
-    const rows = toReviewRows([{ amount: -100 }]);
+    const rows = toReviewRows([{ amount: -100 }], { accountId: 'a-1' });
     expect(rows[0].flags).toEqual([
       expect.objectContaining({ kind: 'date-out-of-range' }),
     ]);
   });
 
   it('does not flag a well-formed row', () => {
-    const rows = toReviewRows([
-      { date: '2026-09-07', amount: -100, imported_payee: 'Demo Vendor' },
-    ]);
+    const rows = toReviewRows(
+      [{ date: '2026-09-07', amount: -100, imported_payee: 'Demo Vendor' }],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].flags).toBeUndefined();
   });
 
   it('reads the bank memo', () => {
-    const rows = toReviewRows([
-      { date: '2026-09-07', amount: -1, notes: 'a bank note' },
-    ]);
+    const rows = toReviewRows(
+      [{ date: '2026-09-07', amount: -1, notes: 'a bank note' }],
+      { accountId: 'a-1' },
+    );
     expect(rows[0].memo).toBe('a bank note');
   });
 
   it('handles an empty list', () => {
-    expect(toReviewRows([])).toEqual([]);
+    expect(toReviewRows([], { accountId: 'a-1' })).toEqual([]);
   });
 });
 

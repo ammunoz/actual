@@ -818,6 +818,38 @@ export function KeyboardImportModal({
                     );
                     return;
                   }
+
+                  // A row with no payee NAME is not a payee row. Actual
+                  // creates a payee per account for transfers, with an
+                  // empty name, so an empty name would land the row on
+                  // one of them and turn it into a transfer to an
+                  // arbitrary account.
+                  if (
+                    edits.payeeCanonical !== undefined &&
+                    edits.payeeCanonical.trim() === ''
+                  ) {
+                    setNotice(
+                      t('A payee needs a name. Pick one from the list.'),
+                    );
+                    return;
+                  }
+
+                  // Giving a row a payee takes the transfer away: a
+                  // transfer row is not a payee row, its payee IS the
+                  // transfer. The user is told, because the row's shape
+                  // changes in a way they may not have meant.
+                  if (
+                    focused &&
+                    effectiveTransferAccountId(focused) !== undefined &&
+                    edits.payeeCanonical !== undefined
+                  ) {
+                    setNotice(
+                      t(
+                        'This row was a transfer. Giving it a payee makes it an ordinary transaction.',
+                      ),
+                    );
+                  }
+
                   review.edit(review.focusedIndex, edits, { chosenPayeeId });
                   openPane(null);
                 }}

@@ -97,13 +97,26 @@ function findTransferPayeeId(
  *
  * Used to turn a payee name the user typed into a payee id, so that the
  * user's choice wins over whatever the resolver matched.
+ *
+ * Two kinds of payee are NOT candidates:
+ *
+ *   - a TRANSFER payee. Actual creates one per account, with an EMPTY
+ *     name, and a transaction on it is a transfer to that account. A
+ *     lookup that matched one would turn a row into a transfer to an
+ *     arbitrary account.
+ *   - an empty name. It is not a payee: a row with no payee name would
+ *     match the first empty-named payee in the budget, which is a
+ *     transfer payee.
  */
 function findPayeeIdByName(
   name: string,
   payees: readonly ReviewPayeeRef[],
 ): string | undefined {
   const lower = name.trim().toLowerCase();
-  return payees.find(p => p.name.trim().toLowerCase() === lower)?.id;
+  if (lower === '') return undefined;
+  return payees.find(
+    p => p.transfer_acct == null && p.name.trim().toLowerCase() === lower,
+  )?.id;
 }
 
 /**

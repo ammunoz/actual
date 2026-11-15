@@ -270,9 +270,9 @@ export function readVendorMap(raw: string | undefined): VendorMap | undefined {
  */
 export function toReviewRows(
   transactions: readonly Record<string, unknown>[],
-  opts: { accountId?: string } = {},
+  opts: { accountId: string },
 ): ReviewRowInput[] {
-  const accountId = opts.accountId ?? '';
+  const { accountId } = opts;
   return transactions.map((trans, index) => {
     const importedId =
       typeof trans.imported_id === 'string' ? trans.imported_id : undefined;
@@ -830,6 +830,25 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // would be silently discarded.
       const { updates } = buildUpdates();
 
+      // The rows that are about to be updated are excluded from the
+      // import, so the import's update path cannot undo them.
+      const updatedRowKeys = new Set(updates.map(u => u.rowKey));
+
+      // The import payload is built BEFORE anything is written.
+      //
+      // Building it can refuse the import: a transfer whose target has no
+      // transfer payee, or a split whose legs do not add up. A refusal
+      // after the edits were written would leave the user's edits in the
+      // budget and the rest of the file unimported, with no way to tell
+      // that is what happened. Built first, a refusal happens with
+      // nothing written.
+      const payload = buildApplyPayload(state, {
+        accountId,
+        payees: payeeRefs(payees),
+        categories: categories.map(c => ({ id: c.id })),
+        updatedRowKeys,
+      });
+
       // A payee the user named that no existing payee matches has to be
       // created before the update can point at it: `transaction-update`
       // cannot create a payee from a name, because `payee_name` is not a
@@ -862,16 +881,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         await send('transaction-update', update);
         didChange = true;
       }
-
-      // The rows that were just updated are excluded from the import, so
-      // the import's update path cannot undo them.
-      const updatedRowKeys = new Set(updates.map(u => u.rowKey));
-      const payload = buildApplyPayload(state, {
-        accountId,
-        payees: payeeRefs(payees),
-        categories: categories.map(c => ({ id: c.id })),
-        updatedRowKeys,
-      });
 
       if (payload.length === 0) {
         // Every row was updated in place. The updates above were written,
@@ -928,7 +937,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       }
       if (importErrors && importErrors.length > 0) {
         setStatus('reviewing');
-        setError(importErrors[0].message);
+        // The edits above are already written, so the message says so:
+        // the user has to know that their edits are in the budget even
+        // though the import did not go through.
+        setError(
+          didChange
+            ? t('The edits were saved, but the import failed: {{message}}', {
+                message: importErrors[0].message,
+              })
+            : importErrors[0].message,
+        );
         return false;
       }
 

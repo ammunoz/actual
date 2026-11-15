@@ -794,13 +794,18 @@ const modalsSlice = createSlice({
     popModal(state) {
       state.modalStack = state.modalStack.slice(0, -1);
     },
-    removeModal(state, action: PayloadAction<{ name: string }>) {
+    removeModal(state, action: PayloadAction<{ name: Modal['name'] }>) {
       // A modal that closes ITSELF, wherever it is in the stack.
       //
       // `popModal` removes the TOP modal, which is the wrong one when
       // something else was pushed on top: a modal that opens another
       // modal and then finishes would close the other one and leave
       // itself on screen.
+      //
+      // The modals above it move down one place, and the stack is keyed
+      // by name and position, so they are re-mounted. That is the price
+      // of removing a modal from the middle, and it is cheaper than
+      // closing the wrong one.
       const { name } = action.payload;
       state.modalStack = state.modalStack.filter(modal => modal.name !== name);
     },

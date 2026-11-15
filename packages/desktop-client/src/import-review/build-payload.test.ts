@@ -14,7 +14,9 @@ import {
 const PAYEES = [
   { id: 'p-coffee', name: 'Demo Coffee Shop', transfer_acct: null },
   { id: 'p-two', name: 'Demo Payee Two', transfer_acct: null },
-  { id: 'p-transfer', name: 'Demo Checking', transfer_acct: 'a-checking' },
+  // A transfer payee has an EMPTY name in a real budget: Actual creates one
+  // per account, and the account's name is shown instead.
+  { id: 'p-transfer', name: '', transfer_acct: 'a-checking' },
 ];
 
 const CATEGORIES = [{ id: 'c-groceries', name: 'Groceries' }];
@@ -1045,6 +1047,24 @@ describe('buildApplyPayload — a user payee edit beats the resolver match', () 
     });
     expect(payload[0].payee).toBeUndefined();
     expect(payload[0].payee_name).toBe('Demo Brand New Payee');
+  });
+
+  it('never lands a row on a transfer payee', () => {
+    // Actual creates one payee per account for transfers, with an EMPTY
+    // name. A lookup that matched one would turn the row into a transfer
+    // to an arbitrary account — so an empty name matches nothing, and a
+    // transfer payee is not a candidate at all.
+    const state = buildStateWithEdit({ payeeCanonical: '' });
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: [
+        ...PAYEES,
+        { id: 'p-transfer', name: '', transfer_acct: 'a-other' },
+      ],
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBeUndefined();
+    expect(payload[0].payee_name).toBe('');
   });
 
   it('still uses the resolver match when the user did not choose a payee', () => {

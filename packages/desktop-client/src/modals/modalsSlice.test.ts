@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
+import type { Modal } from './modalsSlice';
 import { actions, reducer } from './modalsSlice';
 
 const { pushModal, removeModal, popModal } = actions;
 
-const review = { name: 'keyboard-import-transactions' } as never;
-const merge = { name: 'merge-unused-payees' } as never;
+const review: Modal = {
+  name: 'keyboard-import-transactions',
+  options: {
+    accountId: 'a-1',
+    filename: '/tmp/demo.ofx',
+    onImported: () => undefined,
+  },
+};
+
+const merge: Modal = {
+  name: 'merge-unused-payees',
+  options: { payeeIds: ['p-1'], targetPayeeId: 'p-2' },
+};
 
 describe('the modal stack', () => {
   it('removes a modal by name, wherever it is', () => {
@@ -28,7 +40,7 @@ describe('the modal stack', () => {
 
   it('leaves the stack alone when the modal is not there', () => {
     let state = reducer(undefined, pushModal({ modal: review }));
-    state = reducer(state, removeModal({ name: 'nope' }));
+    state = reducer(state, removeModal({ name: 'merge-unused-payees' }));
     expect(state.modalStack).toHaveLength(1);
   });
 
