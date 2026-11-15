@@ -38,6 +38,7 @@ import type {
   ImportPreviewState,
   PreviewDecision,
   PreviewEdits,
+  PreviewRow,
   PreviewSummary,
   ResolvedRow,
   ReviewAccount,
@@ -49,8 +50,14 @@ import type {
   UnsavedWork,
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
+import { q } from '@actual-app/core/shared/query';
 import { amountToInteger } from '@actual-app/core/shared/util';
-import type { ImportTransactionEntity } from '@actual-app/core/types/models';
+import type {
+  ImportTransactionEntity,
+  TransactionEntity,
+} from '@actual-app/core/types/models';
+
+import { aqlQuery } from '#queries/aqlQuery';
 
 import {
   findImportedTransactions,
@@ -64,6 +71,8 @@ import {
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import { splitErrorMessage } from './split-error-labels';
+import { buildSplitReconciliation, childrenOf } from './split-reconcile';
+import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
 import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
@@ -600,6 +609,70 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // ref, because a write to it must never re-parse the file.
   }, [filename, accountId, t]);
 
+  /**
+   * Rewrite the legs of the splits that are already in the budget.
+   *
+   * The budget is asked for the transactions and their legs, because the
+   * review's legs are matched to the existing ones IN ORDER: a leg that
+   * is already there is updated rather than replaced, so anything the
+   * user put on it survives.
+   *
+   * The difference is sent as one batch, which is what upstream's own
+   * desktop UI sends when a split is edited.
+   */
+  const reconcileSplits = useCallback(async (rows: readonly PreviewRow[]) => {
+    const parentIds = rows
+      .map(row => matchedTransactionIds.current.get(rowKey(row)))
+      .filter((id): id is string => !!id);
+
+    if (parentIds.length === 0) return;
+
+    const { data } = await aqlQuery(
+      q('transactions')
+        .filter({ id: { $oneof: parentIds } })
+        .select('*'),
+    );
+    const transactions = (
+      Array.isArray(data) ? data : []
+    ) as TransactionEntity[];
+
+    const added: TransactionEntity[] = [];
+    const updated: SplitTransactionUpdate[] = [];
+    const deleted: { id: string }[] = [];
+
+    for (const row of rows) {
+      const parentId = matchedTransactionIds.current.get(rowKey(row));
+      if (!parentId) continue;
+      const parent = transactions.find(
+        transaction => transaction.id === parentId,
+      );
+      if (!parent) continue;
+
+      const reconciliation = buildSplitReconciliation({
+        parent,
+        children: childrenOf(transactions, parentId),
+        legs: row.edits.splits ?? [],
+      });
+      added.push(...reconciliation.added);
+      updated.push(...reconciliation.updated);
+      deleted.push(...reconciliation.deleted);
+    }
+
+    if (added.length === 0 && updated.length === 0 && deleted.length === 0) {
+      return;
+    }
+
+    await send('transactions-batch-update', {
+      added,
+      // The cast is here, and only here: a split's parent has no category
+      // of its own — the legs carry them — so the parent's category has to
+      // be CLEARED, and `null` is how the database says "no category". The
+      // column is nullable; the entity type does not say so.
+      updated: updated as Partial<TransactionEntity>[],
+      deleted,
+    });
+  }, []);
+
   const buildUpdates = useCallback(() => {
     if (!state) return { updates: [] };
     return buildUpdatePayload(state, {
@@ -793,21 +866,21 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     let didChange = false;
 
     try {
-      // A row that is already in the budget cannot be SPLIT, and this is
-      // where that is caught.
-      //
-      // Neither path can apply one: the update path writes columns, and
-      // the import's update path keeps the existing transaction and
-      // never creates the legs. So the split would be dropped and the
-      // import would report success. Failing here says so instead.
-      //
-      // The split editor refuses it too, but only once the import
-      // preview has reported which rows matched — and the rows are on
-      // screen before that has happened, so this is the guarantee.
       const livePayeeNames = new Set(
         payees.map(payee => normalizePayeeName(payee.name)),
       );
-      const splitOnExisting = state.rows.find(row => {
+
+      // A row the user SPLIT and that is already in the budget is
+      // reconciled: the legs are rewritten, the parent is updated, and the
+      // row is not sent to the import at all.
+      //
+      // The import cannot do this on its own. Its UPDATE path writes
+      // columns on the transaction it matched and never touches the legs,
+      // so the user's new split would be dropped and the import would
+      // report success. The reconciliation does what upstream's own
+      // desktop UI does when a split is edited: it rewrites the legs and
+      // sends the difference.
+      const splitRows = state.rows.filter(row => {
         if (!isSplitRow(row.edits)) return false;
         // A row that is thrown away, or that the gate holds back, does
         // not land at all, so it cannot lose a split.
@@ -818,11 +891,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (!evaluation.willImport) return false;
         return matchedTransactionIds.current.has(rowKey(row));
       });
-      if (splitOnExisting) {
-        setStatus('reviewing');
-        setError(t('A row that is already in the budget cannot be split'));
-        return false;
-      }
 
       // Rows the user edited AND that matched an existing transaction are
       // updated in place: Actual's import UPDATE path keeps the existing
@@ -833,6 +901,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The rows that are about to be updated are excluded from the
       // import, so the import's update path cannot undo them.
       const updatedRowKeys = new Set(updates.map(u => u.rowKey));
+
+      // The splits that are reconciled are excluded too: the
+      // reconciliation writes the parent and its legs, and the import
+      // would take the parent's FITID-matched row down its update path,
+      // which cannot touch the legs.
+      for (const row of splitRows) {
+        updatedRowKeys.add(rowKey(row));
+      }
 
       // The import payload is built BEFORE anything is written.
       //
@@ -848,6 +924,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         categories: categories.map(c => ({ id: c.id })),
         updatedRowKeys,
       });
+
+      // The splits that are already in the budget are reconciled FIRST,
+      // so the legs are in place before anything else is written.
+      if (splitRows.length > 0) {
+        await reconcileSplits(splitRows);
+        didChange = true;
+      }
 
       // A payee the user named that no existing payee matches has to be
       // created before the update can point at it: `transaction-update`
@@ -997,6 +1080,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, [
     accountId,
     buildUpdates,
+    reconcileSplits,
     state,
     payees,
     categories,

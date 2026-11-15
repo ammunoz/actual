@@ -404,16 +404,9 @@ export function KeyboardImportModal({
           setNotice(t('This row is a transfer, so it cannot be split'));
           break;
         }
-        // A row that is already in the budget is edited IN PLACE, and
-        // that path writes columns: it cannot create the legs a split is
-        // made of. The split would be dropped silently, so the review
-        // says so instead.
-        if (review.isAlreadyImported(rowKey(focused))) {
-          setNotice(
-            t('This row is already in the budget, so it cannot be split here.'),
-          );
-          break;
-        }
+        // A row that is already in the budget can be split: the apply
+        // step rewrites the legs of the transaction it matched, the same
+        // way upstream's own UI does when a split is edited.
         openPane({ kind: 'split' });
         break;
       }
@@ -783,6 +776,12 @@ export function KeyboardImportModal({
                   </>
                 ) : null}
 
+                {focused && review.isAlreadyImported(rowKey(focused)) ? (
+                  <Text data-testid="import-review-already-imported">
+                    <Trans>This transaction is already in the budget</Trans>
+                  </Text>
+                ) : null}
+
                 {focusedMemo ? (
                   <Text data-testid="import-review-notes">
                     <Trans>Notes</Trans>: {focusedMemo}
@@ -870,20 +869,10 @@ export function KeyboardImportModal({
                 row={focused}
                 categories={review.categories}
                 onCommit={(edits: PreviewEdits) => {
-                  // The row may have been matched to a transaction that
-                  // is already in the budget AFTER the pane opened: the
-                  // rows are on screen before the import preview has
-                  // reported which they matched. Such a row cannot be
-                  // split, and the pane stays open so the work is not
-                  // lost.
-                  if (review.isAlreadyImported(rowKey(focused))) {
-                    setNotice(
-                      t(
-                        'This row is already in the budget, so it cannot be split here.',
-                      ),
-                    );
-                    return;
-                  }
+                  // A row that is already in the budget can be split:
+                  // the apply step rewrites the legs of the transaction
+                  // it matched, the same way upstream's own UI does when
+                  // a split is edited.
                   review.edit(review.focusedIndex, edits);
                   openPane(null);
                 }}

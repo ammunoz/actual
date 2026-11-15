@@ -440,6 +440,84 @@ describe('useImportReview', () => {
     );
   });
 
+  it('reconciles the legs of a split that is already in the budget', async () => {
+    // The row is already in the budget and the user split it. The import
+    // cannot do this on its own — its update path writes columns and
+    // never touches the legs — so the review rewrites them.
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          return {
+            data: [
+              {
+                id: 'txn-1',
+                account: 'a-1',
+                date: '2026-09-07',
+                amount: -2500,
+                payee: 'p-2',
+                is_parent: true,
+                imported_id: 'FITID-1',
+              },
+              {
+                id: 'child-1',
+                account: 'a-1',
+                date: '2026-09-07',
+                amount: -2500,
+                category: 'c-1',
+                is_child: true,
+                parent_id: 'txn-1',
+                sort_order: -1,
+              },
+            ],
+            dependencies: [],
+          };
+        case 'transactions-batch-update':
+          return { added: [], updated: [], deleted: [] };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(0, {
+        splits: [{ amountCents: -1500, categoryId: 'c-1' }],
+      });
+    });
+
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    // The legs were rewritten, and the row was NOT sent to the import:
+    // the import's update path cannot touch the legs.
+    expect(sendMock).toHaveBeenCalledWith(
+      'transactions-batch-update',
+      expect.objectContaining({
+        updated: expect.arrayContaining([
+          expect.objectContaining({ id: 'txn-1', is_parent: true }),
+          expect.objectContaining({ id: 'child-1', amount: -1500 }),
+        ]),
+      }),
+    );
+  });
+
   it('undoes an edit', async () => {
     const { result } = await renderReview();
 
