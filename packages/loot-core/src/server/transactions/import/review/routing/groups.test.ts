@@ -74,7 +74,9 @@ describe('rangeOfGroup', () => {
     expect(range?.count).toBe(3);
   });
 
-  it('says nothing for a group that is not there', () => {
+  it('says nothing when no group starts at that row', () => {
+    // The group at row 0 covers rows 0-4; there is no group that STARTS
+    // at row 3.
     expect(
       rangeOfGroup([{ start: 0, accountId: 'a-1' }], 3, 5),
     ).toBeUndefined();
@@ -206,10 +208,41 @@ describe('setRowAccount', () => {
     ]);
   });
 
+  it('merges the group below when the cursor is inside a group', () => {
+    // Rows 1-2 to a-1, rows 3-6 to a-2, and the cursor is on row 2
+    // picking a-2: the a-2 group starts at row 2, so it is one group
+    // again.
+    const groups = setRowAccount(
+      [
+        { start: 0, accountId: 'a-1' },
+        { start: 2, accountId: 'a-2' },
+      ],
+      1,
+      'a-2',
+      6,
+    );
+    expect(groups).toEqual([
+      { start: 0, accountId: 'a-1' },
+      { start: 1, accountId: 'a-2' },
+    ]);
+  });
+
+  it('routes the last row of the review', () => {
+    const groups = setRowAccount([{ start: 0, accountId: 'a-1' }], 5, 'a-2', 6);
+    expect(groups).toEqual([
+      { start: 0, accountId: 'a-1' },
+      { start: 5, accountId: 'a-2' },
+    ]);
+  });
+
   it('leaves the routing alone for a row that is not there', () => {
     const groups = [{ start: 0, accountId: 'a-1' }];
     expect(setRowAccount(groups, 9, 'a-2', 3)).toEqual(groups);
     expect(setRowAccount(groups, -1, 'a-2', 3)).toEqual(groups);
+  });
+
+  it('leaves the routing alone when there are no rows', () => {
+    expect(setRowAccount([], 0, 'a-1', 0)).toEqual([]);
   });
 
   it('does not mutate the routing it was given', () => {
@@ -309,12 +342,39 @@ describe('isValidRouting', () => {
     ).toBe(false);
   });
 
+  it('refuses groups that do not start in order', () => {
+    expect(
+      isValidRouting(
+        [
+          { start: 0, accountId: 'a-1' },
+          { start: 3, accountId: 'a-2' },
+          { start: 2, accountId: 'a-3' },
+        ],
+        6,
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a group that starts at or past the last row', () => {
+    expect(
+      isValidRouting(
+        [
+          { start: 0, accountId: 'a-1' },
+          { start: 6, accountId: 'a-2' },
+        ],
+        6,
+      ),
+    ).toBe(false);
+  });
+
   it('refuses nonsense', () => {
     expect(isValidRouting(undefined, 6)).toBe(false);
     expect(isValidRouting('nonsense', 6)).toBe(false);
     expect(isValidRouting([{ start: 0 }], 6)).toBe(false);
     expect(isValidRouting([{ start: 0, accountId: '' }], 6)).toBe(false);
     expect(isValidRouting([{ start: 0.5, accountId: 'a-1' }], 6)).toBe(false);
+    expect(isValidRouting([null], 6)).toBe(false);
+    expect(isValidRouting(['nonsense'], 6)).toBe(false);
   });
 
   it('is nothing for an empty review', () => {

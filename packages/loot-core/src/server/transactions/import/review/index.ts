@@ -35,14 +35,16 @@ export {
 } from './resolver/flags';
 export type { GateOutcome } from './resolver/flags';
 
+export { rebuildPreviewState } from './preview/rebuild';
+
 export {
   accountForRow,
   defaultGroups,
   distinctAccounts,
   groupAt,
   groupRanges,
+  isSameRouting,
   isValidRouting,
-  rangeOfGroup,
   rowsOfGroup,
   setAllRowsAccount,
   setRowAccount,
@@ -84,6 +86,7 @@ export {
   updateEdits,
   validateSplitRow,
   validateTransferRow,
+  withCarriedWork,
   withPayee,
   withSplit,
   withTransfer,

@@ -76,6 +76,10 @@ export function defaultGroups(rowCount: number, accountId: string): RowGroup[] {
  *
  * The groups are sorted and do not overlap, so the last one that starts at
  * or before the row is the one the row belongs to.
+ *
+ * A row PAST the last group gets the last group: the bounds are the
+ * caller's job, and a cursor that has been left behind should not make a
+ * row look like it belongs to no account at all.
  */
 export function groupAt(
   groups: readonly RowGroup[],
@@ -102,14 +106,49 @@ export function accountForRow(
 
 /**
  * Pure: the range a group covers.
+ *
+ * `groupStart` is the row a group BEGINS at, not a row the group
+ * contains: the group's rows run from there to where the next group
+ * starts.
  */
 export function rangeOfGroup(
   groups: readonly RowGroup[],
-  index: number,
+  groupStart: number,
   rowCount: number,
 ): GroupRange | undefined {
-  const position = groups.findIndex(group => group.start === index);
+  const position = groups.findIndex(group => group.start === groupStart);
   if (position === -1) return undefined;
+  return rangeAt(groups, position, rowCount);
+}
+
+/**
+ * Pure: the rows a group covers.
+ */
+export function rowsOfGroup(
+  groups: readonly RowGroup[],
+  groupStart: number,
+  rowCount: number,
+): number[] {
+  const range = rangeOfGroup(groups, groupStart, rowCount);
+  if (!range) return [];
+  const rows: number[] = [];
+  for (let row = range.start; row <= range.end; row++) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Pure: the range of the group at a position.
+ *
+ * The end of a group is where the next one starts, so the last group
+ * ends with the last row.
+ */
+function rangeAt(
+  groups: readonly RowGroup[],
+  position: number,
+  rowCount: number,
+): GroupRange {
   const group = groups[position];
   const next = groups[position + 1];
   const end = next ? next.start - 1 : rowCount - 1;
@@ -122,23 +161,6 @@ export function rangeOfGroup(
 }
 
 /**
- * Pure: the rows a group covers.
- */
-export function rowsOfGroup(
-  groups: readonly RowGroup[],
-  index: number,
-  rowCount: number,
-): number[] {
-  const range = rangeOfGroup(groups, index, rowCount);
-  if (!range) return [];
-  const rows: number[] = [];
-  for (let row = range.start; row <= range.end; row++) {
-    rows.push(row);
-  }
-  return rows;
-}
-
-/**
  * Pure: every group, with the rows it covers.
  *
  * This is what the interface renders: a header per group.
@@ -147,16 +169,7 @@ export function groupRanges(
   groups: readonly RowGroup[],
   rowCount: number,
 ): GroupRange[] {
-  return groups.map((group, position) => {
-    const next = groups[position + 1];
-    const end = next ? next.start - 1 : rowCount - 1;
-    return {
-      group,
-      start: group.start,
-      end,
-      count: end - group.start + 1,
-    };
-  });
+  return groups.map((_group, position) => rangeAt(groups, position, rowCount));
 }
 
 /**
@@ -187,7 +200,9 @@ export function distinctAccounts(groups: readonly RowGroup[]): string[] {
  *
  * Picking the account the row's group ALREADY has changes nothing: two
  * adjacent groups with the same account are one group, and the routing
- * says so.
+ * says so. The routing that comes back is then EQUAL to the one that
+ * went in, but not the same array: compare the two with
+ * `isSameRouting`, not with `===`.
  */
 export function setRowAccount(
   groups: readonly RowGroup[],
@@ -210,14 +225,33 @@ export function setRowAccount(
   }
   replacement.push({ start: index, accountId });
 
-  const next2 = [
+  const candidates = [
     ...groups.slice(0, position),
     ...replacement,
     ...groups.slice(position + 1),
   ];
 
-  return mergeAdjacent(next2);
+  return mergeAdjacent(candidates);
 }
+/**
+ * Pure: whether two routings are the same.
+ *
+ * The routing functions return a NEW array every time, so "did this
+ * change?" cannot be answered by identity. It matters: a routing change
+ * re-resolves every row, and doing that for a routing that did not change
+ * would throw away nothing and cost a lot.
+ */
+export function isSameRouting(
+  a: readonly RowGroup[],
+  b: readonly RowGroup[],
+): boolean {
+  if (a.length !== b.length) return false;
+  return a.every(
+    (group, index) =>
+      group.start === b[index].start && group.accountId === b[index].accountId,
+  );
+}
+
 /**
  * Pure: the routing that puts EVERY row into one account.
  *
@@ -286,7 +320,7 @@ export function isValidRouting(
   let previousAccount: string | undefined;
   for (const group of groups) {
     if (typeof group !== 'object' || group === null) return false;
-    const { start, accountId } = group as Partial<RowGroup>;
+    const { start, accountId } = group as Record<string, unknown>;
     if (typeof start !== 'number' || !Number.isInteger(start)) return false;
     if (typeof accountId !== 'string' || accountId.length === 0) return false;
     // The groups must cover the rows exactly: they start at the first
