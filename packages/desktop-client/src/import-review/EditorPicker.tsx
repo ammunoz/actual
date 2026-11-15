@@ -41,6 +41,16 @@ export type EditorPickerProps = {
    * caller's business, and the caller may refuse it.
    */
   onPick: (suggestion: EditorSuggestion | null, text: string) => void;
+  /**
+   * Whether the field takes the focus when it mounts.
+   *
+   * A pane with one picker wants it. A pane with a picker per leg does NOT:
+   * every mounted field would claim the focus, and the last one to mount
+   * would win.
+   */
+  autoFocus?: boolean;
+  /** The test id of the field. */
+  testId?: string;
 };
 
 /**
@@ -68,6 +78,8 @@ export function EditorPicker({
   allowNew,
   errorText,
   onPick,
+  autoFocus = true,
+  testId = 'import-review-editor-input',
 }: EditorPickerProps) {
   const [text, setText] = useState(initialText);
   // The field starts out showing a name, so the highlight starts on that
@@ -76,6 +88,31 @@ export function EditorPicker({
     exactMatchIndex(filterSuggestions(suggestions, initialText), initialText),
   );
   const [refused, setRefused] = useState(false);
+  // The value the field last committed.
+  //
+  // The field is uncontrolled — the text the user is typing is a filter,
+  // not a choice — so this is what the field goes back to when it loses
+  // the focus without a pick.
+  const [committedText, setCommittedText] = useState(initialText);
+
+  // The field follows the value it was given when that value changes,
+  // the way the text field does. Nothing changes a suggestion's value
+  // from outside the picker today, but a picker that could be
+  // pre-filled programmatically would otherwise show a stale name.
+  const [shownInitialText, setShownInitialText] = useState(initialText);
+  if (initialText !== shownInitialText) {
+    setShownInitialText(initialText);
+    setCommittedText(initialText);
+    setText(initialText);
+    setRefused(false);
+  }
+  // Whether the field has the focus.
+  //
+  // The list of suggestions is only shown while the field has it. A
+  // picker that always shows its list is fine when there is ONE picker,
+  // but the split editor has one per leg: twenty open lists would bury
+  // the table they belong to.
+  const [focused, setFocused] = useState(autoFocus);
 
   const listboxId = useId();
   const optionId = (index: number) => `${listboxId}-option-${index}`;
@@ -86,6 +123,10 @@ export function EditorPicker({
   );
 
   const pick = (suggestion: EditorSuggestion | null, value: string) => {
+    // The field shows what was picked, rather than keeping the
+    // half-typed name that was never chosen.
+    if (suggestion) setText(suggestion.name);
+    setCommittedText(value);
     onPick(suggestion, value);
   };
 
@@ -126,17 +167,30 @@ export function EditorPicker({
       <Text>{label}</Text>
       <Input
         value={text}
-        autoFocus
+        autoFocus={autoFocus}
         // The list is a listbox and the highlighted entry is pointed at
         // from the field, so a screen reader says which suggestion is
         // about to be picked.
         role="combobox"
         aria-label={label}
         aria-autocomplete="list"
-        aria-expanded={matches.length > 0}
-        aria-controls={matches.length > 0 ? listboxId : undefined}
-        aria-activedescendant={highlight >= 0 ? optionId(highlight) : undefined}
-        data-testid="import-review-editor-input"
+        aria-expanded={focused && matches.length > 0}
+        aria-controls={focused && matches.length > 0 ? listboxId : undefined}
+        aria-activedescendant={
+          focused && highlight >= 0 ? optionId(highlight) : undefined
+        }
+        data-testid={testId}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false);
+          // A field that loses the focus without a pick goes back to
+          // the value it last committed: the text the user typed was a
+          // filter, not a choice.
+          if (text !== committedText) {
+            setText(committedText);
+            setRefused(false);
+          }
+        }}
         onChangeValue={value => {
           setText(value);
           setRefused(false);
@@ -153,7 +207,7 @@ export function EditorPicker({
         <Text style={{ color: theme.errorText }}>{errorText}</Text>
       ) : null}
 
-      {matches.length > 0 ? (
+      {focused && matches.length > 0 ? (
         <View
           id={listboxId}
           role="listbox"
@@ -164,27 +218,75 @@ export function EditorPicker({
             overflowY: 'auto',
           }}
         >
-          {matches.map((suggestion, index) => (
-            <View
-              key={suggestion.id}
-              id={optionId(index)}
-              role="option"
-              aria-selected={index === highlight}
-              data-testid="import-review-editor-option"
-              data-highlighted={index === highlight ? 'true' : 'false'}
-              onClick={() => pick(suggestion, suggestion.name)}
-              style={{
-                padding: '4px 8px',
-                cursor: 'default',
-                backgroundColor:
-                  index === highlight
-                    ? theme.menuAutoCompleteBackgroundHover
-                    : 'transparent',
-              }}
-            >
-              <Text>{suggestion.name}</Text>
-            </View>
-          ))}
+          {matches.map((suggestion, index) => {
+            // The group is shown once, as a header, at the top of its
+            // suggestions. The suggestions are in group order, so the
+            // header appears exactly where its group starts.
+            const groupName = suggestion.groupName;
+            const showGroup =
+              groupName !== undefined &&
+              groupName !== matches[index - 1]?.groupName;
+
+            return (
+              <View key={suggestion.id}>
+                {showGroup ? (
+                  <View
+                    data-testid="import-review-editor-group"
+                    style={{
+                      padding: '4px 8px 0',
+                    }}
+                  >
+                    <Text style={{ color: theme.pageTextSubdued }}>
+                      {groupName}
+                    </Text>
+                  </View>
+                ) : null}
+
+                <View
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={index === highlight}
+                  // The accessible name carries the group, so a screen
+                  // reader says which of two same-named categories is
+                  // meant. The visible name is still the start of it.
+                  aria-label={
+                    groupName
+                      ? `${suggestion.name}, ${groupName}`
+                      : suggestion.name
+                  }
+                  data-testid="import-review-editor-option"
+                  data-highlighted={index === highlight ? 'true' : 'false'}
+                  // The pick happens on MOUSE DOWN, not on click: the
+                  // input loses the focus when the mouse goes down, and
+                  // the blur closes the list — so a click would land on
+                  // a list that is already gone. Preventing the default
+                  // keeps the focus on the input, and the list stays
+                  // open until the pick has been made.
+                  onMouseDown={event => {
+                    event.preventDefault();
+                    pick(suggestion, suggestion.name);
+                  }}
+                  // A click that a screen reader or the keyboard
+                  // synthesised carries no pointer detail, and it never
+                  // had a mouse down: that is the only path assistive
+                  // activation has.
+                  onClick={event => {
+                    if (event.detail === 0) pick(suggestion, suggestion.name);
+                  }}
+                  style={{
+                    padding: '4px 8px',
+                    cursor: 'default',
+                    backgroundColor:
+                      index === highlight
+                        ? theme.menuAutoCompleteBackgroundHover
+                        : 'transparent',
+                  }}
+                >
+                  <Text>{suggestion.name}</Text>
+                </View>
+              </View>
+            );
+          })}
         </View>
       ) : null}
     </View>

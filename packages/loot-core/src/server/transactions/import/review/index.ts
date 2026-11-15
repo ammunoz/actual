@@ -68,6 +68,9 @@ export {
   summarize,
   unsavedWork,
   updateEdits,
+  validateSplitRow,
+  withSplit,
+  withTransfer,
   withTrustLevel,
 } from './preview/preview-state';
 export type {
@@ -98,6 +101,7 @@ export {
   splitResidualCents,
   splitResidualDirection,
   splitTotalCents,
+  SplitValidationError,
   uncategorizedLegCount,
   validateSplit,
 } from './preview/split-primitives';

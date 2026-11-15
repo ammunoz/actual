@@ -1,8 +1,6 @@
-import { useMemo, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { Input } from '@actual-app/components/input';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -20,6 +18,7 @@ import {
 } from './editor-mode';
 import type { EditorMode } from './editor-mode';
 import { EditorPicker } from './EditorPicker';
+import { TextField } from './TextField';
 
 export type RowEditorProps = {
   /** The row being edited. */
@@ -41,54 +40,6 @@ export type RowEditorProps = {
   onCommit: (edits: PreviewEdits, chosenPayeeId?: string) => void;
 };
 
-/**
- * A text field that commits on enter.
- */
-function TextField({
-  label,
-  initialText,
-  errorText,
-  isValid,
-  onCommit,
-}: {
-  label: string;
-  initialText: string;
-  errorText?: string;
-  isValid: (text: string) => boolean;
-  onCommit: (text: string) => void;
-}) {
-  const [text, setText] = useState(initialText);
-  const [refused, setRefused] = useState(false);
-
-  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return;
-    event.preventDefault();
-    if (!isValid(text)) {
-      setRefused(true);
-      return;
-    }
-    onCommit(text);
-  };
-
-  return (
-    <View style={{ gap: 4 }}>
-      <Text>{label}</Text>
-      <Input
-        value={text}
-        autoFocus
-        data-testid="import-review-editor-input"
-        onChangeValue={value => {
-          setText(value);
-          setRefused(false);
-        }}
-        onKeyDown={onKeyDown}
-      />
-      {refused && errorText ? (
-        <Text style={{ color: theme.errorText }}>{errorText}</Text>
-      ) : null}
-    </View>
-  );
-}
 /**
  * The editing pane: the field the user is editing for the focused row.
  *

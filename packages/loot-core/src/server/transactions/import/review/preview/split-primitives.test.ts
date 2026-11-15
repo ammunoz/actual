@@ -222,12 +222,15 @@ describe('validateSplit', () => {
     expect(err?.code).toBe('SPLIT-005');
   });
 
-  it('treats an empty-string categoryId as set', () => {
+  it('treats an empty-string categoryId as NOT set', () => {
+    // The empty string is the "cleared" marker, not a category id: a leg
+    // with one has no category, and the apply step would send it as
+    // one.
     const legs: PreviewSplitLeg[] = [
       { amountCents: -1500, categoryId: '' },
-      { amountCents: -1000, categoryId: '' },
+      { amountCents: -1000, categoryId: 'c-1' },
     ];
-    expect(validateSplit(legs, -2500)).toBeNull();
+    expect(validateSplit(legs, -2500)?.code).toBe('SPLIT-005');
   });
 
   it('the message carries the code and never a category name', () => {

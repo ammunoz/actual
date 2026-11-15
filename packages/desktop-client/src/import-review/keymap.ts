@@ -160,8 +160,7 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 's',
     action: 'edit-split',
-    // The split editor is not part of this slice either.
-    showInHelp: false,
+    showInHelp: true,
   },
   {
     keys: 'tab',

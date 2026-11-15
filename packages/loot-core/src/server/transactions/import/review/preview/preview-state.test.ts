@@ -15,6 +15,9 @@ import {
   summarize,
   unsavedWork,
   updateEdits,
+  validateSplitRow,
+  withSplit,
+  withTransfer,
   withTrustLevel,
 } from './preview-state';
 
@@ -557,5 +560,123 @@ describe('unsavedWork', () => {
     const accepted = applyDecision(state, 't-1', 'accept');
     const next = updateEdits(accepted, 't-1', { memo: 'a note' });
     expect(unsavedWork(next)).toEqual({ hasWork: true, decided: 1, edited: 1 });
+  });
+});
+
+describe('withSplit', () => {
+  it('sets the split', () => {
+    const edits = withSplit({}, [{ amountCents: -500, categoryId: 'c-1' }]);
+    expect(edits.splits).toHaveLength(1);
+    expect(edits.splits?.[0].categoryId).toBe('c-1');
+  });
+
+  it('clears the transfer, because a row is either a transfer or a split', () => {
+    const edits = withSplit({ transferAccountId: 'a-2' }, [
+      { amountCents: -500, categoryId: 'c-1' },
+    ]);
+    expect(edits.transferAccountId).toBeUndefined();
+    expect(edits.splits).toHaveLength(1);
+  });
+
+  it('un-splits when the split is undefined', () => {
+    const edits = withSplit({ splits: [{ amountCents: -500 }] }, undefined);
+    expect(edits.splits).toBeUndefined();
+    expect(isSplitRow(edits)).toBe(false);
+  });
+
+  it('keeps the other edits', () => {
+    const edits = withSplit(
+      { payeeCanonical: 'Krogger', memo: 'a note', categoryId: 'c-1' },
+      [{ amountCents: -500 }],
+    );
+    expect(edits.payeeCanonical).toBe('Krogger');
+    expect(edits.memo).toBe('a note');
+    expect(edits.categoryId).toBe('c-1');
+  });
+
+  it('does not mutate the edits it was given', () => {
+    const original = { transferAccountId: 'a-2' };
+    withSplit(original, [{ amountCents: -500 }]);
+    expect(original.transferAccountId).toBe('a-2');
+  });
+});
+
+describe('withTransfer', () => {
+  it('sets the transfer', () => {
+    const edits = withTransfer({}, 'a-2');
+    expect(edits.transferAccountId).toBe('a-2');
+  });
+
+  it('clears the split, because a row is either a transfer or a split', () => {
+    const edits = withTransfer({ splits: [{ amountCents: -500 }] }, 'a-2');
+    expect(edits.splits).toBeUndefined();
+    expect(isSplitRow(edits)).toBe(false);
+  });
+
+  it('clears the transfer when the account is undefined', () => {
+    const edits = withTransfer({ transferAccountId: 'a-2' }, undefined);
+    expect(edits.transferAccountId).toBeUndefined();
+  });
+
+  it('keeps the other edits', () => {
+    const edits = withTransfer({ payeeCanonical: 'Krogger' }, 'a-2');
+    expect(edits.payeeCanonical).toBe('Krogger');
+  });
+});
+
+describe('validateSplitRow', () => {
+  it('has nothing to say about a row with no split', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    expect(validateSplitRow(state.rows[0])).toBeNull();
+  });
+
+  it('accepts a split that adds up and is categorised', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', {
+      splits: [
+        { amountCents: -1500, categoryId: 'c-1' },
+        { amountCents: -1000, categoryId: 'c-2' },
+      ],
+    });
+    expect(validateSplitRow(next.rows[0])).toBeNull();
+  });
+
+  it('rejects a split that does not add up to the row', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', {
+      splits: [
+        { amountCents: -1500, categoryId: 'c-1' },
+        { amountCents: -900, categoryId: 'c-2' },
+      ],
+    });
+    expect(validateSplitRow(next.rows[0])?.code).toBe('SPLIT-004');
+  });
+
+  it('rejects a leg with no category', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', {
+      splits: [
+        { amountCents: -1500, categoryId: 'c-1' },
+        { amountCents: -1000 },
+      ],
+    });
+    expect(validateSplitRow(next.rows[0])?.code).toBe('SPLIT-005');
+  });
+
+  it('rejects a row that is a transfer as well', () => {
+    // The resolver's auto-detect can put a row on the transfer path
+    // without the user asking for it, so the check cannot be left to
+    // the editor.
+    const state = buildPreviewState(
+      [mkRow({ matchedTransferAccountId: 'a-2' })],
+      'cautious',
+    );
+    const next = updateEdits(state, 't-1', {
+      splits: [
+        { amountCents: -1500, categoryId: 'c-1' },
+        { amountCents: -1000, categoryId: 'c-2' },
+      ],
+    });
+    expect(validateSplitRow(next.rows[0])?.code).toBe('SPLIT-006');
   });
 });

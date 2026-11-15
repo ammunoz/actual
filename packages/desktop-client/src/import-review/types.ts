@@ -80,7 +80,16 @@ export type ImportReviewTransaction = {
   cleared?: boolean;
   subtransactions?: Array<{
     amount: number;
-    category?: string;
+    /**
+     * The leg's category id, or `null` for a leg that has none.
+     *
+     * `null` and "omitted" are NOT the same thing: upstream's
+     * `makeChild` decides inherit-vs-override with
+     * `"category" in data ? data.category : parent.category`, so a leg
+     * without the key INHERITS the parent's category. `null` says "no
+     * category" outright, which is what a leg without one means.
+     */
+    category?: string | null;
   }>;
   /**
    * Set on a row the user explicitly dropped. The row is still sent so it

@@ -8,19 +8,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
   buildPreviewState,
   emptyVendorMap,
+  evaluateRow,
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
+  isSplitRow,
   isUsableDate,
   normalizePayeeName,
   resolvePayees,
   rowKey,
+  SplitValidationError,
   summarize,
   unsavedWork,
   updateEdits,
@@ -45,6 +49,7 @@ import type {
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { amountToInteger } from '@actual-app/core/shared/util';
+import type { ImportTransactionEntity } from '@actual-app/core/types/models';
 
 import {
   buildApplyPayload,
@@ -53,6 +58,7 @@ import {
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
+import { splitErrorMessage } from './split-error-labels';
 import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
@@ -173,6 +179,22 @@ export type ImportReviewState = {
    * The UI reads this to badge the rows and to explain the focused row.
    */
   evaluations: ReadonlyMap<string, RowEvaluation>;
+  /**
+   * Whether the row is ALREADY in the budget.
+   *
+   * The import preview reports which existing transaction each row
+   * matched. A row that matched is edited IN PLACE, and that path
+   * writes columns: it cannot create the legs a split is made of. So
+   * such a row cannot be split, and the review says so rather than
+   * dropping the split on the floor.
+   *
+   * KNOWN LIMIT: the preview only reports a match whose fields DIFFER
+   * from the existing transaction's, so a row that matches an
+   * unchanged transaction is not reported here. The apply step has the
+   * same limit — and it is the apply step, not this, that is the
+   * guarantee that a split is never dropped silently.
+   */
+  isAlreadyImported: (key: string) => boolean;
   /**
    * What closing the review would throw away: the rows the user decided
    * and the rows the user edited.
@@ -306,6 +328,7 @@ function payeeRefs(payees: readonly ReviewPayee[]): readonly ReviewPayeeRef[] {
  */
 export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const { accountId, filename, onImported } = opts;
+  const { t } = useTranslation();
 
   const [status, setStatus] = useState<ReviewStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -417,13 +440,39 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
             closed: a.closed === 1,
           }),
         );
-        const categoryList: readonly ReviewCategory[] =
-          categoryEntities.list.map(c => ({
-            id: c.id,
-            name: c.name,
-            hidden: c.hidden,
-            isIncome: c.is_income,
+        // The categories, in the order the budget GROUPS them, each
+        // carrying its group name.
+        //
+        // The group matters: the split editor asks the user to pick a
+        // category for every leg, and two groups can hold categories with
+        // the same name. A flat list cannot tell them apart.
+        const grouped = categoryEntities.grouped ?? [];
+        const groupedCategories: ReviewCategory[] = grouped.flatMap(group =>
+          (group.categories ?? []).map(category => ({
+            id: category.id,
+            name: category.name,
+            groupName: group.name,
+            hidden: category.hidden,
+            isIncome: category.is_income,
+          })),
+        );
+        // A category that is in no group would be lost by grouping alone,
+        // so it is added at the end rather than dropped.
+        const groupedIds = new Set(
+          groupedCategories.map(category => category.id),
+        );
+        const orphans: ReviewCategory[] = categoryEntities.list
+          .filter(category => !groupedIds.has(category.id))
+          .map(category => ({
+            id: category.id,
+            name: category.name,
+            hidden: category.hidden,
+            isIncome: category.is_income,
           }));
+        const categoryList: readonly ReviewCategory[] = [
+          ...groupedCategories,
+          ...orphans,
+        ];
 
         setPayees(payeeList);
         setAccounts(accountList);
@@ -467,11 +516,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // come back with no correlation at all.
         const preview = await send('transactions-import', {
           accountId,
+          // The same cast as the import itself, for the same reason: a
+          // split leg's category is `null` when it has none, and
+          // upstream's type says `string | undefined`.
           transactions: buildPreviewPayload(next, {
             accountId,
             payees: payeeRefs(payeeList),
             categories: categoryList.map(c => ({ id: c.id })),
-          }),
+          }) as ImportTransactionEntity[],
           isPreview: true,
         });
 
@@ -651,6 +703,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     [pushUndo, payees],
   );
 
+  const isAlreadyImported = useCallback((key: string) => {
+    return matchedTransactionIds.current.has(key);
+  }, []);
+
   const focus = useCallback((index: number) => {
     setFocusedIndex(index);
   }, []);
@@ -701,6 +757,37 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     let didChange = false;
 
     try {
+      // A row that is already in the budget cannot be SPLIT, and this is
+      // where that is caught.
+      //
+      // Neither path can apply one: the update path writes columns, and
+      // the import's update path keeps the existing transaction and
+      // never creates the legs. So the split would be dropped and the
+      // import would report success. Failing here says so instead.
+      //
+      // The split editor refuses it too, but only once the import
+      // preview has reported which rows matched — and the rows are on
+      // screen before that has happened, so this is the guarantee.
+      const livePayeeNames = new Set(
+        payees.map(payee => normalizePayeeName(payee.name)),
+      );
+      const splitOnExisting = state.rows.find(row => {
+        if (!isSplitRow(row.edits)) return false;
+        // A row that is thrown away, or that the gate holds back, does
+        // not land at all, so it cannot lose a split.
+        if (row.decision === 'drop') return false;
+        const evaluation = evaluateRow(row, state.trustLevel, {
+          livePayeeNames,
+        });
+        if (!evaluation.willImport) return false;
+        return matchedTransactionIds.current.has(rowKey(row));
+      });
+      if (splitOnExisting) {
+        setStatus('reviewing');
+        setError(t('A row that is already in the budget cannot be split'));
+        return false;
+      }
+
       // Rows the user edited AND that matched an existing transaction are
       // updated in place: Actual's import UPDATE path keeps the existing
       // payee and category, so an edit sent through `transactions-import`
@@ -773,7 +860,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         updated = [],
       } = await send('transactions-import', {
         accountId,
-        transactions: payload,
+        // The cast is here, and only here, because upstream types a
+        // split leg's `category` as `string | undefined` while its
+        // runtime accepts `null` — and the difference is load-bearing:
+        // upstream's `makeChild` decides inherit-vs-override with
+        // `"category" in data`, so a leg WITHOUT the key inherits the
+        // parent's category. `null` says "no category" outright.
+        //
+        // Widening the call instead would push the same problem into
+        // every caller of `transactions-import`.
+        transactions: payload as ImportTransactionEntity[],
         isPreview: false,
       });
       if (errors && errors.length > 0) {
@@ -788,6 +884,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       didChange = didChange || added.length > 0 || updated.length > 0;
     } catch (err) {
       setStatus('reviewing');
+      // A split that does not fit its row is reported in the user's
+      // words, not as the domain's code: the code is for logs and for
+      // tests, and a person has to be able to read it.
+      if (err instanceof SplitValidationError) {
+        setError(splitErrorMessage(err.code, t));
+        return false;
+      }
       setError(err instanceof Error ? err.message : 'Import failed');
       return false;
     } finally {
@@ -813,6 +916,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     payees,
     categories,
     onImported,
+    t,
     writeVendorMap,
   ]);
 
@@ -869,6 +973,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     summary,
     evaluations,
     unsavedWork: unsaved,
+    isAlreadyImported,
     decide,
     decideAll,
     edit,

@@ -46,6 +46,8 @@ import {
   isSplitRow,
   normalizePayeeName,
   rowKey,
+  SplitValidationError,
+  validateSplitRow,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type { ImportPreviewState } from '@actual-app/core/server/transactions/import/review/index';
 
@@ -261,7 +263,16 @@ function buildPayload(
       payload.payee_name = userPayee;
     }
 
-    if (categoryId) {
+    // The parent of a split has NO category: the categories live on the
+    // legs, and a parent that carried one would say where the money
+    // goes twice.
+    //
+    // Upstream's `makeChild` decides inherit-vs-override with
+    // `"category" in data ? data.category : parent.category`, so a
+    // parent's category is what a leg without one would inherit. A split
+    // parent with no category is what makes a leg with no category land
+    // uncategorized rather than in the parent's place.
+    if (categoryId && !isSplitRow(row.edits)) {
       payload.category = categoryId;
     }
 
@@ -274,13 +285,39 @@ function buildPayload(
     // A split carries its categories on the legs. The parent keeps the
     // payee, date, imported_id and notes; the categories live on the legs.
     if (isSplitRow(row.edits) && row.edits.splits) {
+      // The split is checked against the row it belongs to before it is
+      // sent: the legs have to add up to the row's EFFECTIVE amount, and
+      // the row cannot be a transfer as well.
+      //
+      // Upstream does NOT reject an unbalanced split: it stores it and
+      // records a `SplitTransactionError` on the parent, which leaves the
+      // money in no category at all. Failing loudly here is the only way
+      // the user hears about it.
+      //
+      // The pane refuses to save an invalid split, so this can only fire
+      // through a bug — and a bug that quietly unbalances a budget is
+      // worse than an import that stops with a message.
+      const problem = validateSplitRow(row);
+      if (problem) {
+        throw new SplitValidationError(
+          problem.code,
+          `${problem.code}: a split does not fit its row`,
+        );
+      }
+
       payload.subtransactions = row.edits.splits.map(leg => {
-        const sub: { amount: number; category?: string } = {
+        // The leg's category is sent even when it is `null`: upstream's
+        // `makeChild` decides inherit-vs-override with `"category" in
+        // data`, so OMITTING the key makes the leg inherit the parent's
+        // category. `null` says "no category" outright.
+        const live =
+          leg.categoryId !== undefined && liveCategoryIds.has(leg.categoryId)
+            ? leg.categoryId
+            : null;
+        const sub: { amount: number; category: string | null } = {
           amount: leg.amountCents,
+          category: live,
         };
-        if (leg.categoryId && liveCategoryIds.has(leg.categoryId)) {
-          sub.category = leg.categoryId;
-        }
         return sub;
       });
     }

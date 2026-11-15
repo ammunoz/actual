@@ -48,13 +48,18 @@ export type PreviewSplitLeg = {
  */
 export const MAX_SPLIT_LEGS = 20;
 
-/** Codes emitted by `validateSplit`. Stable, greppable, value-free. */
+/**
+ * Codes emitted by `validateSplit` and `validateSplitRow`.
+ *
+ * Stable, greppable, value-free.
+ */
 export type SplitErrorCode =
   | 'SPLIT-001'
   | 'SPLIT-002'
   | 'SPLIT-003'
   | 'SPLIT-004'
-  | 'SPLIT-005';
+  | 'SPLIT-005'
+  | 'SPLIT-006';
 
 export class SplitValidationError extends Error {
   readonly code: SplitErrorCode;
@@ -137,12 +142,20 @@ export function splitResidualDirection(
     : 'unallocated';
 }
 
-/** How many legs are still missing a category. */
+/**
+ * How many legs are still missing a category.
+ *
+ * An EMPTY-STRING `categoryId` counts as missing: the empty string is
+ * the domain's "cleared" marker, not a category id, and a leg with one
+ * has no category to send. A STALE id — a category that has been
+ * deleted — still counts as set: that is a well-formed id, and only the
+ * apply step knows which ids are live.
+ */
 export function uncategorizedLegCount(
   legs: readonly PreviewSplitLeg[],
 ): number {
   let n = 0;
-  for (const leg of legs) if (leg.categoryId === undefined) n += 1;
+  for (const leg of legs) if (!leg.categoryId) n += 1;
   return n;
 }
 
@@ -250,10 +263,12 @@ export function replaceLeg(
  *   SPLIT-004  legs do not sum to the target amount
  *   SPLIT-005  at least one leg has no category
  *
- * `SPLIT-005` treats an empty-string `categoryId` as SET. That is
- * deliberate: this function validates SHAPE, and the only component that
- * knows which ids are live is the apply step's category filter, which
- * downgrades a stale id to `null` at send time.
+ * `SPLIT-005` treats an empty-string `categoryId` as NOT set: the empty
+ * string is the "cleared" marker, not a category id. A STALE id — a
+ * category that has been deleted since — still counts as set, because
+ * this function validates SHAPE and only the apply step knows which ids
+ * are live; its category filter downgrades a stale id to `null` at send
+ * time.
  *
  * Both SPLIT-004 and SPLIT-005 are hard blocks rather than warnings because
  * upstream records an imbalance as a split error on the parent and an

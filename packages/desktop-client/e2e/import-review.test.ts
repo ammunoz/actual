@@ -943,6 +943,363 @@ test.describe('Keyboard import review', () => {
     await expect(dialog.getByText('Review import')).toBeVisible();
   });
 
+  test('the split editor opens with two legs', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Open',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    // The split opens with two legs that already add up to the row, so
+    // the only work left is giving each leg its own category.
+    await expect(split.getByTestId('import-review-split-leg')).toHaveCount(2);
+    await expect(
+      split.getByTestId('import-review-split-leg-amount-0'),
+    ).toHaveValue('-12.50');
+    await expect(
+      split.getByTestId('import-review-split-leg-amount-1'),
+    ).toHaveValue('-12.50');
+    await expect(
+      split.getByTestId('import-review-split-residual'),
+    ).toContainText('add up');
+  });
+
+  test('a split with no categories is refused', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Uncategorised',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    // The row has no category of its own, so the legs have none either,
+    // and a leg without a category cannot be committed.
+    await split.getByTestId('import-review-split-save').click();
+
+    await expect(
+      split.getByTestId('import-review-split-problem'),
+    ).toContainText('category');
+    // The pane is still open: the split was not saved.
+    await expect(split).toBeVisible();
+  });
+
+  test('a split is saved and the row says so', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Save',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    // Give each leg its own category.
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+
+    await split.getByTestId('import-review-split-save').click();
+
+    // The pane is closed and the row says it is a split, the way Actual's
+    // own transactions table says it.
+    await expect(split).not.toBeVisible();
+    await expect(rows.nth(0)).toContainText('Split (2)');
+  });
+
+  test('a saved split imports as a split', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Import',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+    await split.getByTestId('import-review-split-save').click();
+    await expect(split).not.toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // The split landed as a split: the parent says "Split" and its two
+    // legs carry the categories the user picked.
+    // The rows are found by what they SAY rather than by their position:
+    // the table is sorted newest first, and the demo budget the test
+    // runs against has transactions and splits of its own.
+    //
+    // The imported rows are the ones with the resolved payee "Purchase".
+    const landed = accountPage.transactionTableRow.filter({
+      hasText: 'Purchase',
+    });
+    await expect(landed).toHaveCount(3);
+
+    // The parent says "Split" and its two legs carry the categories the
+    // user picked. The category cell is matched EXACTLY: a substring
+    // match would find the demo budget's own "Food" and "General".
+    const categories = landed.getByTestId('category');
+    await expect(categories.filter({ hasText: /^Split$/ })).toHaveCount(1);
+    await expect(categories.filter({ hasText: /^General$/ })).toHaveCount(1);
+    await expect(categories.filter({ hasText: /^Food$/ })).toHaveCount(1);
+  });
+
+  test('distribute fills the empty leg, and the fields follow', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Distribute',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    // Empty the second leg, so there is something for "Distribute" to
+    // fill.
+    const second = split.getByTestId('import-review-split-leg-amount-1');
+    await second.fill('0.00');
+    await page.keyboard.press('Enter');
+    await expect(second).toHaveValue('0.00');
+
+    await split.getByTestId('import-review-split-distribute').click();
+
+    // The FIELD follows the draft: the empty leg took the remainder, and
+    // the field says so. A field that kept the old value would ask the
+    // user to save an amount they cannot see.
+    await expect(second).toHaveValue('-12.50');
+    await expect(
+      split.getByTestId('import-review-split-leg-amount-0'),
+    ).toHaveValue('-12.50');
+    await expect(
+      split.getByTestId('import-review-split-residual'),
+    ).toContainText('add up');
+  });
+
+  test('a leg with its category cleared cannot be saved', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Cleared',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    // Give both legs a category, so the split is otherwise sound.
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+
+    // The legs add up, so the category is the only thing that can stop
+    // the split.
+    await expect(
+      split.getByTestId('import-review-split-residual'),
+    ).toContainText('add up');
+
+    // Now clear the first leg's category and confirm it.
+    const field = split.getByTestId('import-review-split-leg-category-0');
+    await field.click();
+    await field.fill('');
+    await page.keyboard.press('Enter');
+
+    // A leg with no category cannot be committed: the split would land
+    // a leg in no category at all, without saying so.
+    await split.getByTestId('import-review-split-save').click();
+    await expect(
+      split.getByTestId('import-review-split-problem'),
+    ).toContainText('category');
+    await expect(split).toBeVisible();
+  });
+
+  test('ctrl+enter saves the split from inside a field', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Ctrl Enter',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+
+    // The focus is in a field, where the plain Enter belongs to the
+    // field: the split is saved with Ctrl+Enter.
+    await page.keyboard.press('Control+Enter');
+
+    await expect(split).not.toBeVisible();
+    await expect(rows.nth(0)).toContainText('Split (2)');
+  });
+
+  test("a split row's amount cannot be changed", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Split Amount',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+    await split.getByTestId('import-review-split-save').click();
+    await expect(split).not.toBeVisible();
+
+    // Changing the amount of a split row would unbalance the split, so
+    // the edit is refused and the editor stays open.
+    await page.keyboard.press('Shift+4');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId('import-review-editor-input').fill('-30.00');
+    await page.keyboard.press('Enter');
+
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'split',
+    );
+    await expect(editor).toBeVisible();
+  });
+
   test('the help overlay lists the keys', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Help',

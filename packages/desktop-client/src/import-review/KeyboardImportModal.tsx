@@ -8,13 +8,17 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import {
+  effectiveAmountCents,
+  effectiveTransferAccountId,
   gateRow,
+  isSplitRow,
   normalizePayeeName,
   rowKey,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type {
   FlagKind,
   PreviewEdits,
+  PreviewRow,
   RowEvaluation,
   TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
@@ -31,6 +35,7 @@ import { HelpOverlay } from './HelpOverlay';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
+import { SplitPane } from './SplitPane';
 import { useImportReview } from './use-import-review';
 
 export type KeyboardImportModalProps = {
@@ -42,12 +47,13 @@ export type KeyboardImportModalProps = {
 /**
  * What the pane below the table is showing.
  *
- * The editor, the help overlay and the confirmation are the same pane:
- * they cannot both be open, because there is only one keyboard and only
- * one of them may have it.
+ * The editor, the split editor, the help overlay and the confirmation are
+ * the same pane: they cannot both be open, because there is only one
+ * keyboard and only one of them may have it.
  */
 type PaneMode =
   | { kind: 'editor'; field: EditorMode }
+  | { kind: 'split' }
   | { kind: 'help' }
   | { kind: 'confirm' }
   | null;
@@ -69,8 +75,16 @@ export function KeyboardImportModal({
   const review = useImportReview({ accountId, filename, onImported });
   const { enableScope, disableScope } = useHotkeysContext();
 
-  // The pane below the table: the editor for a field, or the help.
+  // The pane below the table: the editor for a field, the split editor,
+  // the help, or the confirmation.
   const [pane, setPane] = useState<PaneMode>(null);
+
+  // Why the last thing the user asked for did not happen.
+  //
+  // It is shown next to the pane rather than in it, because the pane it
+  // belongs to may not even be open: a row that cannot be split is
+  // refused before the pane opens.
+  const [notice, setNotice] = useState<string | null>(null);
 
   // The trust level is a domain value, so it is translated at the point it
   // is shown rather than translated inside the domain layer.
@@ -108,6 +122,54 @@ export function KeyboardImportModal({
     if (evaluation.gate === 'skip') return t('Skipped');
     if (evaluation.gate === 'warn') return t('Flagged');
     return null;
+  };
+
+  /**
+   * What the row's category cell says.
+   *
+   * A split row says "Split (N)", the way Actual's own transactions
+   * table does: the categories of a split live on its legs, and the
+   * parent has none.
+   *
+   * An ordinary row says its category, or "Categorize" when it has none
+   * — the word Actual uses for a transaction that still needs one.
+   *
+   * The cell is MUTED when it says something other than a category name:
+   * a split is a shape, not a place for money to go, and a row that
+   * needs a category is a row that is not finished.
+   */
+  // The category names, looked up once: the table renders a cell for
+  // every row, and finding the name in a list each time is a search per
+  // row per render.
+  const categoryNames = useMemo(
+    () =>
+      new Map(review.categories.map(category => [category.id, category.name])),
+    [review.categories],
+  );
+
+  const categoryCell = (row: PreviewRow): { label: string; muted: boolean } => {
+    if (isSplitRow(row.edits)) {
+      return {
+        // The count is NOT named `count`: i18next reads that as a
+        // plural, and this is a number of legs, not a number of
+        // something countable.
+        label: t('Split ({{legs}})', { legs: row.edits.splits?.length ?? 0 }),
+        muted: true,
+      };
+    }
+    // A transfer's category is the transfer pseudo-category, not a
+    // budget category, so it says "Transfer" the way Actual's own
+    // transactions table does.
+    if (effectiveTransferAccountId(row) !== undefined) {
+      return { label: t('Transfer'), muted: true };
+    }
+    const categoryId = row.edits.categoryId ?? row.matchedCategoryId;
+    if (!categoryId) return { label: t('Categorize'), muted: true };
+    const name = categoryNames.get(categoryId);
+    // A category that no longer exists is dropped at the apply step, so
+    // the row is imported without one: "Categorize" says so.
+    if (!name) return { label: t('Categorize'), muted: true };
+    return { label: name, muted: false };
   };
 
   // Why a row is flagged, in the user's terms. The code beside it is the
@@ -170,6 +232,17 @@ export function KeyboardImportModal({
   };
 
   /**
+   * Open a pane, clearing whatever notice was showing.
+   *
+   * A notice belongs to the thing that was refused, so it does not
+   * survive into the next thing the user asks for.
+   */
+  const openPane = (next: PaneMode) => {
+    setNotice(null);
+    setPane(next);
+  };
+
+  /**
    * Close the review, asking first if there is anything to lose.
    *
    * A review the user has not touched has nothing to lose, so it closes
@@ -188,6 +261,12 @@ export function KeyboardImportModal({
   };
 
   const dispatch = (action: ReviewAction) => {
+    // A notice belongs to the thing that was refused. It does not
+    // survive into the next thing the user does — a refusal about one
+    // row must not sit under the cursor while the cursor is on
+    // another row.
+    setNotice(null);
+
     switch (action) {
       case 'move-next':
         review.moveFocus(1);
@@ -254,18 +333,46 @@ export function KeyboardImportModal({
       case 'close':
         requestClose();
         break;
+      case 'edit-split': {
+        // A row is EITHER a transfer OR a split, never both.
+        //
+        // The check uses `effectiveTransferAccountId`, NOT
+        // `edits.transferAccountId`, because the resolver's account-name
+        // auto-detect sets `matchedTransferAccountId` without the user
+        // confirming it: a row whose vendor string happens to equal a
+        // budget account name would otherwise become a split here, and
+        // then fail the apply step's transfer/split check.
+        if (!focused) break;
+        if (effectiveTransferAccountId(focused) !== undefined) {
+          setNotice(t('This row is a transfer, so it cannot be split'));
+          break;
+        }
+        // A row that is already in the budget is edited IN PLACE, and
+        // that path writes columns: it cannot create the legs a split is
+        // made of. The split would be dropped silently, so the review
+        // says so instead.
+        if (review.isAlreadyImported(rowKey(focused))) {
+          setNotice(
+            t('This row is already in the budget, so it cannot be split here.'),
+          );
+          break;
+        }
+        openPane({ kind: 'split' });
+        break;
+      }
       case 'help':
+        setNotice(null);
         setPane(current =>
           current?.kind === 'help' ? null : { kind: 'help' },
         );
         break;
       default: {
         // The field editors. Each one opens the pane for the field the
-        // action names; an action with no editor yet — the transfer and
-        // split editors, which are their own slice — does nothing.
+        // action names; an action with no editor yet — the transfer
+        // editor, which is its own slice — does nothing.
         const field = EDITOR_FOR_ACTION[action];
         if (field && focused) {
-          setPane({ kind: 'editor', field });
+          openPane({ kind: 'editor', field });
         }
         break;
       }
@@ -324,7 +431,7 @@ export function KeyboardImportModal({
   useHotkeys(
     'escape',
     () => {
-      setPane(null);
+      openPane(null);
     },
     { enabled: pane !== null, enableOnFormTags: true },
   );
@@ -334,6 +441,7 @@ export function KeyboardImportModal({
   useHotkeys(
     'shift+slash',
     () => {
+      setNotice(null);
       setPane(current => (current?.kind === 'help' ? null : current));
     },
     { enabled: pane?.kind === 'help' },
@@ -396,8 +504,15 @@ export function KeyboardImportModal({
                     if (didChange) onClose();
                   });
                 }}
+                // The Import button is off while a pane owns the
+                // keyboard: the confirmation's outcomes are Keep and
+                // Discard, and a split the user has not saved would be
+                // applied without.
                 isDisabled={
-                  isLoading || rows.length === 0 || pane?.kind === 'confirm'
+                  isLoading ||
+                  rows.length === 0 ||
+                  pane?.kind === 'confirm' ||
+                  pane?.kind === 'split'
                 }
               >
                 <Trans>Import</Trans>
@@ -477,6 +592,7 @@ export function KeyboardImportModal({
                 );
                 const evaluation = review.evaluations.get(rowKey(row));
                 const badge = evaluation ? gateBadge(row, evaluation) : null;
+                const category = categoryCell(row);
                 return (
                   <View
                     key={row.previewKey ?? row.importedId ?? String(index)}
@@ -500,6 +616,17 @@ export function KeyboardImportModal({
                     <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
                     <Text style={{ width: 120 }}>
                       {row.edits.payeeCanonical ?? row.payeeCanonical}
+                    </Text>
+                    <Text
+                      style={{
+                        width: 130,
+                        fontStyle: category.muted ? 'italic' : undefined,
+                        color: category.muted
+                          ? theme.pageTextSubdued
+                          : undefined,
+                      }}
+                    >
+                      {category.label}
                     </Text>
                     <FinancialText style={{ width: 100, textAlign: 'right' }}>
                       {amount}
@@ -590,8 +717,62 @@ export function KeyboardImportModal({
                 payees={review.payees}
                 categories={review.categories}
                 onCommit={(edits: PreviewEdits, chosenPayeeId?: string) => {
+                  // A split is only valid against the row's EFFECTIVE
+                  // amount, so changing the amount would silently
+                  // unbalance it. The edit is refused rather than
+                  // accepted: the legs are not rescaled, because
+                  // inventing amounts the user never typed is worse
+                  // than refusing the edit.
+                  //
+                  // The way out is the split pane's "Remove split".
+                  if (
+                    focused &&
+                    isSplitRow(focused.edits) &&
+                    edits.amountCents !== effectiveAmountCents(focused)
+                  ) {
+                    setNotice(
+                      t(
+                        'This row is split, so its amount cannot be changed here. Remove the split first.',
+                      ),
+                    );
+                    return;
+                  }
                   review.edit(review.focusedIndex, edits, { chosenPayeeId });
-                  setPane(null);
+                  openPane(null);
+                }}
+              />
+            ) : null}
+
+            {notice ? (
+              <Text
+                data-testid="import-review-notice"
+                style={{ color: theme.warningText }}
+              >
+                {notice}
+              </Text>
+            ) : null}
+
+            {pane?.kind === 'split' && focused ? (
+              <SplitPane
+                row={focused}
+                categories={review.categories}
+                onCommit={(edits: PreviewEdits) => {
+                  // The row may have been matched to a transaction that
+                  // is already in the budget AFTER the pane opened: the
+                  // rows are on screen before the import preview has
+                  // reported which they matched. Such a row cannot be
+                  // split, and the pane stays open so the work is not
+                  // lost.
+                  if (review.isAlreadyImported(rowKey(focused))) {
+                    setNotice(
+                      t(
+                        'This row is already in the budget, so it cannot be split here.',
+                      ),
+                    );
+                    return;
+                  }
+                  review.edit(review.focusedIndex, edits);
+                  openPane(null);
                 }}
               />
             ) : null}
@@ -602,7 +783,7 @@ export function KeyboardImportModal({
               <ConfirmPane
                 decided={review.unsavedWork.decided}
                 edited={review.unsavedWork.edited}
-                onKeep={() => setPane(null)}
+                onKeep={() => openPane(null)}
                 onDiscard={confirmClose}
               />
             ) : null}

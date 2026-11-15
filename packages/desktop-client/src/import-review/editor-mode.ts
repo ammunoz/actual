@@ -47,6 +47,15 @@ export const EDITOR_FOR_ACTION: Readonly<
 export type EditorSuggestion = {
   id: string;
   name: string;
+  /**
+   * The group the thing is in, when it is in one.
+   *
+   * Two groups can hold things with the SAME name — Actual budgets are
+   * full of them — so the group is what tells two suggestions apart.
+   * The list shows it as a header, and the suggestion's accessible name
+   * carries it, so a screen reader says which one is meant.
+   */
+  groupName?: string;
 };
 
 /**

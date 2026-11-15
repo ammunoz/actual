@@ -252,7 +252,7 @@ describe('buildApplyPayload', () => {
     ]);
   });
 
-  it('drops a stale category from a split leg', () => {
+  it('says a split leg has no category when its category is stale', () => {
     const state = buildState([mkRow()]);
     const split = {
       ...state,
@@ -272,7 +272,13 @@ describe('buildApplyPayload', () => {
       payees: PAYEES,
       categories: CATEGORIES,
     });
-    expect(payload[0].subtransactions?.[0]).toEqual({ amount: -1500 });
+    // `null`, not an omitted key: upstream's `makeChild` decides
+    // inherit-vs-override with `"category" in data`, so a leg without the
+    // key inherits the parent's category. `null` says "no category".
+    expect(payload[0].subtransactions?.[0]).toEqual({
+      amount: -1500,
+      category: null,
+    });
   });
 
   it('omits subtransactions entirely for an ordinary row', () => {

@@ -19,6 +19,7 @@ import type {
 
 import { evaluateRow } from './gating';
 import type { GateOpts, RowEvaluation } from './gating';
+import { SplitValidationError, validateSplit } from './split-primitives';
 import type { PreviewSplitLeg } from './split-primitives';
 
 /**
@@ -102,6 +103,76 @@ export type PreviewEdits = {
  */
 export function isSplitRow(edits: PreviewEdits): boolean {
   return edits.splits !== undefined;
+}
+
+/**
+ * Pure: check a row's SPLIT against the row it belongs to.
+ *
+ * `validateSplit` checks the SHAPE of a set of legs. This checks the row
+ * the legs sit on: the legs have to add up to the row's EFFECTIVE amount,
+ * and the row cannot be a transfer as well.
+ *
+ * The transfer check is here because the two are STRUCTURALLY exclusive:
+ * a split parent's category is null and a transfer's category is the
+ * transfer pseudo-category, so a row carrying both says two contradictory
+ * things about where its money goes. The resolver's account-name
+ * auto-detect can put a row on that path without the user asking for it,
+ * so this cannot be left to the editor.
+ *
+ * `null` when the row has no split, or when its split is sound.
+ */
+export function validateSplitRow(row: PreviewRow): SplitValidationError | null {
+  if (!isSplitRow(row.edits) || !row.edits.splits) return null;
+
+  if (effectiveTransferAccountId(row) !== undefined) {
+    return new SplitValidationError(
+      'SPLIT-006',
+      'SPLIT-006: a row cannot be both a transfer and a split',
+    );
+  }
+
+  return validateSplit(row.edits.splits, effectiveAmountCents(row));
+}
+
+/**
+ * Pure: the edits that make a row a SPLIT.
+ *
+ * A row is EITHER a transfer OR a split, never both. Upstream nulls a
+ * split parent's category, and a transfer's category is the transfer
+ * pseudo-category, so a row carrying both says two contradictory things
+ * about where its money goes.
+ *
+ * The rule lives here rather than in the UI so that it cannot be
+ * forgotten: setting one clears the other.
+ *
+ * `splits` is `undefined` to UN-SPLIT the row. That is not the same as an
+ * empty list — see `PreviewEdits.splits` for why a zero-leg or one-leg
+ * split is not a state worth expressing.
+ */
+export function withSplit(
+  edits: PreviewEdits,
+  splits: readonly PreviewSplitLeg[] | undefined,
+): PreviewEdits {
+  return { ...edits, splits, transferAccountId: undefined };
+}
+
+/**
+ * Pure: the edits that make a row a TRANSFER.
+ *
+ * The mirror of `withSplit`: setting a transfer clears the split, so the
+ * row says one thing about where its money goes and not two.
+ *
+ * `accountId` is `undefined` to clear the user's own transfer choice.
+ * That does NOT clear the resolver's auto-detect — the auto-detect is a
+ * prefill, and `effectiveTransferAccountId` still reports it. A row the
+ * resolver thinks is a transfer cannot be split at all; see
+ * `withSplit`.
+ */
+export function withTransfer(
+  edits: PreviewEdits,
+  accountId: string | undefined,
+): PreviewEdits {
+  return { ...edits, transferAccountId: accountId, splits: undefined };
 }
 
 export type PreviewRow = ResolvedRow & {
