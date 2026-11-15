@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { Input } from '@actual-app/components/input';
@@ -106,13 +106,106 @@ export function EditorPicker({
     setText(initialText);
     setRefused(false);
   }
-  // Whether the field has the focus.
+  // Whether the list of suggestions is OPEN.
   //
-  // The list of suggestions is only shown while the field has it. A
-  // picker that always shows its list is fine when there is ONE picker,
-  // but the split editor has one per leg: twenty open lists would bury
-  // the table they belong to.
-  const [focused, setFocused] = useState(autoFocus);
+  // The list is open while the user is CHOOSING and closed once they
+  // have chosen. A picker that always shows its list is fine when there
+  // is ONE picker, but the split editor has one per leg: twenty open
+  // lists would bury the table they belong to.
+  //
+  // It closes on a pick, which is also what upstream's payee picker
+  // does. It has to: the list sits between the field and the buttons
+  // below it, so a list that closed on blur would move those buttons
+  // out from under the pointer — and the click that was aimed at "Save"
+  // would land on nothing at all.
+  const [listOpen, setListOpen] = useState(autoFocus);
+
+  // Whether a pointer is currently DOWN.
+  //
+  // The list must not close WHILE one is. The list sits between the
+  // field and the controls below it, so closing it on the blur that a
+  // press causes would move those controls out from under the pointer
+  // between the press and the release — and the click would land on
+  // nothing at all. The user presses "Save", nothing happens, and
+  // nothing says why.
+  const pointerIsDown = useRef(false);
+
+  // The listener that closes the list once a press is over.
+  //
+  // It is held in a ref so that it can be taken off again: a listener
+  // that outlives its picker is a leak, and a leaked one would close a
+  // list that is no longer there.
+  const deferredClose = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!listOpen) return;
+    const onPointerDown = () => {
+      pointerIsDown.current = true;
+    };
+    // A pointer that is CANCELLED — a touch that turns into a scroll, a
+    // drag that leaves the window — is not down any more. Without this
+    // the flag would latch, and every later blur would leave the list
+    // open.
+    const onPointerEnd = () => {
+      pointerIsDown.current = false;
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('pointerup', onPointerEnd, true);
+    document.addEventListener('pointercancel', onPointerEnd, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('pointerup', onPointerEnd, true);
+      document.removeEventListener('pointercancel', onPointerEnd, true);
+      // The flag goes back to false with the listeners: a pick closes
+      // the list, which unmounts this effect, and the pointer that comes
+      // up afterwards is never seen. A flag left set would make every
+      // later blur defer the close to a pointerup that is not coming.
+      pointerIsDown.current = false;
+    };
+  }, [listOpen]);
+
+  // The picker goes away with its pending listener.
+  useEffect(() => {
+    return () => {
+      const pending = deferredClose.current;
+      if (pending) {
+        document.removeEventListener('pointerup', pending, true);
+        document.removeEventListener('pointercancel', pending, true);
+        deferredClose.current = null;
+      }
+    };
+  }, []);
+
+  // Close the list, unless a press is in progress.
+  //
+  // A press that is under way finishes first: the list closes when the
+  // pointer comes up, so the control the user aimed at is still where
+  // they left it when the click lands.
+  const closeList = () => {
+    if (!pointerIsDown.current) {
+      setListOpen(false);
+      return;
+    }
+    // A press is under way: the list closes when the pointer comes up,
+    // so the control the user aimed at is still where they left it when
+    // the click lands.
+    const pending = deferredClose.current;
+    if (pending) {
+      document.removeEventListener('pointerup', pending, true);
+      document.removeEventListener('pointercancel', pending, true);
+    }
+    const onPointerEnd = () => {
+      // The listener takes itself off: it is done, and a listener that
+      // outlives its job is a leak that holds the picker alive.
+      document.removeEventListener('pointerup', onPointerEnd, true);
+      document.removeEventListener('pointercancel', onPointerEnd, true);
+      deferredClose.current = null;
+      setListOpen(false);
+    };
+    deferredClose.current = onPointerEnd;
+    document.addEventListener('pointerup', onPointerEnd, true);
+    document.addEventListener('pointercancel', onPointerEnd, true);
+  };
 
   const listboxId = useId();
   const optionId = (index: number) => `${listboxId}-option-${index}`;
@@ -127,6 +220,11 @@ export function EditorPicker({
     // half-typed name that was never chosen.
     if (suggestion) setText(suggestion.name);
     setCommittedText(value);
+    // The choice is made, so the list closes.
+    setListOpen(false);
+    // The pointer that made the choice is still down, and the list's
+    // closing unmounts the tracking that would have cleared the flag.
+    pointerIsDown.current = false;
     onPick(suggestion, value);
   };
 
@@ -135,6 +233,7 @@ export function EditorPicker({
       // The caret would jump to the start or the end of the field, which
       // is not what the arrow keys mean here.
       event.preventDefault();
+      setListOpen(true);
       setHighlight(current =>
         nextHighlightIndex(
           matches.length,
@@ -174,15 +273,19 @@ export function EditorPicker({
         role="combobox"
         aria-label={label}
         aria-autocomplete="list"
-        aria-expanded={focused && matches.length > 0}
-        aria-controls={focused && matches.length > 0 ? listboxId : undefined}
+        aria-expanded={listOpen && matches.length > 0}
+        aria-controls={listOpen && matches.length > 0 ? listboxId : undefined}
         aria-activedescendant={
-          focused && highlight >= 0 ? optionId(highlight) : undefined
+          listOpen && highlight >= 0 ? optionId(highlight) : undefined
         }
         data-testid={testId}
-        onFocus={() => setFocused(true)}
+        onFocus={() => setListOpen(true)}
+        // Clicking a field that already has the focus does not fire
+        // `focus` again, so the list is reopened here: a user who has
+        // picked something and then changed their mind clicks the field.
+        onClick={() => setListOpen(true)}
         onBlur={() => {
-          setFocused(false);
+          closeList();
           // A field that loses the focus without a pick goes back to
           // the value it last committed: the text the user typed was a
           // filter, not a choice.
@@ -194,6 +297,8 @@ export function EditorPicker({
         onChangeValue={value => {
           setText(value);
           setRefused(false);
+          // Typing is choosing, so the list opens again.
+          setListOpen(true);
           // The list just changed underneath the highlight, so the
           // highlight goes back to the exact match — and to nothing at
           // all when the name is one the budget does not have.
@@ -207,7 +312,7 @@ export function EditorPicker({
         <Text style={{ color: theme.errorText }}>{errorText}</Text>
       ) : null}
 
-      {focused && matches.length > 0 ? (
+      {listOpen && matches.length > 0 ? (
         <View
           id={listboxId}
           role="listbox"

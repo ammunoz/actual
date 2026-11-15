@@ -36,6 +36,7 @@ import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
 import { SplitPane } from './SplitPane';
+import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
 
 export type KeyboardImportModalProps = {
@@ -47,13 +48,14 @@ export type KeyboardImportModalProps = {
 /**
  * What the pane below the table is showing.
  *
- * The editor, the split editor, the help overlay and the confirmation are
- * the same pane: they cannot both be open, because there is only one
- * keyboard and only one of them may have it.
+ * The editor, the split editor, the transfer editor, the help overlay and
+ * the confirmation are the same pane: they cannot both be open, because
+ * there is only one keyboard and only one of them may have it.
  */
 type PaneMode =
   | { kind: 'editor'; field: EditorMode }
   | { kind: 'split' }
+  | { kind: 'transfer' }
   | { kind: 'help' }
   | { kind: 'confirm' }
   | null;
@@ -124,6 +126,44 @@ export function KeyboardImportModal({
     return null;
   };
 
+  // The category names, looked up once: the table renders a cell for
+  // every row, and finding the name in a list each time is a search per
+  // row per render.
+  const categoryNames = useMemo(
+    () =>
+      new Map(review.categories.map(category => [category.id, category.name])),
+    [review.categories],
+  );
+
+  // The account names, for the same reason: a transfer row shows the
+  // account it transfers to.
+  const accountNames = useMemo(
+    () => new Map(review.accounts.map(account => [account.id, account.name])),
+    [review.accounts],
+  );
+
+  /**
+   * What the row's payee cell says.
+   *
+   * A transfer row says the ACCOUNT the money goes to, the way Actual's
+   * own transactions table does: the payee of a transfer is the other
+   * account, not the vendor the bank file named.
+   */
+  const payeeCell = (row: PreviewRow): { label: string } => {
+    // A split keeps the vendor: the categories live on the legs, and
+    // the parent still carries the payee.
+    if (isSplitRow(row.edits)) {
+      return { label: row.edits.payeeCanonical ?? row.payeeCanonical };
+    }
+    const transferAccountId = effectiveTransferAccountId(row);
+    if (transferAccountId !== undefined) {
+      return {
+        label: accountNames.get(transferAccountId) ?? t('Transfer'),
+      };
+    }
+    return { label: row.edits.payeeCanonical ?? row.payeeCanonical };
+  };
+
   /**
    * What the row's category cell says.
    *
@@ -138,15 +178,6 @@ export function KeyboardImportModal({
    * a split is a shape, not a place for money to go, and a row that
    * needs a category is a row that is not finished.
    */
-  // The category names, looked up once: the table renders a cell for
-  // every row, and finding the name in a list each time is a search per
-  // row per render.
-  const categoryNames = useMemo(
-    () =>
-      new Map(review.categories.map(category => [category.id, category.name])),
-    [review.categories],
-  );
-
   const categoryCell = (row: PreviewRow): { label: string; muted: boolean } => {
     if (isSplitRow(row.edits)) {
       return {
@@ -360,6 +391,30 @@ export function KeyboardImportModal({
         openPane({ kind: 'split' });
         break;
       }
+      case 'edit-transfer': {
+        // A row is EITHER a transfer OR a split, never both.
+        //
+        // `withTransfer` clears the split, so allowing the edit would
+        // silently un-split the user's work — the exact failure the
+        // split editor exists to prevent. The way out is the split
+        // pane's "Remove split".
+        if (!focused) break;
+        if (isSplitRow(focused.edits)) {
+          setNotice(
+            t(
+              'This row is split, so it cannot be transferred. Remove the split first.',
+            ),
+          );
+          break;
+        }
+        // A row that is already in the budget is NOT refused here, the
+        // way the split editor refuses it. A transfer is a COLUMN: the
+        // update path writes the transfer payee, and upstream's
+        // `transfer.onUpdate` keeps the mirror in step. The split
+        // editor refuses it because that path cannot create legs.
+        openPane({ kind: 'transfer' });
+        break;
+      }
       case 'help':
         setNotice(null);
         setPane(current =>
@@ -512,7 +567,8 @@ export function KeyboardImportModal({
                   isLoading ||
                   rows.length === 0 ||
                   pane?.kind === 'confirm' ||
-                  pane?.kind === 'split'
+                  pane?.kind === 'split' ||
+                  pane?.kind === 'transfer'
                 }
               >
                 <Trans>Import</Trans>
@@ -593,6 +649,7 @@ export function KeyboardImportModal({
                 const evaluation = review.evaluations.get(rowKey(row));
                 const badge = evaluation ? gateBadge(row, evaluation) : null;
                 const category = categoryCell(row);
+                const payee = payeeCell(row);
                 return (
                   <View
                     key={row.previewKey ?? row.importedId ?? String(index)}
@@ -614,9 +671,7 @@ export function KeyboardImportModal({
                       {row.edits.date ?? row.date}
                     </Text>
                     <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
-                    <Text style={{ width: 120 }}>
-                      {row.edits.payeeCanonical ?? row.payeeCanonical}
-                    </Text>
+                    <Text style={{ width: 120 }}>{payee.label}</Text>
                     <Text
                       style={{
                         width: 130,
@@ -771,6 +826,19 @@ export function KeyboardImportModal({
                     );
                     return;
                   }
+                  review.edit(review.focusedIndex, edits);
+                  openPane(null);
+                }}
+              />
+            ) : null}
+
+            {pane?.kind === 'transfer' && focused ? (
+              <TransferPane
+                row={focused}
+                accounts={review.accounts}
+                payees={review.payees}
+                sourceAccountId={accountId}
+                onCommit={(edits: PreviewEdits) => {
                   review.edit(review.focusedIndex, edits);
                   openPane(null);
                 }}

@@ -69,6 +69,7 @@ export {
   unsavedWork,
   updateEdits,
   validateSplitRow,
+  validateTransferRow,
   withSplit,
   withTransfer,
   withTrustLevel,
@@ -110,6 +111,9 @@ export type {
   SplitErrorCode,
   SplitResidualDirection,
 } from './preview/split-primitives';
+
+export { TransferValidationError } from './preview/transfer-primitives';
+export type { TransferErrorCode } from './preview/transfer-primitives';
 
 export {
   emptyVendorMap,

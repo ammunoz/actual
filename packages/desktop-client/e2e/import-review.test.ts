@@ -1300,6 +1300,185 @@ test.describe('Keyboard import review', () => {
     await expect(editor).toBeVisible();
   });
 
+  test('the transfer editor lists the accounts it can transfer to', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Open',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('t');
+
+    const transfer = dialog.getByTestId('import-review-transfer');
+    await expect(transfer).toBeVisible();
+
+    // The budget's accounts are offered as transfer targets.
+    const options = transfer.getByTestId('import-review-editor-option');
+    await expect(options.first()).toBeVisible();
+    await expect(options.filter({ hasText: 'Ally Savings' })).toHaveCount(1);
+
+    // The account the import is going into is not: a transfer to itself
+    // is not a transfer.
+    await expect(
+      options.filter({ hasText: 'Keyboard Review Transfer Open' }),
+    ).toHaveCount(0);
+  });
+
+  test('a transfer shows in the row and imports as a transfer', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Import',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('t');
+    const transfer = dialog.getByTestId('import-review-transfer');
+    await expect(transfer).toBeVisible();
+
+    const field = transfer.getByTestId('import-review-transfer-target');
+    await field.click();
+    await field.pressSequentially('Ally Savings');
+    await page.keyboard.press('Enter');
+
+    await transfer.getByTestId('import-review-transfer-save').click();
+    await expect(transfer).not.toBeVisible();
+
+    // The row says where the money goes: the account in the payee
+    // column, and "Transfer" in the category column.
+    await expect(rows.nth(0)).toContainText('Ally Savings');
+    await expect(rows.nth(0)).toContainText('Transfer');
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // The row landed in the source account as a transfer: its payee is
+    // the target account, and the money left.
+    const landed = accountPage.transactionTableRow.filter({
+      hasText: 'Ally Savings',
+    });
+    await expect(landed.first()).toBeVisible();
+    await expect(landed.first().getByTestId('debit')).toHaveText('25.00');
+
+    // And the mirror landed in the target account, with the amount
+    // flipped: the money arrived there.
+    const targetPage = await navigation.goToAccountPage('Ally Savings');
+    const mirror = targetPage.transactionTableRow.filter({
+      hasText: 'Keyboard Review Transfer Import',
+    });
+    await expect(mirror.first()).toBeVisible();
+    await expect(mirror.first().getByTestId('credit')).toHaveText('25.00');
+  });
+
+  test('a split row cannot be turned into a transfer', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Split',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // Split the row first.
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+    await split.getByTestId('import-review-split-save').click();
+    await expect(split).not.toBeVisible();
+
+    // A row is EITHER a transfer OR a split. Turning a split into a
+    // transfer would throw the split away without saying so.
+    await page.keyboard.press('t');
+
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'split',
+    );
+    await expect(dialog.getByTestId('import-review-transfer')).toHaveCount(0);
+  });
+
+  test('remove transfer takes the transfer away', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Remove',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('t');
+    const transfer = dialog.getByTestId('import-review-transfer');
+    await expect(transfer).toBeVisible();
+
+    const field = transfer.getByTestId('import-review-transfer-target');
+    await field.click();
+    await field.pressSequentially('Ally Savings');
+    await page.keyboard.press('Enter');
+    await transfer.getByTestId('import-review-transfer-save').click();
+    await expect(transfer).not.toBeVisible();
+
+    await expect(rows.nth(0)).toContainText('Transfer');
+
+    // Open it again and take the transfer away.
+    await page.keyboard.press('t');
+    await expect(transfer).toBeVisible();
+    await transfer.getByTestId('import-review-transfer-remove').click();
+    await expect(transfer).not.toBeVisible();
+
+    // The row is an ordinary transaction again: the category cell says
+    // it needs a category, and the payee cell is the vendor's own name
+    // again.
+    await expect(rows.nth(0)).not.toContainText('Transfer');
+    await expect(rows.nth(0)).toContainText('Categorize');
+    await expect(rows.nth(0)).toContainText('PURCHASE');
+  });
+
   test('the help overlay lists the keys', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Help',

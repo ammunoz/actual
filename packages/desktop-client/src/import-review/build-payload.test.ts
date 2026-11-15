@@ -42,6 +42,189 @@ function buildState(rows: readonly Record<string, unknown>[]) {
   return buildPreviewState(resolved, 'cautious');
 }
 
+describe('the transfer target', () => {
+  it('sends the target accounts transfer payee', () => {
+    const state = buildState([mkRow()]);
+    const transfer = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: 'a-checking' },
+      })),
+    };
+    const payload = buildApplyPayload(transfer, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBe('p-transfer');
+  });
+
+  it('refuses a target the budget has no transfer payee for', () => {
+    // Without the check the row would fall through to the ordinary payee
+    // path and land as an ordinary transaction, with nothing saying so.
+    const state = buildState([mkRow()]);
+    const transfer = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: 'a-nope' },
+      })),
+    };
+    expect(() =>
+      buildApplyPayload(transfer, {
+        accountId: 'a-1',
+        payees: PAYEES,
+        categories: CATEGORIES,
+      }),
+    ).toThrow(/TRANSFER-001/);
+  });
+
+  it('lands a cleared auto-detected transfer under the vendors name', () => {
+    // The resolver detected the transfer because the vendor string WAS
+    // an account's name. The user says it is not a transfer, so the row
+    // lands under an ordinary payee with that name — which is the
+    // vendor's own name, not a new vendor.
+    const state = buildState([mkRow({ payeeRaw: 'Demo Checking' })]);
+    const cleared = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: '' },
+      })),
+    };
+    const payload = buildApplyPayload(cleared, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBeUndefined();
+    expect(payload[0].payee_name).toBe('Demo Checking');
+  });
+
+  it('refuses a row that is both a transfer and a split', () => {
+    // The two say contradictory things about where the money goes: a
+    // transfer's payee is the other account, and a split's legs carry
+    // their own categories. The UI refuses the edit; the apply step is
+    // the last place that can catch it.
+    const state = buildState([mkRow()]);
+    const both = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: {
+          ...row.edits,
+          transferAccountId: 'a-checking',
+          splits: [
+            { amountCents: -1500, categoryId: 'c-groceries' },
+            { amountCents: -1000, categoryId: 'c-groceries' },
+          ],
+        },
+      })),
+    };
+    expect(() =>
+      buildApplyPayload(both, {
+        accountId: 'a-1',
+        payees: PAYEES,
+        categories: CATEGORIES,
+      }),
+    ).toThrow(/SPLIT-006/);
+  });
+
+  it('sends an ordinary row when the transfer was cleared', () => {
+    // The empty string is the "cleared" marker: it overrides the
+    // resolver's auto-detect.
+    const state = buildState([mkRow()]);
+    const transfer = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: '' },
+      })),
+    };
+    const payload = buildApplyPayload(transfer, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].payee).toBe('p-coffee');
+  });
+});
+
+describe('the update path of a transfer', () => {
+  // A row that is already in the budget is edited IN PLACE, through
+  // `transaction-update`. A transfer is a COLUMN, so it can be applied
+  // there — and it has to be, or the edit would be dropped silently.
+  function buildTransferState(
+    edits: Record<string, unknown>,
+    rowOverrides: Record<string, unknown> = {},
+  ) {
+    const state = buildState([mkRow(rowOverrides)]);
+    return {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, ...edits },
+      })),
+    };
+  }
+
+  const opts = {
+    accountId: 'a-1',
+    matchedTransactionIds: new Map([['row-0', 'trx-1']]),
+    payees: PAYEES,
+    categories: CATEGORIES,
+    editedRowKeys: new Set(['row-0']),
+  };
+
+  it('sends an update for a row whose ONLY edit is the transfer', () => {
+    // Without this the update would carry nothing at all, and the
+    // transfer would be dropped while the import reported success.
+    const state = buildTransferState({ transferAccountId: 'a-checking' });
+    const { updates } = buildUpdatePayload(state, opts);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.payee).toBe('p-transfer');
+  });
+
+  it('sends nothing when the transfer is the one the resolver found', () => {
+    // The resolver's transfer detection matched the vendor string
+    // against an account name, so the row was already this transfer.
+    const state = buildState([mkRow({ payeeRaw: 'Demo Checking' })]);
+    const same = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: 'a-checking' },
+      })),
+    };
+    const { updates } = buildUpdatePayload(same, opts);
+    expect(updates).toEqual([]);
+  });
+
+  it('clears the payee when an auto-detected transfer is removed', () => {
+    // The resolver matched the ACCOUNT, not a payee, so there is no
+    // payee to go back to. Creating a payee named after the account
+    // would put the money under a vendor that does not exist.
+    const state = buildState([mkRow({ payeeRaw: 'Demo Checking' })]);
+    const cleared = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, transferAccountId: '' },
+      })),
+    };
+    const { updates } = buildUpdatePayload(cleared, opts);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.payee).toBeNull();
+    expect(updates[0].payeeNameToCreate).toBeUndefined();
+  });
+
+  it('refuses a transfer target the budget cannot honour', () => {
+    const state = buildTransferState({ transferAccountId: 'a-nope' });
+    expect(() => buildUpdatePayload(state, opts)).toThrow(/TRANSFER-001/);
+  });
+});
+
 describe('buildApplyPayload', () => {
   it('sends the account, date and amount', () => {
     const state = buildState([mkRow()]);

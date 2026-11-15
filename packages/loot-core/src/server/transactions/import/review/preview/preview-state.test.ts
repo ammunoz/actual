@@ -16,6 +16,7 @@ import {
   unsavedWork,
   updateEdits,
   validateSplitRow,
+  validateTransferRow,
   withSplit,
   withTransfer,
   withTrustLevel,
@@ -265,6 +266,18 @@ describe('effectiveTransferAccountId', () => {
   it('is undefined for an ordinary row', () => {
     const state = buildPreviewState([mkRow()], 'cautious');
     expect(effectiveTransferAccountId(state.rows[0])).toBeUndefined();
+  });
+
+  it('treats the empty string as CLEARED, so the row is not a transfer', () => {
+    // The auto-detect is a prefill, and the user has to be able to
+    // disagree with it. `undefined` means "not touched", so the clear
+    // needs its own marker.
+    const state = buildPreviewState(
+      [mkRow({ matchedTransferAccountId: 'a-2' })],
+      'cautious',
+    );
+    const next = updateEdits(state, 't-1', { transferAccountId: '' });
+    expect(effectiveTransferAccountId(next.rows[0])).toBeUndefined();
   });
 });
 
@@ -618,6 +631,13 @@ describe('withTransfer', () => {
     expect(edits.transferAccountId).toBeUndefined();
   });
 
+  it('clears the transfer, auto-detect and all, when the account is empty', () => {
+    // The empty string is the "cleared" marker: it overrides the
+    // resolver's auto-detect, which `undefined` does not.
+    const edits = withTransfer({ transferAccountId: 'a-2' }, '');
+    expect(edits.transferAccountId).toBe('');
+  });
+
   it('keeps the other edits', () => {
     const edits = withTransfer({ payeeCanonical: 'Krogger' }, 'a-2');
     expect(edits.payeeCanonical).toBe('Krogger');
@@ -678,5 +698,48 @@ describe('validateSplitRow', () => {
       ],
     });
     expect(validateSplitRow(next.rows[0])?.code).toBe('SPLIT-006');
+  });
+});
+
+describe('validateTransferRow', () => {
+  it('has nothing to say about a row that is not a transfer', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    expect(validateTransferRow(state.rows[0], new Set())).toBeNull();
+  });
+
+  it('accepts a transfer target the budget has a transfer payee for', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { transferAccountId: 'a-2' });
+    expect(validateTransferRow(next.rows[0], new Set(['a-2']))).toBeNull();
+  });
+
+  it('rejects a transfer target the budget cannot honour', () => {
+    // Without a transfer payee the payload falls back to the ordinary
+    // payee path, and the row lands as an ordinary transaction without
+    // saying so.
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { transferAccountId: 'a-2' });
+    expect(validateTransferRow(next.rows[0], new Set())?.code).toBe(
+      'TRANSFER-001',
+    );
+  });
+
+  it('rejects an auto-detected transfer the budget cannot honour', () => {
+    const state = buildPreviewState(
+      [mkRow({ matchedTransferAccountId: 'a-2' })],
+      'cautious',
+    );
+    expect(validateTransferRow(state.rows[0], new Set())?.code).toBe(
+      'TRANSFER-001',
+    );
+  });
+
+  it('says nothing about a transfer the user cleared', () => {
+    const state = buildPreviewState(
+      [mkRow({ matchedTransferAccountId: 'a-2' })],
+      'cautious',
+    );
+    const next = updateEdits(state, 't-1', { transferAccountId: '' });
+    expect(validateTransferRow(next.rows[0], new Set())).toBeNull();
   });
 });

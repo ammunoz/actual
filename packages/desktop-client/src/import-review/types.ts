@@ -120,7 +120,14 @@ export type ImportReviewUpdate = {
   amount: number;
   /** The date, `YYYY-MM-DD`. */
   date: string;
-  payee?: string;
+  /**
+   * The payee id, or `null` to CLEAR the payee.
+   *
+   * `null` is what a row whose transfer was removed needs: the
+   * transaction's payee is the transfer payee, and leaving it there
+   * would keep the row a transfer.
+   */
+  payee?: string | null;
   category?: string;
   notes?: string;
 };

@@ -21,6 +21,7 @@ import { evaluateRow } from './gating';
 import type { GateOpts, RowEvaluation } from './gating';
 import { SplitValidationError, validateSplit } from './split-primitives';
 import type { PreviewSplitLeg } from './split-primitives';
+import { TransferValidationError } from './transfer-primitives';
 
 /**
  * What the user decided about a row.
@@ -72,8 +73,20 @@ export type PreviewEdits = {
    * User-set transfer target: the budget account id this row moves money
    * to/from. Set either by the resolver's auto-detect or manually.
    *
-   * `undefined` → ordinary (non-transfer) row. Set → the apply step
-   * converts the account id into the account's transfer payee id.
+   * Three states, and `undefined` cannot mean two of them:
+   *
+   *   `undefined` → the user has not touched the transfer; the apply step
+   *                 falls back to the resolver's auto-detect, which is a
+   *                 PREFILL and not a fact.
+   *   `''`        → the user CLEARED the transfer, including an
+   *                 auto-detected one. The row is not a transfer.
+   *   an id      → the user chose this account. The apply step converts
+   *                 the account id into the account's transfer payee id.
+   *
+   * The empty string is the "cleared" marker, exactly as it is for
+   * `categoryId`: `undefined` means "not touched", and a row the resolver
+   * auto-detected as a transfer has to be CLEARABLE, or the user cannot
+   * disagree with the resolver.
    */
   transferAccountId?: string;
   /**
@@ -135,6 +148,40 @@ export function validateSplitRow(row: PreviewRow): SplitValidationError | null {
 }
 
 /**
+ * Pure: check a row's TRANSFER target against the budget.
+ *
+ * The target is an account id, and the import needs the account's hidden
+ * TRANSFER PAYEE to send it. A budget has one transfer payee per account
+ * (Actual creates it with the account), so an account without one is
+ * either a leftover or a target that was deleted between the edit and the
+ * apply.
+ *
+ * The consequence of sending such a row is SILENT and wrong: the payload
+ * builder falls back to the ordinary payee path, and the row lands as an
+ * ordinary transaction with the account's name as its payee — not a
+ * transfer at all, with nothing saying so.
+ *
+ * `liveTransferAccountIds` is the set of accounts the budget has a
+ * transfer payee for. Only the apply step knows which payees are live, so
+ * the caller passes them in.
+ *
+ * `null` when the row is not a transfer, or when its target can be
+ * honoured.
+ */
+export function validateTransferRow(
+  row: PreviewRow,
+  liveTransferAccountIds: ReadonlySet<string>,
+): TransferValidationError | null {
+  const accountId = effectiveTransferAccountId(row);
+  if (accountId === undefined) return null;
+  if (liveTransferAccountIds.has(accountId)) return null;
+  return new TransferValidationError(
+    'TRANSFER-001',
+    'TRANSFER-001: the transfer target has no transfer payee',
+  );
+}
+
+/**
  * Pure: the edits that make a row a SPLIT.
  *
  * A row is EITHER a transfer OR a split, never both. Upstream nulls a
@@ -144,6 +191,12 @@ export function validateSplitRow(row: PreviewRow): SplitValidationError | null {
  *
  * The rule lives here rather than in the UI so that it cannot be
  * forgotten: setting one clears the other.
+ *
+ * The UI REFUSES the edit as well, rather than letting the clear happen
+ * silently — the editor's guard is the call site that turns the rule
+ * into a message the user can read. The apply step enforces it too, and
+ * fails the import: a row that carries both says two contradictory
+ * things about where its money goes.
  *
  * `splits` is `undefined` to UN-SPLIT the row. That is not the same as an
  * empty list — see `PreviewEdits.splits` for why a zero-leg or one-leg
@@ -162,10 +215,16 @@ export function withSplit(
  * The mirror of `withSplit`: setting a transfer clears the split, so the
  * row says one thing about where its money goes and not two.
  *
- * `accountId` is `undefined` to clear the user's own transfer choice.
- * That does NOT clear the resolver's auto-detect — the auto-detect is a
- * prefill, and `effectiveTransferAccountId` still reports it. A row the
- * resolver thinks is a transfer cannot be split at all; see
+ * `accountId` has two ways to say "no transfer":
+ *
+ *   `undefined` → clear the user's own choice. The resolver's
+ *                 auto-detect comes BACK, because it is a prefill and the
+ *                 user did not say anything about it.
+ *   `''`        → the row is not a transfer, whatever the resolver
+ *                 thought. This is what the "Remove transfer" action
+ *                 writes.
+ *
+ * A row the resolver thinks is a transfer cannot be split at all; see
  * `withSplit`.
  */
 export function withTransfer(
@@ -248,11 +307,21 @@ export function effectiveAmountCents(row: PreviewRow): number {
  * The auto-detect is a *prefill*, not a fact — the row stays pending until
  * the user confirms it, at which point the editor writes the value into
  * `edits.transferAccountId`.
+ *
+ * An EMPTY STRING means the user CLEARED the transfer, including an
+ * auto-detected one, so the row is not a transfer at all. Without this,
+ * `edits.transferAccountId` could not say "not a transfer": `undefined`
+ * means "not touched", and the auto-detect would come back.
  */
 export function effectiveTransferAccountId(
   row: PreviewRow,
 ): string | undefined {
-  return row.edits.transferAccountId ?? row.matchedTransferAccountId;
+  if (row.edits.transferAccountId !== undefined) {
+    return row.edits.transferAccountId === ''
+      ? undefined
+      : row.edits.transferAccountId;
+  }
+  return row.matchedTransferAccountId;
 }
 
 /** Code emitted when a preview helper cannot find the row. */

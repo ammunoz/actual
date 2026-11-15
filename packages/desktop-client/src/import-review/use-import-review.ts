@@ -26,6 +26,7 @@ import {
   rowKey,
   SplitValidationError,
   summarize,
+  TransferValidationError,
   unsavedWork,
   updateEdits,
   upsertVendorMapEntry,
@@ -59,6 +60,7 @@ import {
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import { splitErrorMessage } from './split-error-labels';
+import { transferErrorMessage } from './transfer-error-labels';
 import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
@@ -889,6 +891,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // tests, and a person has to be able to read it.
       if (err instanceof SplitValidationError) {
         setError(splitErrorMessage(err.code, t));
+        return false;
+      }
+      // The same for a transfer the budget cannot honour: the code is
+      // for logs and for tests, and a person has to be able to read it.
+      if (err instanceof TransferValidationError) {
+        setError(transferErrorMessage(err.code, t));
         return false;
       }
       setError(err instanceof Error ? err.message : 'Import failed');

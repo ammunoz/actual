@@ -48,6 +48,7 @@ import {
   rowKey,
   SplitValidationError,
   validateSplitRow,
+  validateTransferRow,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type { ImportPreviewState } from '@actual-app/core/server/transactions/import/review/index';
 
@@ -170,6 +171,12 @@ function buildPayload(
   const livePayeeNames = new Set(
     opts.payees.map(p => normalizePayeeName(p.name)),
   );
+  // The accounts the budget has a transfer payee for. A transfer is sent
+  // as that payee, so an account without one cannot be a transfer
+  // target.
+  const liveTransferAccountIds = new Set(
+    opts.payees.map(p => p.transfer_acct).filter((id): id is string => !!id),
+  );
 
   const out: ImportReviewTransaction[] = [];
 
@@ -186,6 +193,17 @@ function buildPayload(
     // happens first.
     const evaluation = evaluateRow(row, state.trustLevel, { livePayeeNames });
     if (!evaluation.willSend) continue;
+
+    // A transfer the budget cannot honour is not sent at all.
+    //
+    // Without this check the row would fall through to the ordinary
+    // payee path below and land as an ordinary transaction with the
+    // account's name as its payee — not a transfer, with nothing saying
+    // so.
+    const transferProblem = validateTransferRow(row, liveTransferAccountIds);
+    if (transferProblem) {
+      throw transferProblem;
+    }
 
     // The payee the user ended up with. A transfer target wins over the
     // ordinary payee: a transfer row is not a payee row.
@@ -260,6 +278,17 @@ function buildPayload(
     } else if (row.matchedPayeeId) {
       payload.payee = row.matchedPayeeId;
     } else if (userPayee) {
+      // A transfer the user CLEARED lands here, and the payee is the
+      // account's name — because the resolver auto-detected the
+      // transfer by matching the vendor string against the account
+      // names, so the vendor WAS called that. The row is no longer a
+      // transfer, and it lands under an ordinary payee with the
+      // vendor's own name.
+      //
+      // It cannot land back on the transfer payee: that payee's name
+      // column is empty (the budget shows the account's name instead),
+      // so looking the name up finds nothing and Actual creates an
+      // ordinary payee.
       payload.payee_name = userPayee;
     }
 
@@ -402,6 +431,9 @@ export function buildUpdatePayload(
   const livePayeeNames = new Set(
     opts.payees.map(p => normalizePayeeName(p.name)),
   );
+  const liveTransferAccountIds = new Set(
+    opts.payees.map(p => p.transfer_acct).filter((id): id is string => !!id),
+  );
   const updates: PendingUpdate[] = [];
 
   for (const row of state.rows) {
@@ -428,6 +460,17 @@ export function buildUpdatePayload(
     const dateChanged = editedDate !== undefined && editedDate !== row.date;
     const editedPayee = row.edits.payeeCanonical;
     const payeeChanged = editedPayee !== undefined;
+    // The transfer the user chose, compared against what the resolver
+    // found.
+    //
+    // A transfer is a change even when nothing else is: the row's payee
+    // IS the transfer, and without this a row whose only edit is the
+    // transfer would send no update at all, and the transfer would be
+    // dropped silently.
+    const editedTransfer = row.edits.transferAccountId;
+    const transferChanged =
+      editedTransfer !== undefined &&
+      editedTransfer !== (row.matchedTransferAccountId ?? '');
     const editedCategory = row.edits.categoryId;
     const editedMemo = row.edits.memo;
     const memoChanged = editedMemo !== undefined;
@@ -443,6 +486,7 @@ export function buildUpdatePayload(
       amountChanged ||
       dateChanged ||
       payeeChanged ||
+      transferChanged ||
       liveCategoryId !== undefined ||
       memoChanged;
     if (!hasChange) continue;
@@ -455,6 +499,11 @@ export function buildUpdatePayload(
     };
 
     let payeeNameToCreate: string | undefined;
+
+    const transferProblem = validateTransferRow(row, liveTransferAccountIds);
+    if (transferProblem) {
+      throw transferProblem;
+    }
 
     const transferAccountId = effectiveTransferAccountId(row);
     const transferPayeeId = transferAccountId
@@ -473,6 +522,23 @@ export function buildUpdatePayload(
       } else {
         payeeNameToCreate = editedPayee;
       }
+    } else if (row.edits.transferAccountId === '') {
+      // The user CLEARED a transfer on a row that is already in the
+      // budget. The transaction's payee is the transfer payee, and
+      // leaving it there would keep the row a transfer.
+      //
+      // The payee is CLEARED rather than replaced. The transfer that is
+      // being cleared is the one the resolver AUTO-DETECTED — a
+      // transfer the user set and then cleared leaves the row as it
+      // was, and sends no update at all. The resolver matched the
+      // ACCOUNT and not a payee, so there is no payee to go back to;
+      // creating a payee named after the account would put the money
+      // under a vendor that does not exist.
+      //
+      // Clearing the payee also drops the mirror: upstream's
+      // `transfer.onUpdate` sees a transaction with no transfer payee
+      // and removes the other side.
+      update.payee = null;
     }
 
     if (liveCategoryId !== undefined) {
