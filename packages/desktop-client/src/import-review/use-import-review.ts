@@ -20,6 +20,7 @@ import {
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
+  groupRanges,
   isSameRouting,
   isSplitRow,
   isUsableDate,
@@ -556,21 +557,45 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // The PREVIEW payload marks nothing as skipped: Actual skips a
         // marked row before it reports the match, so a marked row would
         // come back with no correlation at all.
-        const preview = await send('transactions-import', {
-          accountId,
-          // The same cast as the import itself, for the same reason: a
-          // split leg's category is `null` when it has none, and
-          // upstream's type says `string | undefined`.
-          transactions: buildPreviewPayload(
-            { rows: accountRows, trustLevel: trustLevelRef.current },
-            {
-              accountId,
-              payees: payeeRefs(payeeList),
-              categories: categoryList.map(c => ({ id: c.id })),
-            },
-          ) as ImportTransactionEntity[],
-          isPreview: true,
-        });
+        let preview: {
+          updatedPreview?: {
+            existing?: { id?: string };
+            transaction?: unknown;
+          }[];
+        };
+        try {
+          preview = await send('transactions-import', {
+            accountId,
+            // The same cast as the import itself, for the same reason: a
+            // split leg's category is `null` when it has none, and
+            // upstream's type says `string | undefined`.
+            transactions: buildPreviewPayload(
+              { rows: accountRows, trustLevel: trustLevelRef.current },
+              {
+                accountId,
+                payees: payeeRefs(payeeList),
+                categories: categoryList.map(c => ({ id: c.id })),
+              },
+            ) as ImportTransactionEntity[],
+            isPreview: true,
+          });
+        } catch (err) {
+          // The preview REFUSES a row the import would refuse: a
+          // transfer whose target has no transfer payee, or a split
+          // whose legs do not add up. Such a row cannot be imported
+          // either way, so its match does not matter — and the apply
+          // step reports the refusal in the user's words.
+          //
+          // Only those refusals are swallowed. Anything else is a real
+          // failure and is passed on.
+          if (
+            !(err instanceof TransferValidationError) &&
+            !(err instanceof SplitValidationError)
+          ) {
+            throw err;
+          }
+          continue;
+        }
 
         preview.updatedPreview?.forEach(entry => {
           const existing = entry.existing;
@@ -963,17 +988,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     [matchedTransactionIds],
   );
 
-  const buildUpdates = useCallback(() => {
-    if (!state) return { updates: [] };
-    return buildUpdatePayload(state, {
-      accountId,
-      matchedTransactionIds,
-      payees: payeeRefs(payees),
-      categories: categories.map(c => ({ id: c.id })),
-      editedRowKeys: editedRowKeys.current,
-    });
-  }, [state, accountId, categories, matchedTransactionIds, payees]);
-
   /**
    * Write the vendor-map entries the user's payee choices earned.
    *
@@ -1271,25 +1285,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return matchedTransactionIds.has(rowKey(row));
       });
 
-      // Rows the user edited AND that matched an existing transaction are
-      // updated in place: Actual's import UPDATE path keeps the existing
-      // payee and category, so an edit sent through `transactions-import`
-      // would be silently discarded.
-      const { updates } = buildUpdates();
-
-      // The rows that are about to be updated are excluded from the
-      // import, so the import's update path cannot undo them.
-      const updatedRowKeys = new Set(updates.map(u => u.rowKey));
-
-      // The splits that are reconciled are excluded too: the
-      // reconciliation writes the parent and its legs, and the import
-      // would take the parent's FITID-matched row down its update path,
-      // which cannot touch the legs.
-      for (const row of splitRows) {
-        updatedRowKeys.add(rowKey(row));
-      }
-
-      // The import payload is built BEFORE anything is written.
+      // ---- Phase 1: build, for every group --------------------------
+      //
+      // Every payload is built BEFORE anything is written.
       //
       // Building it can refuse the import: a transfer whose target has no
       // transfer payee, or a split whose legs do not add up. A refusal
@@ -1297,13 +1295,64 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // budget and the rest of the file unimported, with no way to tell
       // that is what happened. Built first, a refusal happens with
       // nothing written.
-      const payload = buildApplyPayload(state, {
-        accountId,
-        payees: payeeRefs(payees),
-        categories: categories.map(c => ({ id: c.id })),
-        updatedRowKeys,
+      //
+      // With several groups this matters more, not less: a refusal in the
+      // SECOND group must not leave the first group written either.
+      //
+      // The routing and the rows are set together, but a review with no
+      // routing at all would import nothing, and the user asked for an
+      // import. One group with the account the review was opened for is
+      // what the review did before routing existed.
+      const routing =
+        groups.length > 0
+          ? groups
+          : defaultGroups(state.rows.length, accountId);
+
+      const plans = groupRanges(routing, state.rows.length).map(range => {
+        const groupAccountId = range.group.accountId;
+        const groupRows = state.rows.slice(range.start, range.end + 1);
+        const groupState: ImportPreviewState = {
+          rows: groupRows,
+          trustLevel: state.trustLevel,
+        };
+
+        // Rows the user edited AND that matched an existing transaction
+        // are updated in place: Actual's import UPDATE path keeps the
+        // existing payee and category, so an edit sent through
+        // `transactions-import` would be silently discarded.
+        const { updates } = buildUpdatePayload(groupState, {
+          accountId: groupAccountId,
+          matchedTransactionIds,
+          payees: payeeRefs(payees),
+          categories: categories.map(c => ({ id: c.id })),
+          editedRowKeys: editedRowKeys.current,
+        });
+
+        // The rows that are about to be updated are excluded from the
+        // import, so the import's update path cannot undo them.
+        const updatedRowKeys = new Set(updates.map(u => u.rowKey));
+
+        // The splits that are reconciled are excluded too: the
+        // reconciliation writes the parent and its legs, and the import
+        // would take the parent's FITID-matched row down its update path,
+        // which cannot touch the legs.
+        for (const row of splitRows) {
+          if (row.accountId !== groupAccountId) continue;
+          updatedRowKeys.add(rowKey(row));
+        }
+
+        const payload = buildApplyPayload(groupState, {
+          accountId: groupAccountId,
+          payees: payeeRefs(payees),
+          categories: categories.map(c => ({ id: c.id })),
+          updatedRowKeys,
+        });
+
+        return { accountId: groupAccountId, updates, payload };
       });
 
+      // ---- Phase 2: write -------------------------------------------
+      //
       // The splits that are already in the budget are reconciled FIRST,
       // so the legs are in place before anything else is written.
       if (splitRows.length > 0) {
@@ -1316,36 +1365,52 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // created before the update can point at it: `transaction-update`
       // cannot create a payee from a name, because `payee_name` is not a
       // column on the transaction.
+      //
+      // The payees are created ONCE, before any import runs, and the
+      // names are collected across every group. `payee-create` does NOT
+      // dedupe by name — it always inserts — so a payee two groups need
+      // would otherwise be created twice, and an import that creates the
+      // same payee would leave a duplicate behind.
       const createdPayeeIds = new Map<string, string>();
-
-      for (const { update, payeeNameToCreate } of updates) {
-        if (payeeNameToCreate !== undefined) {
-          let payeeId = createdPayeeIds.get(payeeNameToCreate);
-          if (!payeeId) {
-            const created = await send('payee-create', {
-              name: payeeNameToCreate,
-            });
-            if (typeof created === 'string') {
-              payeeId = created;
-              createdPayeeIds.set(payeeNameToCreate, payeeId);
-            }
+      const namesToCreate = new Set<string>();
+      for (const plan of plans) {
+        for (const { payeeNameToCreate } of plan.updates) {
+          if (payeeNameToCreate !== undefined) {
+            namesToCreate.add(payeeNameToCreate);
           }
-          if (!payeeId) {
-            // The payee could not be created, so the update would go
-            // through WITHOUT the payee the user chose - the edit would be
-            // silently dropped while the apply reported success. Better to
-            // say so.
-            setStatus('reviewing');
-            setError(t('The payee could not be created'));
-            return false;
-          }
-          update.payee = payeeId;
         }
-        await send('transaction-update', update);
-        didChange = true;
+      }
+      for (const name of namesToCreate) {
+        const created = await send('payee-create', { name });
+        if (typeof created === 'string') {
+          createdPayeeIds.set(name, created);
+        }
       }
 
-      if (payload.length === 0) {
+      // The updates, group by group.
+      for (const plan of plans) {
+        for (const { update, payeeNameToCreate } of plan.updates) {
+          if (payeeNameToCreate !== undefined) {
+            const payeeId = createdPayeeIds.get(payeeNameToCreate);
+            if (!payeeId) {
+              // The payee could not be created, so the update would go
+              // through WITHOUT the payee the user chose - the edit would
+              // be silently dropped while the apply reported success.
+              // Better to say so.
+              setStatus('reviewing');
+              setError(t('The payee could not be created'));
+              return false;
+            }
+            update.payee = payeeId;
+          }
+          await send('transaction-update', update);
+          didChange = true;
+        }
+      }
+
+      const imports = plans.filter(plan => plan.payload.length > 0);
+
+      if (imports.length === 0) {
         // Every row was updated in place. The updates above were written,
         // so this is a SUCCESS, not a failure with nothing to do.
         setStatus('reviewing');
@@ -1364,62 +1429,86 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return false;
       }
 
+      // The imports, group by group.
+      //
       // The updates above are already written by the time the import runs,
       // so the two are not atomic: if the import fails, the updates stay.
       // That is deliberate — the updates are the user's explicit edits and
       // re-sending them would be a no-op — but it is worth knowing.
-      let importErrors: { message: string }[] | undefined;
-      let added: string[] = [];
-      let updated: string[] = [];
-      try {
-        const result = await send('transactions-import', {
-          accountId,
-          // The cast is here, and only here, because upstream types a
-          // split leg's `category` as `string | undefined` while its
-          // runtime accepts `null` — and the difference is load-bearing:
-          // upstream's `makeChild` decides inherit-vs-override with
-          // `"category" in data`, so a leg WITHOUT the key inherits the
-          // parent's category. `null` says "no category" outright.
-          //
-          // Widening the call instead would push the same problem into
-          // every caller of `transactions-import`.
-          transactions: payload as ImportTransactionEntity[],
-          isPreview: false,
-        });
-        importErrors = result.errors;
-        added = result.added ?? [];
-        updated = result.updated ?? [];
-      } catch (err) {
-        setStatus('reviewing');
-        // The updates above were already written, so the message says
-        // which half failed: the user has to know that their edits are
-        // in the budget even though the import did not go through.
-        setError(
-          t('The edits were saved, but the import failed: {{message}}', {
-            message: err instanceof Error ? err.message : String(err),
-          }),
-        );
-        return false;
-      }
-      if (importErrors && importErrors.length > 0) {
-        setStatus('reviewing');
-        // The edits above are already written, so the message says so:
-        // the user has to know that their edits are in the budget even
-        // though the import did not go through.
-        setError(
-          didChange
-            ? t('The edits were saved, but the import failed: {{message}}', {
-                message: importErrors[0].message,
-              })
-            : importErrors[0].message,
-        );
-        return false;
-      }
+      //
+      // The first group that fails stops the rest. A partial import is
+      // harder to reason about than a clean stop, and the user can fix
+      // the group and apply again.
+      for (const plan of imports) {
+        const accountName =
+          accounts.find(account => account.id === plan.accountId)?.name ??
+          plan.accountId;
+        let importErrors: { message: string }[] | undefined;
+        let added: string[] = [];
+        let updated: string[] = [];
+        try {
+          const result = await send('transactions-import', {
+            accountId: plan.accountId,
+            // The cast is here, and only here, because upstream types a
+            // split leg's `category` as `string | undefined` while its
+            // runtime accepts `null` — and the difference is load-bearing:
+            // upstream's `makeChild` decides inherit-vs-override with
+            // `"category" in data`, so a leg WITHOUT the key inherits the
+            // parent's category. `null` says "no category" outright.
+            //
+            // Widening the call instead would push the same problem into
+            // every caller of `transactions-import`.
+            transactions: plan.payload as ImportTransactionEntity[],
+            isPreview: false,
+          });
+          importErrors = result.errors;
+          added = result.added ?? [];
+          updated = result.updated ?? [];
+        } catch (err) {
+          setStatus('reviewing');
+          // The updates above were already written, so the message says
+          // which half failed: the user has to know that their edits are
+          // in the budget even though the import did not go through.
+          setError(
+            didChange
+              ? t(
+                  'The edits were saved, but the import into {{account}} failed: {{message}}',
+                  {
+                    account: accountName,
+                    message: err instanceof Error ? err.message : String(err),
+                  },
+                )
+              : t('The import into {{account}} failed: {{message}}', {
+                  account: accountName,
+                  message: err instanceof Error ? err.message : String(err),
+                }),
+          );
+          return false;
+        }
+        if (importErrors && importErrors.length > 0) {
+          setStatus('reviewing');
+          // The edits above are already written, so the message says so:
+          // the user has to know that their edits are in the budget even
+          // though the import did not go through.
+          setError(
+            didChange
+              ? t(
+                  'The edits were saved, but the import into {{account}} failed: {{message}}',
+                  { account: accountName, message: importErrors[0].message },
+                )
+              : t('The import into {{account}} failed: {{message}}', {
+                  account: accountName,
+                  message: importErrors[0].message,
+                }),
+          );
+          return false;
+        }
 
-      // Whether anything actually changed, from what the server reports —
-      // not from the absence of errors. A payload of only dropped rows
-      // imports nothing.
-      didChange = didChange || added.length > 0 || updated.length > 0;
+        // Whether anything actually changed, from what the server reports
+        // — not from the absence of errors. A payload of only dropped rows
+        // imports nothing.
+        didChange = didChange || added.length > 0 || updated.length > 0;
+      }
     } catch (err) {
       setStatus('reviewing');
       // A split that does not fit its row is reported in the user's
@@ -1462,9 +1551,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     return false;
   }, [
     accountId,
-    buildUpdates,
+    accounts,
     categories,
     clearFromStore,
+    groups,
     matchedTransactionIds,
     reconcileSplits,
     state,

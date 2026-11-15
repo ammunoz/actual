@@ -424,6 +424,134 @@ describe('useImportReview', () => {
     ]);
   });
 
+  it('imports each group into its own account', async () => {
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    // Upstream's import takes ONE account per call, so a review that
+    // routes its rows into two accounts imports twice.
+    const imports = sendMock.mock.calls.filter(
+      call => call[0] === 'transactions-import' && call[1]?.isPreview === false,
+    );
+    expect(imports.map(call => call[1]?.accountId)).toEqual(['a-1', 'a-2']);
+  });
+
+  it('routes the rows even when one of them cannot be imported', async () => {
+    const { result } = await renderReview();
+
+    // A transfer to an account with no transfer payee cannot be
+    // imported. The preview refuses it, and the refusal is swallowed:
+    // the row will not import either way, and the apply step reports it
+    // in the user's words.
+    act(() => {
+      result.current.edit(1, { transferAccountId: 'a-2' });
+    });
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+
+    expect(result.current.status).toBe('reviewing');
+    expect(result.current.groups).toEqual([
+      { start: 0, accountId: 'a-1' },
+      { start: 1, accountId: 'a-2' },
+    ]);
+  });
+
+  it('creates a payee two groups need only once', async () => {
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          // Both rows are already in the budget, in the accounts they
+          // are routed to.
+          return {
+            data: [
+              { id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' },
+              { id: 'txn-2', imported_id: 'FITID-2', account: 'a-2' },
+            ],
+            dependencies: [],
+          };
+        case 'payee-create':
+          return 'p-new';
+        case 'transaction-update':
+          return {};
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(0, { payeeCanonical: 'Brand New Payee' });
+      result.current.edit(1, { payeeCanonical: 'Brand New Payee' });
+    });
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    // `payee-create` does not dedupe by name — it always inserts — so a
+    // payee two groups need has to be created once.
+    const creates = sendMock.mock.calls.filter(
+      call => call[0] === 'payee-create',
+    );
+    expect(creates).toHaveLength(1);
+    expect(creates[0][1]).toEqual({ name: 'Brand New Payee' });
+  });
+
+  it('writes nothing when a group cannot be imported', async () => {
+    const { result } = await renderReview();
+
+    // A transfer to an account with no transfer payee cannot be
+    // imported, and the refusal happens while the payloads are built.
+    act(() => {
+      result.current.edit(1, { transferAccountId: 'a-2' });
+    });
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    // The FIRST group was not written either: every payload is built
+    // before anything is written.
+    const imports = sendMock.mock.calls.filter(
+      call => call[0] === 'transactions-import' && call[1]?.isPreview === false,
+    );
+    expect(imports).toHaveLength(0);
+    const updates = sendMock.mock.calls.filter(
+      call => call[0] === 'transaction-update',
+    );
+    expect(updates).toHaveLength(0);
+  });
+
   it('undoes a bulk accept in ONE step', async () => {
     // A bulk action is one change, so it is one undo — not one undo per
     // row.
