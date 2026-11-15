@@ -71,7 +71,7 @@ import {
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
 import { splitErrorMessage } from './split-error-labels';
-import { buildSplitReconciliation, childrenOf } from './split-reconcile';
+import { buildSplitReconciliation, legsOf } from './split-reconcile';
 import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
 import { VENDOR_MAP_PREF } from './types';
@@ -630,7 +630,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     const { data } = await aqlQuery(
       q('transactions')
         .filter({ id: { $oneof: parentIds } })
-        .select('*'),
+        .select('*')
+        // The legs are asked for GROUPED under their parent.
+        //
+        // Without the option, the query returns the transactions one by
+        // one and leaves the SPLIT PARENTS out entirely — a split is not
+        // a row of its own in that shape. So the review would find no
+        // parent, and the reconciliation would silently do nothing while
+        // the row was still held back from the import.
+        .options({ splits: 'grouped' }),
     );
     const transactions = (
       Array.isArray(data) ? data : []
@@ -650,7 +658,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
       const reconciliation = buildSplitReconciliation({
         parent,
-        children: childrenOf(transactions, parentId),
+        children: legsOf(parent),
         legs: row.edits.splits ?? [],
       });
       added.push(...reconciliation.added);
@@ -659,7 +667,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     }
 
     if (added.length === 0 && updated.length === 0 && deleted.length === 0) {
-      return;
+      return false;
     }
 
     await send('transactions-batch-update', {
@@ -671,6 +679,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       updated: updated as Partial<TransactionEntity>[],
       deleted,
     });
+    return true;
   }, []);
 
   const buildUpdates = useCallback(() => {
@@ -928,8 +937,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The splits that are already in the budget are reconciled FIRST,
       // so the legs are in place before anything else is written.
       if (splitRows.length > 0) {
-        await reconcileSplits(splitRows);
-        didChange = true;
+        // Whether anything was written is what the review reports, so the
+        // reconciliation says so rather than the review assuming it.
+        didChange = (await reconcileSplits(splitRows)) || didChange;
       }
 
       // A payee the user named that no existing payee matches has to be

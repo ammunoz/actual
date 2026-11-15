@@ -1,7 +1,7 @@
 import type { TransactionEntity } from '@actual-app/core/types/models';
 import { describe, expect, it } from 'vitest';
 
-import { buildSplitReconciliation, childrenOf } from './split-reconcile';
+import { buildSplitReconciliation, legsOf } from './split-reconcile';
 
 function parent(overrides: Partial<TransactionEntity> = {}): TransactionEntity {
   return {
@@ -76,7 +76,10 @@ describe('buildSplitReconciliation', () => {
     // its id — and anything the user put on it survives.
     const reconciliation = buildSplitReconciliation({
       parent: parent(),
-      children: [child({ id: 'child-1' }), child({ id: 'child-2' })],
+      children: [
+        child({ id: 'child-1', sort_order: -1 }),
+        child({ id: 'child-2', sort_order: -2 }),
+      ],
       legs: [
         { amountCents: -2000, categoryId: 'c-1' },
         { amountCents: -500, categoryId: 'c-2' },
@@ -100,7 +103,10 @@ describe('buildSplitReconciliation', () => {
   it('deletes the legs that are gone', () => {
     const reconciliation = buildSplitReconciliation({
       parent: parent(),
-      children: [child({ id: 'child-1' }), child({ id: 'child-2' })],
+      children: [
+        child({ id: 'child-1', sort_order: -1 }),
+        child({ id: 'child-2', sort_order: -2 }),
+      ],
       legs: [{ amountCents: -2500, categoryId: 'c-1' }],
     });
 
@@ -168,16 +174,24 @@ describe('buildSplitReconciliation', () => {
   });
 });
 
-describe('childrenOf', () => {
-  it('finds the legs of a transaction', () => {
-    const transactions = [
-      parent(),
-      child({ id: 'child-1' }),
-      child({ id: 'child-2', parent_id: 'txn-other' }),
-    ];
+describe('legsOf', () => {
+  it('returns the legs in the order they are shown', () => {
+    // The first leg of a split is the one with the HIGHEST sort_order:
+    // the numbers count down, and the budget reads them back that way.
+    const parentWithLegs = parent({
+      subtransactions: [
+        child({ id: 'child-2', sort_order: -2 }),
+        child({ id: 'child-1', sort_order: -1 }),
+      ],
+    });
 
-    expect(childrenOf(transactions, 'txn-1').map(t => t.id)).toEqual([
+    expect(legsOf(parentWithLegs).map(t => t.id)).toEqual([
       'child-1',
+      'child-2',
     ]);
+  });
+
+  it('has nothing for a transaction that is not a split', () => {
+    expect(legsOf(parent())).toEqual([]);
   });
 });

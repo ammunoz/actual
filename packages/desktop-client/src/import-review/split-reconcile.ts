@@ -57,14 +57,17 @@ export type SplitReconciliation = {
 /**
  * The legs of a split, in the order they are shown.
  *
- * `sort_order` is what puts them in order, and it is a float that counts
- * DOWN: a leg added later sorts before the ones that were there before.
+ * `sort_order` is what puts them in order, and it counts DOWN: a leg
+ * added later is given a LOWER `sort_order` and sorts BEFORE the ones that
+ * were there before. The budget reads them back the same way
+ * (`ORDER BY sort_order DESC`), so the first leg of a split is the one
+ * with the HIGHEST `sort_order`.
  */
 function bySortOrder(
   a: Pick<TransactionEntity, 'sort_order'>,
   b: Pick<TransactionEntity, 'sort_order'>,
 ): number {
-  return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  return (b.sort_order ?? 0) - (a.sort_order ?? 0);
 }
 
 /**
@@ -94,10 +97,15 @@ export function buildSplitReconciliation(opts: {
     // decides inherit-vs-override with `"category" in data`, so leaving
     // the key out would make the leg inherit the parent's category — and
     // a split parent's category is nothing.
+    //
+    // The legs are RE-NUMBERED, so the order on screen is the order the
+    // review shows. A leg that keeps its old number could sort in the
+    // wrong place once another leg is gone: the first leg of a split is
+    // the one with the highest number, and the numbers count down.
     const data = {
       amount: leg.amountCents,
       category: leg.categoryId ?? null,
-      sort_order: existing?.sort_order ?? -(index + 1),
+      sort_order: -(index + 1),
     };
 
     if (!existing) {
@@ -121,6 +129,7 @@ export function buildSplitReconciliation(opts: {
     id: parent.id,
     amount,
     is_parent: true,
+    is_child: false,
     category: null,
     error: null,
   });
@@ -129,14 +138,11 @@ export function buildSplitReconciliation(opts: {
 }
 
 /**
- * Pure: the legs of a transaction, taken from a list of transactions.
+ * Pure: the legs of a transaction, in the order they are shown.
  *
- * A leg is a transaction whose `parent_id` points at the parent. The list
- * is a flat list of transactions, so the legs are picked out of it.
+ * The budget is asked for the transaction with its legs GROUPED under it
+ * (`splits: 'grouped'`), so the legs are on the transaction itself.
  */
-export function childrenOf(
-  transactions: readonly TransactionEntity[],
-  parentId: string,
-): TransactionEntity[] {
-  return transactions.filter(transaction => transaction.parent_id === parentId);
+export function legsOf(parent: TransactionEntity): TransactionEntity[] {
+  return [...(parent.subtransactions ?? [])].sort(bySortOrder);
 }

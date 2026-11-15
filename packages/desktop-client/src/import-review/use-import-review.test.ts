@@ -455,6 +455,9 @@ describe('useImportReview', () => {
         case 'transactions-parse-file':
           return PARSED;
         case 'query':
+          // The legs come back GROUPED under their parent, which is how
+          // the budget is asked for them: without that option the query
+          // leaves the split parents out entirely.
           return {
             data: [
               {
@@ -465,16 +468,18 @@ describe('useImportReview', () => {
                 payee: 'p-2',
                 is_parent: true,
                 imported_id: 'FITID-1',
-              },
-              {
-                id: 'child-1',
-                account: 'a-1',
-                date: '2026-09-07',
-                amount: -2500,
-                category: 'c-1',
-                is_child: true,
-                parent_id: 'txn-1',
-                sort_order: -1,
+                subtransactions: [
+                  {
+                    id: 'child-1',
+                    account: 'a-1',
+                    date: '2026-09-07',
+                    amount: -2500,
+                    category: 'c-1',
+                    is_child: true,
+                    parent_id: 'txn-1',
+                    sort_order: -1,
+                  },
+                ],
               },
             ],
             dependencies: [],
@@ -514,6 +519,17 @@ describe('useImportReview', () => {
           expect.objectContaining({ id: 'txn-1', is_parent: true }),
           expect.objectContaining({ id: 'child-1', amount: -1500 }),
         ]),
+      }),
+    );
+
+    // The legs are asked for GROUPED under their parent. Without that
+    // option the query leaves the split parents out, and the
+    // reconciliation would find nothing to reconcile.
+    const queryCalls = sendMock.mock.calls.filter(call => call[0] === 'query');
+    const reconciliationQuery = queryCalls[queryCalls.length - 1];
+    expect(reconciliationQuery?.[1]).toEqual(
+      expect.objectContaining({
+        tableOptions: expect.objectContaining({ splits: 'grouped' }),
       }),
     );
   });
