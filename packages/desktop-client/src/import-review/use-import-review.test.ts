@@ -202,6 +202,7 @@ describe('useImportReview', () => {
   ];
   const ACCOUNTS = [
     { id: 'a-1', name: 'Demo Checking', offbudget: 0, closed: 0 },
+    { id: 'a-2', name: 'Demo Savings', offbudget: 0, closed: 0 },
   ];
   const CATEGORIES = {
     list: [{ id: 'c-1', name: 'Groceries', hidden: 0, is_income: 0 }],
@@ -326,6 +327,103 @@ describe('useImportReview', () => {
     expect(result.current.unsavedWork.hasWork).toBe(false);
   });
 
+  it('puts a row into another account', async () => {
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+
+    // The rows are partitioned at the row the user routed.
+    expect(result.current.groups).toEqual([
+      { start: 0, accountId: 'a-1' },
+      { start: 1, accountId: 'a-2' },
+    ]);
+    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
+      'a-1',
+      'a-2',
+    ]);
+  });
+
+  it('keeps the decisions and the edits when the routing changes', async () => {
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.decide(0, 'accept');
+      result.current.edit(0, { memo: 'a note from the review' });
+    });
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+
+    // The resolution is the resolver's; the decision and the edit are
+    // the user's.
+    expect(result.current.state?.rows[0].decision).toBe('accept');
+    expect(result.current.state?.rows[0].edits.memo).toBe(
+      'a note from the review',
+    );
+  });
+
+  it('undoes a routing change', async () => {
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+    expect(result.current.groups).toHaveLength(2);
+
+    act(() => {
+      result.current.undo();
+    });
+
+    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-1' }]);
+    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
+      'a-1',
+      'a-1',
+    ]);
+  });
+
+  it('asks the budget about every account the rows go to', async () => {
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+
+    // The FITID lookup covers every account: a FITID is only unique
+    // within one, so a row is matched against its OWN account.
+    const queryCalls = sendMock.mock.calls.filter(call => call[0] === 'query');
+    const lookup = queryCalls[queryCalls.length - 1];
+    expect(lookup?.[1]).toEqual(
+      expect.objectContaining({
+        filterExpressions: [
+          {
+            account: { $oneof: ['a-1', 'a-2'] },
+            imported_id: { $oneof: ['FITID-1', 'FITID-2'] },
+          },
+        ],
+      }),
+    );
+  });
+
+  it('puts every row into one account', async () => {
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.routeRow(1, 'a-2');
+    });
+    await act(async () => {
+      await result.current.routeAll('a-2');
+    });
+
+    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-2' }]);
+    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
+      'a-2',
+      'a-2',
+    ]);
+  });
+
   it('undoes a bulk accept in ONE step', async () => {
     // A bulk action is one change, so it is one undo — not one undo per
     // row.
@@ -356,8 +454,10 @@ describe('useImportReview', () => {
         case 'transactions-parse-file':
           return PARSED;
         case 'query':
+          // The account is part of the answer: a FITID is only unique
+          // within an account.
           return {
-            data: [{ id: 'txn-1', imported_id: 'FITID-1' }],
+            data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' }],
             dependencies: [],
           };
         case 'transaction-update':
@@ -406,8 +506,10 @@ describe('useImportReview', () => {
         case 'transactions-parse-file':
           return PARSED;
         case 'query':
+          // The account is part of the answer: a FITID is only unique
+          // within an account.
           return {
-            data: [{ id: 'txn-1', imported_id: 'FITID-1' }],
+            data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' }],
             dependencies: [],
           };
         case 'transaction-update':

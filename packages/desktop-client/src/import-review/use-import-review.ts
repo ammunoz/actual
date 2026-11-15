@@ -13,17 +13,21 @@ import { useTranslation } from 'react-i18next';
 import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
-  buildPreviewState,
+  defaultGroups,
+  distinctAccounts,
   emptyVendorMap,
   evaluateRow,
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
+  isSameRouting,
   isSplitRow,
   isUsableDate,
   normalizePayeeName,
-  resolvePayees,
+  rebuildPreviewState,
   rowKey,
+  setAllRowsAccount,
+  setRowAccount,
   SplitValidationError,
   summarize,
   TransferValidationError,
@@ -40,12 +44,12 @@ import type {
   PreviewEdits,
   PreviewRow,
   PreviewSummary,
-  ResolvedRow,
   ReviewAccount,
   ReviewCategory,
   ReviewPayee,
   ReviewRowInput,
   RowEvaluation,
+  RowGroup,
   TrustLevel,
   UnsavedWork,
   VendorMap,
@@ -119,6 +123,15 @@ type VendorChoice = {
  */
 type UndoSnapshot = {
   state: ImportPreviewState;
+  /**
+   * The routing the state was built for.
+   *
+   * The routing and the resolution have to travel together: a snapshot
+   * holds the rows as they were resolved for a routing, so restoring the
+   * rows without the routing would restore a resolution that belongs to
+   * accounts the review is no longer using.
+   */
+  groups: readonly RowGroup[];
   editedRowKeys: ReadonlySet<string>;
   /**
    * The vendor-map entries the review had earned when the snapshot was
@@ -246,6 +259,22 @@ export type ImportReviewState = {
   decideAll: (decision: PreviewDecision) => void;
   /** Replace a row's edits. */
   edit: (index: number, edits: PreviewEdits, opts?: EditOptions) => void;
+  /**
+   * The routing: which rows go to which account.
+   *
+   * A partition of the rows into contiguous groups, each with a
+   * destination account.
+   */
+  groups: readonly RowGroup[];
+  /**
+   * Put a row into another account.
+   *
+   * The rows are re-resolved, and the rows that are already in the budget
+   * are asked about again, so this takes a moment.
+   */
+  routeRow: (index: number, accountId: string) => Promise<boolean>;
+  /** Put every row into one account. */
+  routeAll: (accountId: string) => Promise<boolean>;
   /** Move the focus to an absolute index. */
   focus: (index: number) => void;
   /** Move the focus by a delta, clamped to the row range. */
@@ -378,6 +407,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [status, setStatus] = useState<ReviewStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<ImportPreviewState | null>(null);
+  // Which rows go to which account. The default is one group covering
+  // every row, with the account the review was opened for.
+  const [groups, setGroups] = useState<RowGroup[]>([]);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [trustLevel, setTrustLevel] = useState<TrustLevel>('cautious');
   const [payees, setPayees] = useState<readonly ReviewPayee[]>([]);
@@ -410,6 +442,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // in place.
   const editedRowKeys = useRef<ReadonlySet<string>>(new Set());
 
+  // The parsed rows BEFORE they were resolved.
+  //
+  // A routing change re-resolves the rows, and the resolution has to
+  // start from the file rather than from a previous resolution: resolving
+  // a resolution would resolve the resolver's own output. The base rows
+  // are what the resolver is given, so they are kept.
+  const baseRows = useRef<readonly ReviewRowInput[]>([]);
+
   // The changes the review remembers, so they can be undone. A snapshot is
   // taken before every change, and holds the whole state: a bulk action is
   // then one undo rather than one undo per row.
@@ -418,7 +458,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // The transaction each row matched, keyed by the row's key. The import
   // preview reports this, and it is what lets a user's edit to an
   // already-imported transaction be applied in place.
-  const matchedTransactionIds = useRef<ReadonlyMap<string, string>>(new Map());
+  //
+  // It is STATE and not a ref, because the answer can arrive after the
+  // screen has moved on: a routing change asks the budget again, and the
+  // rows that are already in the budget change with the answer. A ref
+  // would be updated without anything redrawing.
+  const [matchedTransactionIds, setMatchedTransactionIds] = useState<
+    ReadonlyMap<string, string>
+  >(new Map());
 
   // The trust level the review started with. It is read by the parse effect
   // but is deliberately not one of its dependencies: changing it must not
@@ -430,6 +477,123 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
   // Guards against a second apply starting while one is running.
   const applyingRef = useRef(false);
+
+  // Tells two routing changes apart. Each one asks the budget again, and
+  // a slower answer must not be applied over a newer routing.
+  const routeToken = useRef(0);
+
+  /**
+   * What the resolver resolves against.
+   *
+   * The vendor map is read through a ref, so it is the map as it was when
+   * the review opened: a review reads the map once, and the next review
+   * sees the updated one.
+   *
+   * Actual's own rules cover what a separate rules system would do. They
+   * run server-side during import, keyed on `imported_payee`, so there is
+   * no second rules system to maintain here.
+   */
+  const resolveOptsFor = useCallback(
+    (
+      payeeList: readonly ReviewPayee[],
+      accountList: readonly ReviewAccount[],
+    ) => {
+      const vendorMap = readVendorMap(vendorMapRawRef.current);
+      const liveMap = vendorMap
+        ? filterStaleVendorMapEntries(vendorMap, payeeList)
+        : undefined;
+      return {
+        existingPayees: payeeList,
+        accounts: accountList,
+        vendorMap: liveMap,
+        fuzzy: { minScore: 0.7, maxResults: 5 },
+      };
+    },
+    [],
+  );
+
+  /**
+   * Which rows are ALREADY in the budget.
+   *
+   * Two questions, two sources.
+   *
+   * The FITID lookup asks the budget DIRECTLY, and it is the authority.
+   * The import preview cannot answer this: it reports the matched
+   * transaction only when the matched row's fields DIFFER from it, so a
+   * file imported a second time matches its own transactions exactly and
+   * the preview reports nothing.
+   *
+   * The import preview knows about one thing the FITID lookup cannot see:
+   * a row with NO FITID that Actual matched against an existing
+   * transaction by date and amount. Those matches are kept, because they
+   * are the same transaction the import itself would update. It is asked
+   * once per account, because that is the account it matches within.
+   */
+  const lookupMatches = useCallback(
+    async (
+      rows: readonly PreviewRow[],
+      routing: readonly RowGroup[],
+      payeeList: readonly ReviewPayee[],
+      categoryList: readonly ReviewCategory[],
+    ): Promise<Map<string, string>> => {
+      const importedIds = rows
+        .map(row => row.importedId)
+        .filter((id): id is string => typeof id === 'string');
+
+      const alreadyImported = await findImportedTransactions({
+        accountIds: distinctAccounts(routing),
+        importedIds,
+      });
+
+      const matched = new Map<string, string>(
+        matchRowsToTransactions(rows, alreadyImported),
+      );
+
+      for (const accountId of distinctAccounts(routing)) {
+        const accountRows = rows.filter(row => row.accountId === accountId);
+        if (accountRows.length === 0) continue;
+
+        // The PREVIEW payload marks nothing as skipped: Actual skips a
+        // marked row before it reports the match, so a marked row would
+        // come back with no correlation at all.
+        const preview = await send('transactions-import', {
+          accountId,
+          // The same cast as the import itself, for the same reason: a
+          // split leg's category is `null` when it has none, and
+          // upstream's type says `string | undefined`.
+          transactions: buildPreviewPayload(
+            { rows: accountRows, trustLevel: trustLevelRef.current },
+            {
+              accountId,
+              payees: payeeRefs(payeeList),
+              categories: categoryList.map(c => ({ id: c.id })),
+            },
+          ) as ImportTransactionEntity[],
+          isPreview: true,
+        });
+
+        preview.updatedPreview?.forEach(entry => {
+          const existing = entry.existing;
+          if (!existing?.id) return;
+          // The preview echoes back the transaction we sent, so the
+          // transient preview key travels with it.
+          //
+          // Safe: the echo is the transaction we sent, plus whatever the
+          // rule engine added to it. The cast is only needed because the
+          // preview's type does not declare the transient field.
+          const key = (
+            entry.transaction as { _previewKey?: string } | undefined
+          )?._previewKey;
+          if (typeof key === 'string') {
+            matched.set(key, existing.id);
+          }
+        });
+      }
+
+      return matched;
+    },
+    [],
+  );
 
   // Load the budget's data and parse the file, in ONE pass.
   //
@@ -537,20 +701,24 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         editedRowKeys.current = new Set(saved.editedRowKeys);
         vendorChoices.current = new Map(saved.vendorChoices);
 
+        // The routing of a picked-up review is the one it was saved
+        // with. The session does not carry a routing yet, so it is the
+        // default: one group, with the account the review was opened
+        // for.
+        const savedGroups = defaultGroups(state.rows.length, saved.accountId);
+        setGroups(savedGroups);
+
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
-        const importedIds = state.rows
-          .map(row => row.importedId)
-          .filter((id): id is string => typeof id === 'string');
-        const alreadyImported = await findImportedTransactions({
-          accountId,
-          importedIds,
-        });
+        const matched = await lookupMatches(
+          state.rows,
+          savedGroups,
+          payeeList,
+          categoryList,
+        );
         if (cancelled) return;
 
-        matchedTransactionIds.current = new Map(
-          matchRowsToTransactions(state.rows, alreadyImported),
-        );
+        setMatchedTransactionIds(matched);
 
         setStatus('reviewing');
       } catch (err) {
@@ -566,7 +734,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // A re-parse starts the review over: the decisions and edits from the
       // previous parse belong to rows that no longer exist.
       editedRowKeys.current = new Set();
-      matchedTransactionIds.current = new Map();
+      setMatchedTransactionIds(new Map());
       vendorChoices.current = new Map();
       undoStack.current = [];
 
@@ -670,89 +838,38 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           ),
         );
 
-        // Actual's own rules cover what a separate rules system would do.
-        // They run server-side during import, keyed on `imported_payee`, so
-        // there is no second rules system to maintain here.
-        const vendorMap = readVendorMap(vendorMapRawRef.current);
-        const liveMap = vendorMap
-          ? filterStaleVendorMapEntries(vendorMap, payeeList)
-          : undefined;
+        // The rows are kept BEFORE they are resolved: a routing change
+        // re-resolves them, and a resolution has to start from the file
+        // rather than from a previous resolution.
+        baseRows.current = raw;
 
-        const resolved: readonly ResolvedRow[] = resolvePayees(raw, {
-          existingPayees: payeeList,
-          accounts: accountList,
-          vendorMap: liveMap,
-          fuzzy: { minScore: 0.7, maxResults: 5 },
+        // The default routing is one group covering every row, with the
+        // account the review was opened for.
+        const nextGroups = defaultGroups(raw.length, accountId);
+
+        const next = rebuildPreviewState({
+          base: raw,
+          groups: nextGroups,
+          trustLevel: trustLevelRef.current,
+          resolveOpts: resolveOptsFor(payeeList, accountList),
         });
 
-        const next = buildPreviewState(resolved, trustLevelRef.current);
         setState(next);
+        setGroups(nextGroups);
         setFocusedIndex(0);
-
-        // Ask Actual which of these rows match an existing transaction. The
-        // preview reports the matched transaction's id, which is what lets a
-        // user's edit to an already-imported transaction be applied in place
-        // (Actual's import UPDATE path keeps the existing payee).
-        //
-        // The PREVIEW payload marks nothing as skipped: Actual skips a
-        // marked row before it reports the match, so a marked row would
-        // come back with no correlation at all.
-        const preview = await send('transactions-import', {
-          accountId,
-          // The same cast as the import itself, for the same reason: a
-          // split leg's category is `null` when it has none, and
-          // upstream's type says `string | undefined`.
-          transactions: buildPreviewPayload(next, {
-            accountId,
-            payees: payeeRefs(payeeList),
-            categories: categoryList.map(c => ({ id: c.id })),
-          }) as ImportTransactionEntity[],
-          isPreview: true,
-        });
 
         if (cancelled) return;
 
         // Which rows are ALREADY in the budget?
-        //
-        // The import preview cannot answer that: it reports the matched
-        // transaction only when the matched row's fields DIFFER from it, so
-        // a file imported a second time matches its own transactions
-        // exactly and the preview reports nothing. Asking the budget
-        // directly, by FITID, is the only way to learn the truth.
-        const importedIds = next.rows
-          .map(row => row.importedId)
-          .filter((id): id is string => typeof id === 'string');
-        const alreadyImported = await findImportedTransactions({
-          accountId,
-          importedIds,
-        });
+        const matched = await lookupMatches(
+          next.rows,
+          nextGroups,
+          payeeList,
+          categoryList,
+        );
         if (cancelled) return;
 
-        const matched = new Map<string, string>(
-          matchRowsToTransactions(next.rows, alreadyImported),
-        );
-
-        // The preview still knows about one thing the FITID lookup cannot
-        // see: a row with NO FITID that Actual matched against an existing
-        // transaction by date and amount. Those matches are kept, because
-        // they are the same transaction the import itself would update.
-        preview.updatedPreview?.forEach(entry => {
-          const existing = entry.existing;
-          if (!existing?.id) return;
-          // The preview echoes back the transaction we sent, so the transient
-          // preview key travels with it.
-          //
-          // Safe: the echo is the transaction we sent, plus whatever the
-          // rule engine added to it. The cast is only needed because the
-          // preview's type does not declare the transient field.
-          const key = (
-            entry.transaction as { _previewKey?: string } | undefined
-          )?._previewKey;
-          if (typeof key === 'string') {
-            matched.set(key, existing.id);
-          }
-        });
-        matchedTransactionIds.current = matched;
+        setMatchedTransactionIds(matched);
 
         setStatus('reviewing');
       } catch (err) {
@@ -768,7 +885,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     };
     // The vendor map is deliberately NOT a dependency: it is read through a
     // ref, because a write to it must never re-parse the file.
-  }, [filename, accountId, t, session]);
+  }, [filename, accountId, t, session, lookupMatches, resolveOptsFor]);
 
   /**
    * Rewrite the legs of the splits that are already in the budget.
@@ -781,78 +898,81 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * The difference is sent as one batch, which is what upstream's own
    * desktop UI sends when a split is edited.
    */
-  const reconcileSplits = useCallback(async (rows: readonly PreviewRow[]) => {
-    const parentIds = rows
-      .map(row => matchedTransactionIds.current.get(rowKey(row)))
-      .filter((id): id is string => !!id);
+  const reconcileSplits = useCallback(
+    async (rows: readonly PreviewRow[]) => {
+      const parentIds = rows
+        .map(row => matchedTransactionIds.get(rowKey(row)))
+        .filter((id): id is string => !!id);
 
-    if (parentIds.length === 0) return;
+      if (parentIds.length === 0) return;
 
-    const { data } = await aqlQuery(
-      q('transactions')
-        .filter({ id: { $oneof: parentIds } })
-        .select('*')
-        // The legs are asked for GROUPED under their parent.
-        //
-        // Without the option, the query returns the transactions one by
-        // one and leaves the SPLIT PARENTS out entirely — a split is not
-        // a row of its own in that shape. So the review would find no
-        // parent, and the reconciliation would silently do nothing while
-        // the row was still held back from the import.
-        .options({ splits: 'grouped' }),
-    );
-    const transactions = (
-      Array.isArray(data) ? data : []
-    ) as TransactionEntity[];
-
-    const added: TransactionEntity[] = [];
-    const updated: SplitTransactionUpdate[] = [];
-    const deleted: { id: string }[] = [];
-
-    for (const row of rows) {
-      const parentId = matchedTransactionIds.current.get(rowKey(row));
-      if (!parentId) continue;
-      const parent = transactions.find(
-        transaction => transaction.id === parentId,
+      const { data } = await aqlQuery(
+        q('transactions')
+          .filter({ id: { $oneof: parentIds } })
+          .select('*')
+          // The legs are asked for GROUPED under their parent.
+          //
+          // Without the option, the query returns the transactions one by
+          // one and leaves the SPLIT PARENTS out entirely — a split is not
+          // a row of its own in that shape. So the review would find no
+          // parent, and the reconciliation would silently do nothing while
+          // the row was still held back from the import.
+          .options({ splits: 'grouped' }),
       );
-      if (!parent) continue;
+      const transactions = (
+        Array.isArray(data) ? data : []
+      ) as TransactionEntity[];
 
-      const reconciliation = buildSplitReconciliation({
-        parent,
-        children: legsOf(parent),
-        legs: row.edits.splits ?? [],
+      const added: TransactionEntity[] = [];
+      const updated: SplitTransactionUpdate[] = [];
+      const deleted: { id: string }[] = [];
+
+      for (const row of rows) {
+        const parentId = matchedTransactionIds.get(rowKey(row));
+        if (!parentId) continue;
+        const parent = transactions.find(
+          transaction => transaction.id === parentId,
+        );
+        if (!parent) continue;
+
+        const reconciliation = buildSplitReconciliation({
+          parent,
+          children: legsOf(parent),
+          legs: row.edits.splits ?? [],
+        });
+        added.push(...reconciliation.added);
+        updated.push(...reconciliation.updated);
+        deleted.push(...reconciliation.deleted);
+      }
+
+      if (added.length === 0 && updated.length === 0 && deleted.length === 0) {
+        return false;
+      }
+
+      await send('transactions-batch-update', {
+        added,
+        // The cast is here, and only here: a split's parent has no category
+        // of its own — the legs carry them — so the parent's category has to
+        // be CLEARED, and `null` is how the database says "no category". The
+        // column is nullable; the entity type does not say so.
+        updated: updated as Partial<TransactionEntity>[],
+        deleted,
       });
-      added.push(...reconciliation.added);
-      updated.push(...reconciliation.updated);
-      deleted.push(...reconciliation.deleted);
-    }
-
-    if (added.length === 0 && updated.length === 0 && deleted.length === 0) {
-      return false;
-    }
-
-    await send('transactions-batch-update', {
-      added,
-      // The cast is here, and only here: a split's parent has no category
-      // of its own — the legs carry them — so the parent's category has to
-      // be CLEARED, and `null` is how the database says "no category". The
-      // column is nullable; the entity type does not say so.
-      updated: updated as Partial<TransactionEntity>[],
-      deleted,
-    });
-    return true;
-  }, []);
+      return true;
+    },
+    [matchedTransactionIds],
+  );
 
   const buildUpdates = useCallback(() => {
     if (!state) return { updates: [] };
     return buildUpdatePayload(state, {
       accountId,
-      matchedTransactionIds: matchedTransactionIds.current,
+      matchedTransactionIds,
       payees: payeeRefs(payees),
       categories: categories.map(c => ({ id: c.id })),
       editedRowKeys: editedRowKeys.current,
     });
-  }, [state, accountId, payees, categories]);
+  }, [state, accountId, categories, matchedTransactionIds, payees]);
 
   /**
    * Write the vendor-map entries the user's payee choices earned.
@@ -897,18 +1017,22 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * same change once, because the second run sees the state it just
    * recorded.
    */
-  const pushUndo = useCallback((current: ImportPreviewState) => {
-    const stack = undoStack.current;
-    if (stack[stack.length - 1]?.state === current) return;
-    undoStack.current = [
-      ...stack.slice(-(MAX_UNDO_STEPS - 1)),
-      {
-        state: current,
-        editedRowKeys: new Set(editedRowKeys.current),
-        vendorChoices: new Map(vendorChoices.current),
-      },
-    ];
-  }, []);
+  const pushUndo = useCallback(
+    (current: ImportPreviewState, routing: readonly RowGroup[]) => {
+      const stack = undoStack.current;
+      if (stack[stack.length - 1]?.state === current) return;
+      undoStack.current = [
+        ...stack.slice(-(MAX_UNDO_STEPS - 1)),
+        {
+          state: current,
+          groups: routing,
+          editedRowKeys: new Set(editedRowKeys.current),
+          vendorChoices: new Map(vendorChoices.current),
+        },
+      ];
+    },
+    [],
+  );
 
   const decide = useCallback(
     (index: number, decision: PreviewDecision) => {
@@ -916,11 +1040,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current);
+        pushUndo(current, groups);
         return applyDecision(current, rowKey(row), decision);
       });
     },
-    [pushUndo],
+    [groups, pushUndo],
   );
 
   const decideAll = useCallback(
@@ -931,7 +1055,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (pending.length === 0) return current;
         // One snapshot for the whole bulk action, so one undo takes it
         // all back.
-        pushUndo(current);
+        pushUndo(current, groups);
         // The domain's `applyDecision` finds its row by key, so applying
         // it once per row is quadratic in the number of rows. An import
         // file has hundreds of rows at most, so this is cheap, and going
@@ -943,7 +1067,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return next;
       });
     },
-    [pushUndo],
+    [groups, pushUndo],
   );
   const edit = useCallback(
     (index: number, edits: PreviewEdits, opts?: EditOptions) => {
@@ -951,7 +1075,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current);
+        pushUndo(current, groups);
         // Remember that the user touched this row, so the apply step can
         // update the matched transaction in place.
         editedRowKeys.current = new Set([
@@ -979,12 +1103,96 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return updateEdits(current, rowKey(row), edits);
       });
     },
-    [pushUndo, payees],
+    [groups, pushUndo, payees],
   );
 
-  const isAlreadyImported = useCallback((key: string) => {
-    return matchedTransactionIds.current.has(key);
-  }, []);
+  /**
+   * Put the rows into a new routing.
+   *
+   * The rows are re-resolved, because the resolution depends on the
+   * account a row is in: a row whose vendor string is exactly a budget
+   * account's name is a TRANSFER to that account, unless the row is IN
+   * it.
+   *
+   * The rows that are already in the budget are asked about AGAIN, for
+   * the same reason: a FITID matches within an account, and the rows
+   * have changed accounts.
+   *
+   * The change is undoable: the snapshot holds the rows AND the routing
+   * they were resolved for.
+   */
+  const applyRouting = useCallback(
+    async (nextGroups: RowGroup[]): Promise<boolean> => {
+      if (!state) return false;
+      // A routing that did not change is not a change: re-resolving
+      // every row for nothing would cost a lot and gain nothing.
+      if (isSameRouting(nextGroups, groups)) return true;
+
+      // The token tells two routing changes apart. The budget is asked
+      // again for each one, and a slower answer must not be applied over
+      // a newer routing.
+      const token = ++routeToken.current;
+
+      pushUndo(state, groups);
+
+      const next = rebuildPreviewState({
+        base: baseRows.current,
+        groups: nextGroups,
+        previous: state,
+        trustLevel,
+        resolveOpts: resolveOptsFor(payees, accounts),
+      });
+
+      const matched = await lookupMatches(
+        next.rows,
+        nextGroups,
+        payees,
+        categories,
+      );
+      if (routeToken.current !== token) return false;
+
+      setMatchedTransactionIds(matched);
+      setGroups(nextGroups);
+      setState(next);
+      return true;
+    },
+    [
+      accounts,
+      categories,
+      groups,
+      lookupMatches,
+      payees,
+      pushUndo,
+      resolveOptsFor,
+      state,
+      trustLevel,
+    ],
+  );
+
+  /** Put a row into another account. */
+  const routeRow = useCallback(
+    (index: number, nextAccountId: string): Promise<boolean> =>
+      applyRouting(
+        setRowAccount(groups, index, nextAccountId, state?.rows.length ?? 0),
+      ),
+    [applyRouting, groups, state],
+  );
+
+  /** Put every row into one account. */
+  const routeAll = useCallback(
+    (nextAccountId: string): Promise<boolean> =>
+      applyRouting(
+        setAllRowsAccount(groups, nextAccountId, state?.rows.length ?? 0),
+      ),
+    [applyRouting, groups, state],
+  );
+
+  const isAlreadyImported = useCallback(
+    (key: string) => {
+      return matchedTransactionIds.has(key);
+    },
+    [matchedTransactionIds],
+  );
 
   const focus = useCallback((index: number) => {
     setFocusedIndex(index);
@@ -1004,6 +1212,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // write a no-op update for it.
     editedRowKeys.current = new Set(last.editedRowKeys);
     vendorChoices.current = new Map(last.vendorChoices);
+    setGroups([...last.groups]);
     setState(last.state);
   }, []);
 
@@ -1059,7 +1268,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           livePayeeNames,
         });
         if (!evaluation.willImport) return false;
-        return matchedTransactionIds.current.has(rowKey(row));
+        return matchedTransactionIds.has(rowKey(row));
       });
 
       // Rows the user edited AND that matched an existing transaction are
@@ -1254,11 +1463,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, [
     accountId,
     buildUpdates,
+    categories,
     clearFromStore,
+    matchedTransactionIds,
     reconcileSplits,
     state,
     payees,
-    categories,
     onImported,
     t,
     writeVendorMap,
@@ -1350,6 +1560,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     decide,
     decideAll,
     edit,
+    groups,
+    routeRow,
+    routeAll,
     focus,
     moveFocus,
     undo,

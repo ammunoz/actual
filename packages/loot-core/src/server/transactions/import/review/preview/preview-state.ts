@@ -478,6 +478,47 @@ export function applyDecision(
 }
 
 /**
+ * Pure: put the user's work back on freshly resolved rows.
+ *
+ * A routing change re-resolves the rows, and the resolution is NOT the
+ * user's work: the DECISION they made and the EDITS they typed are. This
+ * carries them across from one state to another, matched by the row's KEY
+ * and never by its position — so the work survives even if the rows were
+ * ever reordered, and a row that was edited cannot have its edit land on
+ * a different row.
+ *
+ * A row with no counterpart in the previous state keeps its fresh decision
+ * and edits: there was no work to carry.
+ */
+export function withCarriedWork(
+  fresh: ImportPreviewState,
+  previous: ImportPreviewState,
+): ImportPreviewState {
+  const work = new Map<
+    string,
+    { decision: PreviewDecision; edits: PreviewEdits }
+  >();
+  for (const row of previous.rows) {
+    work.set(rowKey(row), { decision: row.decision, edits: row.edits });
+  }
+
+  const rows = fresh.rows.map(row => {
+    const carried = work.get(rowKey(row));
+    if (!carried) return row;
+    return Object.freeze({
+      ...row,
+      decision: carried.decision,
+      edits: freezeEdits(carried.edits),
+    }) as PreviewRow;
+  });
+
+  return Object.freeze({
+    rows: Object.freeze(rows) as readonly PreviewRow[],
+    trustLevel: fresh.trustLevel,
+  });
+}
+
+/**
  * Pure: return a new state with the row identified by `key` updated to have
  * the given `newEdits`, **preserving its existing `decision`**. All other
  * row fields (flags, matchedCategoryId, etc.) are preserved.
