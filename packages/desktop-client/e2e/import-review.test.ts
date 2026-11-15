@@ -240,6 +240,55 @@ test.describe('Keyboard import review', () => {
     await expect(accountPage.transactionTableRow).toHaveCount(0);
   });
 
+  test('w puts the review aside, and the command bar picks it up again', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Session',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user writes a note on the first row and puts the review aside.
+    await page.keyboard.press('m');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('a note from the review');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    await page.keyboard.press('w');
+    await expect(
+      page.getByTestId('keyboard-import-transactions-modal'),
+    ).not.toBeVisible();
+
+    // Nothing was imported: the review was put aside, not applied.
+    await expect(accountPage.transactionTableRow).toHaveCount(0);
+
+    // The command bar brings the review back, with the work in it.
+    await page.keyboard.press('ControlOrMeta+k');
+    const commandBar = page.getByRole('combobox', { name: 'Command Bar' });
+    await expect(commandBar).toBeVisible();
+    await commandBar.fill('Resume the import review');
+    await page.keyboard.press('Enter');
+    await expect(commandBar).not.toBeVisible();
+
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await expect(rows).toHaveCount(3);
+    await expect(
+      dialog.getByTestId('import-review-notes').first(),
+    ).toContainText('a note from the review');
+  });
+
   test('the keyboard drives the review', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Keys',

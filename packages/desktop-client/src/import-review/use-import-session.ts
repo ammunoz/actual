@@ -19,6 +19,15 @@ import type { ImportReviewSession } from './session';
 import { readSession, writeSession } from './session';
 
 /**
+ * The event the store tells the world about when the session changes.
+ *
+ * The command bar is mounted for the whole life of the app, so it read
+ * the session when the app started — long before the user saved a
+ * review. The event is how it hears about one.
+ */
+const SESSION_CHANGED = 'import-review-session-changed';
+
+/**
  * The key the session is stored under, within the budget.
  */
 export const SESSION_KEY = 'import-review.session';
@@ -41,19 +50,27 @@ export function useImportSession(): UseImportSession {
     undefined,
   );
 
-  // The saved review is read once, when the store is first used. It is
-  // not read again: the review that saves one is the one that reads it,
-  // and a review in progress is not disturbed by what is on disk.
+  // The saved review is read when the store is first used, and again
+  // whenever it changes: the command bar is mounted for the whole life
+  // of the app, so it read the session long before the user saved a
+  // review.
   useEffect(() => {
     if (!budgetId) return;
-    try {
-      const stored = window.localStorage.getItem(storageKey(budgetId));
-      setSession(readSession(stored));
-    } catch {
-      // A browser that will not give up its storage is a browser that
-      // cannot save a review either. There is nothing to say about it.
-      setSession(undefined);
-    }
+
+    const read = () => {
+      try {
+        const stored = window.localStorage.getItem(storageKey(budgetId));
+        setSession(readSession(stored));
+      } catch {
+        // A browser that will not give up its storage is a browser that
+        // cannot save a review either. There is nothing to say about it.
+        setSession(undefined);
+      }
+    };
+
+    read();
+    window.addEventListener(SESSION_CHANGED, read);
+    return () => window.removeEventListener(SESSION_CHANGED, read);
   }, [budgetId]);
 
   const save = useCallback(
@@ -67,6 +84,7 @@ export function useImportSession(): UseImportSession {
         return false;
       }
       setSession(next);
+      window.dispatchEvent(new Event(SESSION_CHANGED));
       return true;
     },
     [budgetId],
@@ -81,6 +99,7 @@ export function useImportSession(): UseImportSession {
       // removed.
     }
     setSession(undefined);
+    window.dispatchEvent(new Event(SESSION_CHANGED));
   }, [budgetId]);
 
   return { session, save, clear };
