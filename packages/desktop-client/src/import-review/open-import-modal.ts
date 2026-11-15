@@ -14,6 +14,7 @@
 
 import { useCallback } from 'react';
 
+import type { ImportReviewSession } from './session';
 import { KEYBOARD_MODE_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
@@ -39,6 +40,13 @@ export type ImportModalDescriptor =
       options: {
         accountId: string;
         filename: string;
+        /**
+         * The saved review to pick up, instead of a file.
+         *
+         * A session holds the rows that were already parsed, so there is
+         * no file to read: the review continues where it was left.
+         */
+        session?: ImportReviewSession | undefined;
         onImported: (didChange: boolean) => void;
       };
     };
@@ -66,11 +74,12 @@ export function buildImportModal(
   filename: string,
   onImported: (didChange: boolean) => void,
   keyboardMode: boolean,
+  session?: ImportReviewSession | undefined,
 ): ImportModalDescriptor {
   if (keyboardMode && isKeyboardReviewFile(filename)) {
     return {
       name: 'keyboard-import-transactions',
-      options: { accountId, filename, onImported },
+      options: { accountId, filename, onImported, session },
     };
   }
   return {

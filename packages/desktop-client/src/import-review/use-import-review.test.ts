@@ -16,6 +16,14 @@ vi.mock('./use-custom-synced-pref', () => ({
   useCustomSyncedPref: vi.fn(),
 }));
 
+vi.mock('./use-import-session', () => ({
+  useImportSession: vi.fn(() => ({
+    session: undefined,
+    save: vi.fn(() => true),
+    clear: vi.fn(),
+  })),
+}));
+
 describe('toReviewRows', () => {
   it('reads the FITID from imported_id', () => {
     const rows = toReviewRows(

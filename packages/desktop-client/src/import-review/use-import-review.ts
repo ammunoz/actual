@@ -70,12 +70,21 @@ import {
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
+import {
+  buildSession,
+  MAX_SESSION_BYTES,
+  sessionToPreviewState,
+  staleRowNames,
+  writeSession,
+} from './session';
+import type { ImportReviewSession } from './session';
 import { splitErrorMessage } from './split-error-labels';
 import { buildSplitReconciliation, legsOf } from './split-reconcile';
 import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
 import { VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
+import { useImportSession } from './use-import-session';
 
 export type ReviewStatus = 'idle' | 'parsing' | 'reviewing' | 'applying';
 
@@ -136,6 +145,13 @@ export type UseImportReviewOpts = {
   accountId: string;
   /** The file to review. */
   filename: string;
+  /**
+   * The saved review to pick up, instead of a file.
+   *
+   * A session holds the rows that were already parsed, so there is no
+   * file to read: the review continues where it was left.
+   */
+  session?: ImportReviewSession | undefined;
   /** Called after a successful apply, with whether anything changed. */
   onImported: (didChange: boolean) => void;
 };
@@ -238,6 +254,14 @@ export type ImportReviewState = {
   undo: () => void;
   /** Cycle the trust level. */
   cycleTrustLevel: () => void;
+  /**
+   * Put the review aside, so it can be picked up later.
+   *
+   * Returns false when it does not fit: the storage is full, or the
+   * review is too big for it. The review says so rather than pretending
+   * it was saved.
+   */
+  saveSession: () => boolean;
   /** Apply the import. Resolves to whether the import went through. */
   apply: () => Promise<boolean>;
   /** Discard and close. */
@@ -348,7 +372,7 @@ function payeeRefs(payees: readonly ReviewPayee[]): readonly ReviewPayeeRef[] {
  * The hook that drives the review.
  */
 export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
-  const { accountId, filename, onImported } = opts;
+  const { accountId, filename, session, onImported } = opts;
   const { t } = useTranslation();
 
   const [status, setStatus] = useState<ReviewStatus>('idle');
@@ -361,6 +385,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [categories, setCategories] = useState<readonly ReviewCategory[]>([]);
 
   const [vendorMapRaw, setVendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
+
+  // Where a review is put aside when the user saves it.
+  const { save: saveToStore, clear: clearFromStore } = useImportSession();
 
   // The vendor map as it was when the review opened.
   //
@@ -418,6 +445,121 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   useEffect(() => {
     let cancelled = false;
 
+    /**
+     * Pick a saved review up again.
+     *
+     * The rows come back as they were — the user approved those rows,
+     * against those payees, in that file. What is checked is the budget:
+     * the account, the payees and the categories the rows point at may have
+     * been deleted since the review was put aside, and a row that points at
+     * something that is gone cannot be imported as it is.
+     *
+     * The rows that are already in the budget are asked about AGAIN: the
+     * budget may have changed since the review was put aside, and the FITID
+     * lookup is the only thing that says which rows are already there.
+     */
+    async function loadSession(saved: ImportReviewSession) {
+      try {
+        const [payeeEntities, accountEntities, categoryEntities] =
+          await Promise.all([
+            send('payees-get'),
+            send('accounts-get'),
+            send('get-categories'),
+          ]);
+
+        if (cancelled) return;
+
+        const payeeList: readonly ReviewPayee[] = payeeEntities.map(p => ({
+          id: p.id,
+          name: p.name,
+          transferAcct: p.transfer_acct,
+        }));
+        const accountList: readonly ReviewAccount[] = accountEntities.map(
+          a => ({
+            id: a.id,
+            name: a.name,
+            offbudget: a.offbudget === 1,
+            closed: a.closed === 1,
+          }),
+        );
+        const grouped = categoryEntities.grouped ?? [];
+        const categoryList: readonly ReviewCategory[] = [
+          ...grouped.flatMap(group =>
+            (group.categories ?? []).map(category => ({
+              id: category.id,
+              name: category.name,
+              groupName: group.name,
+              hidden: category.hidden,
+              isIncome: category.is_income,
+            })),
+          ),
+          ...categoryEntities.list
+            .filter(
+              category =>
+                !grouped.some(group =>
+                  (group.categories ?? []).some(
+                    candidate => candidate.id === category.id,
+                  ),
+                ),
+            )
+            .map(category => ({
+              id: category.id,
+              name: category.name,
+              hidden: category.hidden,
+              isIncome: category.is_income,
+            })),
+        ];
+
+        setPayees(payeeList);
+        setAccounts(accountList);
+        setCategories(categoryList);
+
+        const stale = staleRowNames(saved, {
+          accounts: accountList,
+          payees: payeeList,
+          categories: categoryList,
+        });
+        if (stale.length > 0) {
+          setStatus('idle');
+          setError(
+            t(
+              'Some of the saved rows point at something that no longer exists: {{names}}',
+              { names: stale.join(', ') },
+            ),
+          );
+          return;
+        }
+
+        const state = sessionToPreviewState(saved);
+        setState(state);
+        setTrustLevel(saved.trustLevel);
+        setFocusedIndex(saved.focusedIndex);
+        editedRowKeys.current = new Set(saved.editedRowKeys);
+        vendorChoices.current = new Map(saved.vendorChoices);
+
+        // Which rows are ALREADY in the budget? Asked again, because the
+        // budget may have changed since the review was put aside.
+        const importedIds = state.rows
+          .map(row => row.importedId)
+          .filter((id): id is string => typeof id === 'string');
+        const alreadyImported = await findImportedTransactions({
+          accountId,
+          importedIds,
+        });
+        if (cancelled) return;
+
+        matchedTransactionIds.current = new Map(
+          matchRowsToTransactions(state.rows, alreadyImported),
+        );
+
+        setStatus('reviewing');
+      } catch (err) {
+        if (cancelled) return;
+        setStatus('idle');
+        setError(err instanceof Error ? err.message : t('The import failed'));
+      }
+    }
+
     async function load() {
       setStatus('parsing');
       setError(null);
@@ -428,21 +570,40 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       vendorChoices.current = new Map();
       undoStack.current = [];
 
+      // A review that is being PICKED UP rather than started.
+      //
+      // The rows come back as they were: the user approved those rows,
+      // against those payees, in that file. Re-resolving them against the
+      // budget as it is now would change what the user agreed to.
+      //
+      // What IS checked is the budget: the account, the payees and the
+      // categories the rows point at may have been deleted since the
+      // review was put aside, and a row that points at something that is
+      // gone cannot be imported as it is.
+      if (session) {
+        await loadSession(session);
+        return;
+      }
+
       try {
         const [payeeEntities, accountEntities, categoryEntities, parsed] =
           await Promise.all([
             send('payees-get'),
             send('accounts-get'),
             send('get-categories'),
-            send('transactions-parse-file', {
-              filepath: filename,
-              options: {},
-            }),
+            // A session holds the rows that were already parsed, so there
+            // is no file to read: the review continues where it was left.
+            session
+              ? Promise.resolve(null)
+              : send('transactions-parse-file', {
+                  filepath: filename,
+                  options: {},
+                }),
           ]);
 
         if (cancelled) return;
 
-        if (parsed.errors && parsed.errors.length > 0) {
+        if (parsed && parsed.errors && parsed.errors.length > 0) {
           setStatus('idle');
           setError(parsed.errors[0].message);
           return;
@@ -499,12 +660,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setAccounts(accountList);
         setCategories(categoryList);
 
+        // Safe: the parse handler's loose type is a union of a structured
+        // transaction and a CSV record, and `toReviewRows` reads each
+        // field defensively, checking the type before it uses it.
         const raw = flagDuplicateFitids(
           toReviewRows(
-            // Safe: the parse handler's loose type is a union of a structured
-            // transaction and a CSV record, and `toReviewRows` reads each
-            // field defensively, checking the type before it uses it.
-            parsed.transactions as Record<string, unknown>[],
+            (parsed?.transactions ?? []) as Record<string, unknown>[],
             { accountId },
           ),
         );
@@ -607,7 +768,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     };
     // The vendor map is deliberately NOT a dependency: it is read through a
     // ref, because a write to it must never re-parse the file.
-  }, [filename, accountId, t]);
+  }, [filename, accountId, t, session]);
 
   /**
    * Rewrite the legs of the splits that are already in the budget.
@@ -981,6 +1142,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setStatus('reviewing');
         if (didChange) {
           writeVendorMap(state);
+          // The work is in the budget now, so there is nothing left to
+          // pick up later.
+          clearFromStore();
           onImported(true);
           return true;
         }
@@ -1090,6 +1254,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, [
     accountId,
     buildUpdates,
+    clearFromStore,
     reconcileSplits,
     state,
     payees,
@@ -1098,6 +1263,35 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     t,
     writeVendorMap,
   ]);
+
+  /**
+   * Put the review aside.
+   *
+   * The session holds the rows and what the user did with them. It does
+   * NOT hold the undo history: the stack holds whole states, and fifty of
+   * them would be a few megabytes of JSON for a review the user is
+   * picking up again, not editing.
+   */
+  const saveSession = useCallback((): boolean => {
+    if (!state) return false;
+
+    const session = buildSession({
+      accountId,
+      filename,
+      trustLevel,
+      focusedIndex,
+      state,
+      editedRowKeys: editedRowKeys.current,
+      vendorChoices: vendorChoices.current,
+      savedAt: new Date().toISOString(),
+    });
+
+    // The size is checked before the save: a session that does not fit
+    // is better refused than half-written.
+    if (writeSession(session).length > MAX_SESSION_BYTES) return false;
+
+    return saveToStore(session);
+  }, [accountId, filename, focusedIndex, saveToStore, state, trustLevel]);
 
   const close = useCallback(() => {
     onImported(false);
@@ -1160,6 +1354,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     moveFocus,
     undo,
     cycleTrustLevel,
+    saveSession,
     apply,
     close,
   };

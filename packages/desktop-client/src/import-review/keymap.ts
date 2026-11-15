@@ -28,6 +28,7 @@ export type ReviewAction =
   | 'edit-transfer'
   | 'edit-split'
   | 'cycle-flag'
+  | 'save-session'
   | 'accept-all'
   | 'drop-all'
   | 'apply'
@@ -79,6 +80,9 @@ export const REVIEW_SCOPE = 'keyboard-import-transactions';
  * `h`/`l` (switch OFX source account) is deliberately absent: Actual's OFX
  * parser discards `ACCTID`, so a multi-account OFX file cannot be addressed
  * without a change to upstream's `ofx2json.ts`.
+ *
+ * `w` puts the review aside: the decisions and the edits are saved on this
+ * device, and the command bar brings the review back.
  *
  * `ctrl+shift+a` is the override: it accepts a row the trust level is
  * holding back. It has a binding of its own rather than overloading
@@ -162,6 +166,11 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 'tab',
     action: 'cycle-flag',
+    showInHelp: true,
+  },
+  {
+    keys: 'w',
+    action: 'save-session',
     showInHelp: true,
   },
   {

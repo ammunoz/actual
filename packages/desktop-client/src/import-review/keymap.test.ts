@@ -31,8 +31,10 @@ describe('KEYMAP', () => {
     expect(keys).not.toContain('l');
   });
 
-  it('does NOT bind w (session storage needs an upstream prefs change)', () => {
-    expect(KEYMAP.map(binding => binding.keys)).not.toContain('w');
+  it('binds w, which puts the review aside', () => {
+    // The session lives on the device, in the browser's own storage, so
+    // it needs no change to upstream's preferences.
+    expect(KEYMAP.map(binding => binding.keys)).toContain('w');
   });
 
   it('binds the movement keys', () => {

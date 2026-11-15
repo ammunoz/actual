@@ -36,6 +36,7 @@ import { HelpOverlay } from './HelpOverlay';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
+import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
 import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
@@ -43,6 +44,13 @@ import { useImportReview } from './use-import-review';
 export type KeyboardImportModalProps = {
   accountId: string;
   filename: string;
+  /**
+   * The saved review to pick up, instead of a file.
+   *
+   * A session holds the rows that were already parsed, so there is no
+   * file to read: the review continues where it was left.
+   */
+  session?: ImportReviewSession | undefined;
   onImported: (didChange: boolean) => void;
 };
 
@@ -71,6 +79,7 @@ type PaneMode =
 export function KeyboardImportModal({
   accountId,
   filename,
+  session,
   onImported,
 }: KeyboardImportModalProps) {
   const { t } = useTranslation();
@@ -92,7 +101,12 @@ export function KeyboardImportModal({
   const closeReview = useCallback(() => {
     dispatchModal(removeModal({ name: REVIEW_SCOPE }));
   }, [dispatchModal]);
-  const review = useImportReview({ accountId, filename, onImported });
+  const review = useImportReview({
+    accountId,
+    filename,
+    session,
+    onImported,
+  });
   const { enableScope, disableScope } = useHotkeysContext();
 
   // The pane below the table: the editor for a field, the split editor,
@@ -381,6 +395,18 @@ export function KeyboardImportModal({
         break;
       case 'cycle-flag':
         review.cycleTrustLevel();
+        break;
+      case 'save-session':
+        // The review is put aside, not thrown away: the decisions and the
+        // edits are saved on this device, and the command bar brings the
+        // review back.
+        if (!review.saveSession()) {
+          setNotice(
+            t('This review is too big to save. Apply it, or throw it away.'),
+          );
+          break;
+        }
+        closeReview();
         break;
       case 'apply':
         void review.apply().then(didChange => {

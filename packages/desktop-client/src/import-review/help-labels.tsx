@@ -34,6 +34,7 @@ export const HELP_LABELS: Readonly<Record<ReviewAction, ReactNode>> =
     'edit-transfer': <Trans>Set transfer target</Trans>,
     'edit-split': <Trans>Edit split</Trans>,
     'cycle-flag': <Trans>Cycle trust level</Trans>,
+    'save-session': <Trans>Save this review and close</Trans>,
     'accept-all': <Trans>Accept every row</Trans>,
     'drop-all': <Trans>Drop every row</Trans>,
     apply: <Trans>Apply the import</Trans>,

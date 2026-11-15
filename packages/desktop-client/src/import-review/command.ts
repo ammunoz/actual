@@ -14,8 +14,10 @@ import { useTranslation } from 'react-i18next';
 
 import { SvgKeyboard } from '@actual-app/components/icons/v1';
 
+import type { ImportReviewSession } from './session';
 import { KEYBOARD_MODE_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
+import { useImportSession } from './use-import-session';
 
 export type ImportReviewCommandItem = {
   id: string;
@@ -30,6 +32,15 @@ export type UseImportReviewCommand = {
   isEnabled: boolean;
   /** Turn the keyboard review on or off. */
   toggle: () => void;
+  /**
+   * The command-bar item that picks a saved review up again.
+   *
+   * It is only offered when there IS a saved review: an item that is
+   * always there and does nothing is noise.
+   */
+  resumeItem: ImportReviewCommandItem | undefined;
+  /** The saved review, if there is one. */
+  session: ImportReviewSession | undefined;
 };
 
 /**
@@ -56,5 +67,20 @@ export function useImportReviewCommand(): UseImportReviewCommand {
     [isEnabled, t],
   );
 
-  return { item, isEnabled, toggle };
+  // The saved review, and the item that picks it up again.
+  const { session } = useImportSession();
+
+  const resumeItem = useMemo<ImportReviewCommandItem | undefined>(
+    () =>
+      session
+        ? {
+            id: 'import-review-resume',
+            name: t('Resume the import review'),
+            Icon: SvgKeyboard,
+          }
+        : undefined,
+    [session, t],
+  );
+
+  return { item, isEnabled, toggle, resumeItem, session };
 }

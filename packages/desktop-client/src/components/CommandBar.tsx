@@ -26,6 +26,8 @@ import { useNavigate } from '#hooks/useNavigate';
 import { useReports } from '#hooks/useReports';
 import { useSidebarMenu } from '#hooks/useSidebarMenu';
 import { useImportReviewCommand } from '#import-review';
+import { pushModal } from '#modals/modalsSlice';
+import { useDispatch } from '#redux';
 import type { Binding, SheetFields, SheetNames } from '#spreadsheet';
 import {
   accountBalance,
@@ -103,6 +105,7 @@ export function CommandBar() {
   const { availableItems: menuItems } = useSidebarMenu();
   const menuItemDetails = useSidebarMenuItemDetails();
   const importReviewCommand = useImportReviewCommand();
+  const dispatch = useDispatch();
 
   const navigationItems = useMemo(
     () => [
@@ -235,9 +238,37 @@ export function CommandBar() {
     {
       key: 'import-review',
       heading: t('Import'),
-      items: [importReviewCommand.item],
-      onSelect: () => {
+      items: [
+        importReviewCommand.item,
+        ...(importReviewCommand.resumeItem
+          ? [importReviewCommand.resumeItem]
+          : []),
+      ],
+      onSelect: ({ id }) => {
         setOpen(false);
+        if (id === 'import-review-resume') {
+          // The saved review is picked up where it was left. The rows are
+          // in the session, so there is no file to read again.
+          const session = importReviewCommand.session;
+          if (session) {
+            dispatch(
+              pushModal({
+                modal: {
+                  name: 'keyboard-import-transactions',
+                  options: {
+                    accountId: session.accountId,
+                    filename: session.filename,
+                    session,
+                    // The account page refreshes itself when the sync
+                    // events arrive, so there is nothing to do here.
+                    onImported: () => undefined,
+                  },
+                },
+              }),
+            );
+          }
+          return;
+        }
         importReviewCommand.toggle();
       },
     },
