@@ -58,6 +58,16 @@ export type LookupRow = {
 export type ImportedTransactions = ReadonlyMap<string, string>;
 
 /**
+ * Narrow a value to a record, so its fields can be read one at a time.
+ *
+ * The query's own type is `any`, so the rows it returns are checked here
+ * rather than trusted.
+ */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
  * Ask the budget which transactions already carry one of these FITIDs.
  *
  * The query is scoped to the account on purpose: a FITID is only unique
@@ -82,15 +92,10 @@ export async function findImportedTransactions(opts: {
   );
 
   const found = new Map<string, string>();
-  // The query's own type is `any`, so the rows are narrowed here rather
-  // than trusted.
   const rows: unknown[] = Array.isArray(data) ? data : [];
   for (const row of rows) {
-    if (typeof row !== 'object' || row === null) continue;
-    const { id, imported_id: importedId } = row as {
-      id?: unknown;
-      imported_id?: unknown;
-    };
+    if (!isRecord(row)) continue;
+    const { id, imported_id: importedId } = row;
     if (typeof id !== 'string' || id.length === 0) continue;
     if (typeof importedId !== 'string' || importedId.length === 0) continue;
     // The first transaction wins, the same way upstream's matching pass

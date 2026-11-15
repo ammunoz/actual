@@ -498,19 +498,6 @@ export function buildUpdatePayload(
       date: editedDate ?? row.date,
     };
 
-    // The bank's transaction id, so the transaction keeps its dedup key.
-    //
-    // The row is excluded from the import payload (it is updated in place),
-    // and Actual's import UPDATE path is what writes `imported_id` on a
-    // matched row. Without it here, an updated transaction would lose its
-    // FITID and the next import of the same file would add it again.
-    //
-    // Only sent when the row HAS one: a row without a FITID must not
-    // clear the FITID the transaction already carries.
-    if (row.importedId) {
-      update.imported_id = row.importedId;
-    }
-
     let payeeNameToCreate: string | undefined;
 
     const transferProblem = validateTransferRow(row, liveTransferAccountIds);

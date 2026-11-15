@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -26,6 +26,8 @@ import { integerToAmount } from '@actual-app/core/shared/util';
 
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
+import { removeModal } from '#modals/modalsSlice';
+import { useDispatch } from '#redux';
 
 import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
@@ -60,28 +62,6 @@ type PaneMode =
   | null;
 
 /**
- * Hands the modal's own close to the rest of the review.
- *
- * React Aria's close belongs to the modal's render prop, and the places
- * that close the review — the apply, the X button, the escape key — are
- * not inside it. This puts it in a ref they can reach.
- *
- * It renders nothing: it exists only for the ref.
- */
-function CloseCapture({
-  closeRef,
-  close,
-}: {
-  closeRef: { current: (() => void) | null };
-  close: () => void;
-}) {
-  useEffect(() => {
-    closeRef.current = close;
-  }, [closeRef, close]);
-  return null;
-}
-
-/**
  * The keyboard-driven import review.
  *
  * The modal owns its own hotkey scope (Actual's `Modal` component enables a
@@ -94,25 +74,24 @@ export function KeyboardImportModal({
   onImported,
 }: KeyboardImportModalProps) {
   const { t } = useTranslation();
+  const dispatchModal = useDispatch();
   /**
-   * The review's own close, from React Aria.
+   * Close the review, by name.
    *
-   * The review closes ITSELF through this, rather than through the modal
-   * stack's "pop the top" (`useModalState().onClose`). The difference
-   * matters: an apply can push another modal on top of the review — Actual
-   * offers to merge an unused payee when the review gives a transaction a
-   * new one — and popping the top would close THAT modal and leave the
-   * review open, with the import finished and no sign of it.
+   * The review removes ITSELF from the modal stack rather than popping the
+   * top of it. The difference matters: an apply can push another modal on
+   * top of the review — Actual offers to merge an unused payee when the
+   * review gives a transaction a new one — and popping the top would close
+   * THAT modal and leave the review on screen, with the import finished and
+   * no sign of it.
    *
-   * React Aria's close hides the review and leaves whatever is on top of
-   * it alone, which is what the user expects: the import is done, and the
-   * question about the payee is still theirs to answer.
-   *
-   * The function only exists once the modal has rendered, so it is kept in
-   * a ref: the places that close the review (the apply, the X button, the
-   * escape key) are all outside the modal's render prop.
+   * Removing the review by name leaves the other modal alone, which is what
+   * the user expects: the import is done, and the question about the payee
+   * is still theirs to answer.
    */
-  const closeRef = useRef<(() => void) | null>(null);
+  const closeReview = useCallback(() => {
+    dispatchModal(removeModal({ name: REVIEW_SCOPE }));
+  }, [dispatchModal]);
   const review = useImportReview({ accountId, filename, onImported });
   const { enableScope, disableScope } = useHotkeysContext();
 
@@ -298,7 +277,7 @@ export function KeyboardImportModal({
    */
   const confirmClose = () => {
     review.close();
-    closeRef.current?.();
+    closeReview();
   };
 
   /**
@@ -397,7 +376,7 @@ export function KeyboardImportModal({
         break;
       case 'apply':
         void review.apply().then(didChange => {
-          if (didChange) closeRef.current?.();
+          if (didChange) closeReview();
         });
         break;
       case 'close':
@@ -585,12 +564,8 @@ export function KeyboardImportModal({
       isDismissable={false}
       containerProps={{ style: { width: 900, maxWidth: '100%' } }}
     >
-      {modalProps => (
+      {() => (
         <>
-          <CloseCapture
-            closeRef={closeRef}
-            close={() => modalProps.state.close()}
-          />
           <ModalHeader
             title={t('Review import')}
             leftContent={<ModalCloseButton onPress={requestClose} />}
@@ -599,7 +574,7 @@ export function KeyboardImportModal({
                 variant="primary"
                 onPress={() => {
                   void review.apply().then(didChange => {
-                    if (didChange) closeRef.current?.();
+                    if (didChange) closeReview();
                   });
                 }}
                 // The Import button is off while a pane owns the

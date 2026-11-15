@@ -794,6 +794,16 @@ const modalsSlice = createSlice({
     popModal(state) {
       state.modalStack = state.modalStack.slice(0, -1);
     },
+    removeModal(state, action: PayloadAction<{ name: string }>) {
+      // A modal that closes ITSELF, wherever it is in the stack.
+      //
+      // `popModal` removes the TOP modal, which is the wrong one when
+      // something else was pushed on top: a modal that opens another
+      // modal and then finishes would close the other one and leave
+      // itself on screen.
+      const { name } = action.payload;
+      state.modalStack = state.modalStack.filter(modal => modal.name !== name);
+    },
     closeModal(state) {
       state.modalStack = [];
     },
@@ -821,5 +831,11 @@ export const actions = {
   openAccountCloseModal,
 };
 
-export const { pushModal, closeModal, collapseModals, popModal, replaceModal } =
-  actions;
+export const {
+  pushModal,
+  closeModal,
+  collapseModals,
+  popModal,
+  removeModal,
+  replaceModal,
+} = actions;

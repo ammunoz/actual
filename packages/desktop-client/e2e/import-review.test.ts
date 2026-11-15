@@ -189,14 +189,16 @@ test.describe('Keyboard import review', () => {
     await dialog.getByRole('button', { name: 'Import' }).click();
 
     // The old payee is not used by any transaction any more, so Actual
-    // offers to merge it. The review has nothing to do with that.
+    // offers to merge it. The review closes ITSELF and leaves that
+    // question alone: it is still the user's to answer.
     const mergeModal = page.getByTestId('merge-unused-payees-modal');
-    if (await mergeModal.isVisible()) {
-      await mergeModal.getByRole('button', { name: 'Do nothing' }).click();
-    }
+    await expect(mergeModal).toBeVisible();
     await expect(
       page.getByTestId('keyboard-import-transactions-modal'),
     ).not.toBeVisible();
+
+    await mergeModal.getByRole('button', { name: 'Do nothing' }).click();
+    await expect(mergeModal).not.toBeVisible();
 
     // The edit landed on the transaction that was already there: no
     // duplicate, and the payee the user chose.

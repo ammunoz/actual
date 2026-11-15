@@ -186,25 +186,20 @@ describe('the update path of a transfer', () => {
     expect(updates[0].update.payee).toBe('p-transfer');
   });
 
-  it('keeps the FITID on the transaction it updates', () => {
-    // The row is excluded from the import payload, because it is updated
-    // in place. Actual's import UPDATE path is what writes `imported_id`
-    // on a matched row, so without it here the transaction would lose its
-    // dedup key — and the next import of the same file would add it a
-    // second time.
+  it('leaves the FITID of the transaction it updates alone', () => {
+    // The transaction already carries the FITID the row matched on — the
+    // review found it BY that FITID — so writing it again would change
+    // nothing.
+    //
+    // And a row that matched through the import preview, rather than
+    // through its FITID, may well point at a transaction with a DIFFERENT
+    // FITID: writing the row's FITID over it would take the other
+    // transaction's dedup key away, and the next import of THAT file
+    // would add it a second time. The review does not touch it.
     const state = buildTransferState({ memo: 'a note' });
     const { updates } = buildUpdatePayload(state, opts);
     expect(updates).toHaveLength(1);
-    expect(updates[0].update.imported_id).toBe('fit-1');
-  });
-
-  it('does not clear the FITID of a row that has none', () => {
-    // A row without a FITID must not wipe the one the transaction
-    // already has.
-    const state = buildTransferState({ memo: 'a note' }, { importedId: '' });
-    const { updates } = buildUpdatePayload(state, opts);
-    expect(updates).toHaveLength(1);
-    expect(updates[0].update.imported_id).toBeUndefined();
+    expect(updates[0].update).not.toHaveProperty('imported_id');
   });
 
   it('sends nothing when the transfer is the one the resolver found', () => {
