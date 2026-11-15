@@ -17,6 +17,41 @@ Actual supports importing CSV, QIF, OFX, QFX and CAMT files. Your bank probably 
 1. Open the account you want to import transactions into.
 2. Press the **Import** button and select the file.
 
+## Keyboard Import Review (Optional)
+
+Actual has an optional review for OFX and QFX imports that you drive from the keyboard. It is off by default, and turning it on does not change how anything else works.
+
+To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key mod="cmd" fixed k="k" /> on macOS), search for **Keyboard import review**, and choose it. To turn it off, do the same thing again.
+
+When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
+
+| Key | What it does |
+| --- | --- |
+| <Key k="j" />, <Key k="k" /> | Move to the next or previous row |
+| <Key k="g" />, <Key k="G" /> | Jump to the first or last row |
+| <Key k="a" /> | Accept the row and move on |
+| <Key k="r" /> | Drop the row and move on |
+| <Key k="u" /> | Undo the last decision |
+| <Key k="e" /> | Edit the payee |
+| <Key k="c" /> | Edit the category |
+| <Key k="m" /> | Edit the notes |
+| <Key k="d" /> | Edit the date |
+| <Key k="s" /> | Split the row across categories |
+| <Key k="t" /> | Make the row a transfer |
+| <Key k="Tab" /> | Change how careful Actual is about the rows |
+| <Key k="A" />, <Key k="R" /> | Accept or drop every row |
+| <Key k="w" /> | Put the review aside, and pick it up again later |
+| <Key mod="ctrl" k="s" /> | Apply the import |
+| <Key k="?" /> | Show the keys |
+
+The review holds back the rows it is not sure about, and says why: a payee it does not know, a transaction that repeats an earlier one, or a row whose amount or date the file did not supply properly. You can accept a row anyway, or fix it and import it that way.
+
+If you put a review aside with <Key k="w" />, the command bar offers **Resume the import review** the next time you open it. The review is kept on the device you made it on, not synced to your other devices.
+
+:::note
+A file that contains several bank accounts is imported into one account. Actual's OFX parser does not keep the account id, so the review cannot tell the accounts apart. Import such a file one account at a time.
+:::
+
 ## Import CSV Files
 
 If your bank doesn't support downloading financial files, you can import a CSV file instead.
