@@ -5,8 +5,8 @@
  *      per-budget dictionary of explicit confirmations)
  *   1. user payee rules (sorted by pattern length desc, enabled only)
  *   t. transfer detection: exact case-insensitive match of `payeeRaw`
- *      against a budget account name — pre-fills the row as a transfer,
- *      flagged `transfer-detected` pending for user confirmation
+ *      against a budget account name — the row becomes a transfer,
+ *      flagged `transfer-detected` so the review says so
  *   2. longest-prefix match against existing budget payees
  *      (length >= 4 OR word-boundary; transfer payees excluded)
  *   3. fuzzy LCS-ratio match against canonicalized raw (if enabled;
@@ -160,12 +160,20 @@ function resolveOne(
   }
 
   // Transfer-detection layer: exact case-insensitive match of the raw payee
-  // string against a budget account name. Auto-prefills the row as a
-  // transfer but flags it pending for user confirmation. Runs before Layer 2
-  // so an exact account name beats a prefix match on the same string.
+  // string against a budget account name. Auto-detects the row as a
+  // transfer and flags it, so the review says so. Runs before Layer 2 so
+  // an exact account name beats a prefix match on the same string.
+  //
+  // The row's OWN account is never a transfer target: a transaction cannot
+  // transfer to the account it is in. The manual picker already refuses it
+  // (it is the account the user is looking at), and the auto-detect has to
+  // refuse it too, or a file whose vendor string happens to equal the
+  // account's own name would import as a transfer to itself.
   const rawLower = raw.toLowerCase();
   if (accountsIndex.length > 0) {
-    const acct = accountsIndex.find(a => a.lower === rawLower);
+    const acct = accountsIndex.find(
+      a => a.lower === rawLower && a.id !== row.accountId,
+    );
     if (acct) {
       const base = resolved(row, acct.original, 'transfer', undefined);
       base.matchedTransferAccountId = acct.id;

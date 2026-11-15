@@ -17,6 +17,7 @@ import {
   updateEdits,
   validateSplitRow,
   validateTransferRow,
+  withPayee,
   withSplit,
   withTransfer,
   withTrustLevel,
@@ -639,8 +640,39 @@ describe('withTransfer', () => {
   });
 
   it('keeps the other edits', () => {
+    const edits = withTransfer({ memo: 'a note', categoryId: 'c-1' }, 'a-2');
+    expect(edits.memo).toBe('a note');
+    expect(edits.categoryId).toBe('c-1');
+  });
+
+  it("clears the payee, because a transfer's payee IS the transfer", () => {
+    // The payload builder prefers the transfer payee over anything the
+    // user chose, so a payee left on a transfer row would be silently
+    // dropped. The review says which one it is instead.
     const edits = withTransfer({ payeeCanonical: 'Krogger' }, 'a-2');
+    expect(edits.payeeCanonical).toBeUndefined();
+  });
+});
+
+describe('withPayee', () => {
+  it('sets the payee', () => {
+    const edits = withPayee({}, 'Krogger');
     expect(edits.payeeCanonical).toBe('Krogger');
+  });
+
+  it('clears the transfer, auto-detect and all', () => {
+    // A transfer row is not a payee row: its payee IS the transfer. So a
+    // user who gives a row a payee has said what it is, and the
+    // resolver's auto-detect must not come back.
+    const edits = withPayee({ transferAccountId: 'a-2' }, 'Krogger');
+    expect(edits.transferAccountId).toBe('');
+    expect(effectiveTransferAccountId({ edits } as never)).toBeUndefined();
+  });
+
+  it('keeps the other edits', () => {
+    const edits = withPayee({ memo: 'a note', categoryId: 'c-1' }, 'Krogger');
+    expect(edits.memo).toBe('a note');
+    expect(edits.categoryId).toBe('c-1');
   });
 });
 

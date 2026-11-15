@@ -210,10 +210,33 @@ export function withSplit(
 }
 
 /**
+ * Pure: the edits that give a row a PAYEE.
+ *
+ * The mirror of `withTransfer`: a transfer row is not a payee row — its
+ * payee IS the transfer — so choosing a payee clears the transfer.
+ *
+ * The target is cleared with `''` rather than `undefined`, because
+ * `undefined` means "the user did not say anything about it" and the
+ * resolver's auto-detect would come BACK. A user who gives a row a payee
+ * has said what it is: not a transfer.
+ */
+export function withPayee(
+  edits: PreviewEdits,
+  payeeCanonical: string,
+): PreviewEdits {
+  return { ...edits, payeeCanonical, transferAccountId: '' };
+}
+
+/**
  * Pure: the edits that make a row a TRANSFER.
  *
  * The mirror of `withSplit`: setting a transfer clears the split, so the
  * row says one thing about where its money goes and not two.
+ *
+ * A transfer also clears the row's PAYEE: a transfer's payee is the
+ * target account's transfer payee, so a payee the user chose for the row
+ * would be silently dropped by the payload builder, which prefers the
+ * transfer.
  *
  * `accountId` has two ways to say "no transfer":
  *
@@ -231,7 +254,12 @@ export function withTransfer(
   edits: PreviewEdits,
   accountId: string | undefined,
 ): PreviewEdits {
-  return { ...edits, transferAccountId: accountId, splits: undefined };
+  return {
+    ...edits,
+    payeeCanonical: undefined,
+    transferAccountId: accountId,
+    splits: undefined,
+  };
 }
 
 export type PreviewRow = ResolvedRow & {
@@ -304,9 +332,12 @@ export function effectiveAmountCents(row: PreviewRow): number {
  * The transfer account id that actually applies to this row: the user's
  * explicit choice if they made one, otherwise the resolver's auto-detect.
  *
- * The auto-detect is a *prefill*, not a fact — the row stays pending until
- * the user confirms it, at which point the editor writes the value into
- * `edits.transferAccountId`.
+ * The auto-detect is a DEFAULT: it applies unless the user says otherwise.
+ * A vendor string that is exactly a budget account's name is a transfer in
+ * every ordinary sense, and making the user confirm every one of them
+ * would be a chore for no gain. The row is flagged, so the review says so,
+ * and the user can take the transfer away or give the row a payee instead
+ * (which clears the transfer — see `withPayee`).
  *
  * An EMPTY STRING means the user CLEARED the transfer, including an
  * auto-detected one, so the row is not a transfer at all. Without this,

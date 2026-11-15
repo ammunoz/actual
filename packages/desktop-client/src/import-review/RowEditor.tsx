@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import { withPayee } from '@actual-app/core/server/transactions/import/review/index';
 import type {
   PreviewEdits,
   PreviewRow,
@@ -108,10 +109,7 @@ export function RowEditor({
           errorText={t('No payee matches that name')}
           onPick={(suggestion, text) => {
             onCommit(
-              {
-                ...row.edits,
-                payeeCanonical: suggestion ? suggestion.name : text.trim(),
-              },
+              withPayee(row.edits, suggestion ? suggestion.name : text.trim()),
               suggestion?.id,
             );
           }}

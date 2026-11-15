@@ -195,7 +195,8 @@ export type ResolvedRow = ReviewRowInput & {
   matchedPayeeId?: string;
   /**
    * Budget account id, when the row was detected as an inter-account
-   * transfer. The transfer is a *prefill* pending confirmation, not a fact.
+   * transfer. The transfer is a default: it applies unless the user gives
+   * the row a payee or takes the transfer away.
    */
   matchedTransferAccountId?: string;
   /** Budget category id, when a rule supplied a category hint. */

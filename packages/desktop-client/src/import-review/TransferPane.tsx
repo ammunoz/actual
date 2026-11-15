@@ -74,7 +74,7 @@ export function TransferPane({
   const { t } = useTranslation();
 
   // The target the row has NOW: the user's own choice, or the
-  // resolver's auto-detect, which is a prefill and not a fact.
+  // resolver's auto-detect, which is a default the user can take away.
   const currentTargetId = effectiveTransferAccountId(row);
 
   // The draft: the account the row will transfer to.
@@ -106,7 +106,7 @@ export function TransferPane({
   const removeTransfer = () => {
     // The empty string CLEARS the transfer, including the resolver's
     // auto-detect: `undefined` would only clear the user's own choice,
-    // and the prefill would come back.
+    // and the default would come back.
     onCommit(withTransfer(row.edits, ''));
   };
 

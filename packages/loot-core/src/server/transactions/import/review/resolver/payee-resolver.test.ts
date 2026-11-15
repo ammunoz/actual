@@ -266,6 +266,18 @@ describe('resolvePayees — transfer detection', () => {
     ]);
   });
 
+  it("never detects a transfer to the row's own account", () => {
+    // A transaction cannot transfer to the account it is in. The manual
+    // picker refuses it, and the auto-detect has to refuse it too.
+    const row = mkRow({ payeeRaw: 'demo savings', accountId: 'a-savings' });
+    const [out] = resolvePayees([row], {
+      existingPayees: EXISTING,
+      accounts: ACCOUNTS,
+    });
+    expect(out?.matchedTransferAccountId).toBeUndefined();
+    expect(out?.payeeMatchSource).not.toBe('transfer');
+  });
+
   it('transfer detection beats an existing-prefix match on the same string', () => {
     const payees: readonly ReviewPayee[] = [
       { id: 'p-x', name: 'Demo Checking' },

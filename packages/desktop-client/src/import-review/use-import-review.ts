@@ -263,10 +263,16 @@ export function readVendorMap(raw: string | undefined): VendorMap | undefined {
  *
  * A transient `previewKey` is assigned so every row has a unique key even
  * when the file has no FITIDs or repeats one.
+ *
+ * The account is the one the rows are imported INTO. The resolver needs it:
+ * a transaction cannot transfer to the account it is in, so the row's own
+ * account is not a candidate when the resolver looks for a transfer.
  */
 export function toReviewRows(
   transactions: readonly Record<string, unknown>[],
+  opts: { accountId?: string } = {},
 ): ReviewRowInput[] {
+  const accountId = opts.accountId ?? '';
   return transactions.map((trans, index) => {
     const importedId =
       typeof trans.imported_id === 'string' ? trans.imported_id : undefined;
@@ -303,7 +309,7 @@ export function toReviewRows(
     }
 
     return {
-      accountId: '',
+      accountId,
       importedId,
       date,
       // An amount the file did not supply becomes 0 cents, but the row is
@@ -490,6 +496,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
             // transaction and a CSV record, and `toReviewRows` reads each
             // field defensively, checking the type before it uses it.
             parsed.transactions as Record<string, unknown>[],
+            { accountId },
           ),
         );
 
@@ -581,7 +588,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       } catch (err) {
         if (cancelled) return;
         setStatus('idle');
-        setError(err instanceof Error ? err.message : 'Import failed');
+        setError(err instanceof Error ? err.message : t('The import failed'));
       }
     }
 
@@ -591,7 +598,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     };
     // The vendor map is deliberately NOT a dependency: it is read through a
     // ref, because a write to it must never re-parse the file.
-  }, [filename, accountId]);
+  }, [filename, accountId, t]);
 
   const buildUpdates = useCallback(() => {
     if (!state) return { updates: [] };
@@ -847,7 +854,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
             // silently dropped while the apply reported success. Better to
             // say so.
             setStatus('reviewing');
-            setError('The payee could not be created');
+            setError(t('The payee could not be created'));
             return false;
           }
           update.payee = payeeId;
@@ -873,37 +880,55 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (didChange) {
           writeVendorMap(state);
           onImported(true);
-        } else {
-          setError('There is nothing to import');
+          return true;
         }
-        return didChange;
+        // Every row was dropped or held back, so there was nothing to
+        // write. Saying so is the difference between "the import failed"
+        // and "the import did nothing because you asked for nothing".
+        setError(t('There is nothing to import'));
+        return false;
       }
 
       // The updates above are already written by the time the import runs,
       // so the two are not atomic: if the import fails, the updates stay.
       // That is deliberate — the updates are the user's explicit edits and
       // re-sending them would be a no-op — but it is worth knowing.
-      const {
-        errors,
-        added = [],
-        updated = [],
-      } = await send('transactions-import', {
-        accountId,
-        // The cast is here, and only here, because upstream types a
-        // split leg's `category` as `string | undefined` while its
-        // runtime accepts `null` — and the difference is load-bearing:
-        // upstream's `makeChild` decides inherit-vs-override with
-        // `"category" in data`, so a leg WITHOUT the key inherits the
-        // parent's category. `null` says "no category" outright.
-        //
-        // Widening the call instead would push the same problem into
-        // every caller of `transactions-import`.
-        transactions: payload as ImportTransactionEntity[],
-        isPreview: false,
-      });
-      if (errors && errors.length > 0) {
+      let importErrors: { message: string }[] | undefined;
+      let added: string[] = [];
+      let updated: string[] = [];
+      try {
+        const result = await send('transactions-import', {
+          accountId,
+          // The cast is here, and only here, because upstream types a
+          // split leg's `category` as `string | undefined` while its
+          // runtime accepts `null` — and the difference is load-bearing:
+          // upstream's `makeChild` decides inherit-vs-override with
+          // `"category" in data`, so a leg WITHOUT the key inherits the
+          // parent's category. `null` says "no category" outright.
+          //
+          // Widening the call instead would push the same problem into
+          // every caller of `transactions-import`.
+          transactions: payload as ImportTransactionEntity[],
+          isPreview: false,
+        });
+        importErrors = result.errors;
+        added = result.added ?? [];
+        updated = result.updated ?? [];
+      } catch (err) {
         setStatus('reviewing');
-        setError(errors[0].message);
+        // The updates above were already written, so the message says
+        // which half failed: the user has to know that their edits are
+        // in the budget even though the import did not go through.
+        setError(
+          t('The edits were saved, but the import failed: {{message}}', {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+        return false;
+      }
+      if (importErrors && importErrors.length > 0) {
+        setStatus('reviewing');
+        setError(importErrors[0].message);
         return false;
       }
 
@@ -926,7 +951,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setError(transferErrorMessage(err.code, t));
         return false;
       }
-      setError(err instanceof Error ? err.message : 'Import failed');
+      setError(err instanceof Error ? err.message : t('The import failed'));
       return false;
     } finally {
       applyingRef.current = false;
@@ -942,8 +967,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // decisions that produced the entries.
       writeVendorMap(state);
       onImported(true);
+      return true;
     }
-    return didChange;
+
+    // Nothing changed. Every row was dropped, or the trust level held it
+    // back, or the transactions were already in the budget exactly as
+    // they are. The review says so: a keypress that appears to do
+    // nothing is worse than one that says "there was nothing to do".
+    setError(t('There is nothing to import'));
+    return false;
   }, [
     accountId,
     buildUpdates,

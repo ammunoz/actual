@@ -213,6 +213,33 @@ test.describe('Keyboard import review', () => {
     ).toHaveCount(0);
   });
 
+  test('an import with nothing to do says so', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Nothing To Do',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user throws every row away, so there is nothing left to import.
+    await page.keyboard.press('Shift+r');
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+
+    // The review says so rather than sitting there looking broken.
+    await expect(dialog.getByText('There is nothing to import')).toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(0);
+  });
+
   test('the keyboard drives the review', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Keys',

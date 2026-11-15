@@ -70,6 +70,7 @@ export {
   updateEdits,
   validateSplitRow,
   validateTransferRow,
+  withPayee,
   withSplit,
   withTransfer,
   withTrustLevel,

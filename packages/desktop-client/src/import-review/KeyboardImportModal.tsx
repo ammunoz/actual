@@ -351,10 +351,18 @@ export function KeyboardImportModal({
         //
         // A hard-blocked row cannot be overridden: its data is broken, and
         // the import would reject it or write it wrong. The row stays
-        // where it is.
-        if (focused && focusedEvaluation?.overridable) {
-          review.decide(review.focusedIndex, 'accept-override');
+        // where it is — and the user is told, because a keypress that
+        // does nothing at all looks like the review is broken.
+        if (!focused) break;
+        if (!focusedEvaluation?.overridable) {
+          setNotice(
+            t(
+              'This row cannot be accepted: its data is wrong, so it has to be fixed first.',
+            ),
+          );
+          break;
         }
+        review.decide(review.focusedIndex, 'accept-override');
         break;
       case 'accept-all':
         review.decideAll('accept');

@@ -92,10 +92,10 @@ const OUTCOME_MATRIX: Readonly<
     cautious: 'warn',
     trusted: 'warn',
   }),
-  // Auto-detected transfers start as a prefill, not a fact: the user must
-  // confirm (or unset) the row like any other pending decision. Warn at
-  // every trust level so the badge always surfaces, but never blocks — a
-  // false-positive detection is reverted with one keypress, not an error.
+  // An auto-detected transfer is a DEFAULT, not a guess: the row becomes a
+  // transfer unless the user says otherwise. Warn at every trust level so
+  // the badge always surfaces, but never block — a false-positive
+  // detection is reverted with one keypress, not an error.
   'transfer-detected': Object.freeze({
     paranoid: 'warn',
     cautious: 'warn',
