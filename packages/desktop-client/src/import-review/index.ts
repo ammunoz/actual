@@ -57,6 +57,9 @@ export { HELP_LABELS } from './help-labels';
 export { RowEditor } from './RowEditor';
 export type { RowEditorProps } from './RowEditor';
 
+export { ConfirmPane } from './ConfirmPane';
+export type { ConfirmPaneProps } from './ConfirmPane';
+
 export { useImportReview } from './use-import-review';
 export type {
   EditOptions,

@@ -236,6 +236,57 @@ describe('useImportReview', () => {
     expect(result.current.summary.total).toBe(2);
   });
 
+  it('reports no unsaved work for a review the user has not touched', async () => {
+    const { result } = await renderReview();
+    expect(result.current.unsavedWork).toEqual({
+      hasWork: false,
+      decided: 0,
+      edited: 0,
+    });
+  });
+
+  it('reports the work a decision makes', async () => {
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.decide(0, 'accept');
+    });
+
+    expect(result.current.unsavedWork).toEqual({
+      hasWork: true,
+      decided: 1,
+      edited: 0,
+    });
+  });
+
+  it('reports the work an edit makes', async () => {
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(0, { memo: 'a note' });
+    });
+
+    expect(result.current.unsavedWork).toEqual({
+      hasWork: true,
+      decided: 0,
+      edited: 1,
+    });
+  });
+
+  it('reports no unsaved work again once the work is undone', async () => {
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.decide(0, 'accept');
+    });
+    expect(result.current.unsavedWork.hasWork).toBe(true);
+
+    act(() => {
+      result.current.undo();
+    });
+    expect(result.current.unsavedWork.hasWork).toBe(false);
+  });
+
   it('undoes a bulk accept in ONE step', async () => {
     // A bulk action is one change, so it is one undo — not one undo per
     // row.

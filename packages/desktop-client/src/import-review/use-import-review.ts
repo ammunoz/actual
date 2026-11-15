@@ -22,6 +22,7 @@ import {
   resolvePayees,
   rowKey,
   summarize,
+  unsavedWork,
   updateEdits,
   upsertVendorMapEntry,
   validateVendorMap,
@@ -40,6 +41,7 @@ import type {
   ReviewRowInput,
   RowEvaluation,
   TrustLevel,
+  UnsavedWork,
   VendorMap,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { amountToInteger } from '@actual-app/core/shared/util';
@@ -136,6 +138,15 @@ export const EMPTY_SUMMARY: PreviewSummary = Object.freeze({
   outflowCount: 0,
 });
 
+/**
+ * The work there is to lose, before the file has been parsed.
+ */
+const EMPTY_UNSAVED_WORK: UnsavedWork = Object.freeze({
+  hasWork: false,
+  decided: 0,
+  edited: 0,
+});
+
 export type ImportReviewState = {
   status: ReviewStatus;
   error: string | null;
@@ -162,6 +173,16 @@ export type ImportReviewState = {
    * The UI reads this to badge the rows and to explain the focused row.
    */
   evaluations: ReadonlyMap<string, RowEvaluation>;
+  /**
+   * What closing the review would throw away: the rows the user decided
+   * and the rows the user edited.
+   *
+   * The review asks before it throws anything away, and this is what says
+   * whether there is anything to ask about. The confirmation tells the
+   * user what it is about to lose, so the numbers have to be the real
+   * ones.
+   */
+  unsavedWork: UnsavedWork;
   /** Set the decision on a row. */
   decide: (index: number, decision: PreviewDecision) => void;
   /**
@@ -825,6 +846,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     return { summary: summarize(state, map), evaluations: map };
   }, [state, payees]);
 
+  // What the user would lose if the review were closed.
+  //
+  // The domain owns the definition — it is a property of the rows — so
+  // this is only the live answer to it.
+  const unsaved = useMemo(
+    () => (state ? unsavedWork(state) : EMPTY_UNSAVED_WORK),
+    [state],
+  );
+
   const rows = state?.rows ?? [];
 
   return {
@@ -838,6 +868,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     categories,
     summary,
     evaluations,
+    unsavedWork: unsaved,
     decide,
     decideAll,
     edit,

@@ -13,6 +13,7 @@ import {
   PreviewStateError,
   rowKey,
   summarize,
+  unsavedWork,
   updateEdits,
   withTrustLevel,
 } from './preview-state';
@@ -458,5 +459,103 @@ describe('trust level propagation', () => {
       const next = applyDecision(state, 't-1', 'accept');
       expect(next.trustLevel).toBe(level);
     }
+  });
+});
+
+describe('unsavedWork', () => {
+  it('is true once a row is decided', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = applyDecision(state, 't-1', 'accept');
+    expect(unsavedWork(next).hasWork).toBe(true);
+  });
+
+  it('is true for a dropped row too', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = applyDecision(state, 't-1', 'drop');
+    expect(unsavedWork(next).hasWork).toBe(true);
+  });
+
+  it('is true when a row is edited, even without a decision', () => {
+    // The user typed a note on a row they have not accepted yet. Closing
+    // the review throws that note away, so it is work.
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { memo: 'a note' });
+    expect(next.rows[0].decision).toBe('pending');
+    expect(unsavedWork(next).hasWork).toBe(true);
+  });
+
+  it('is true when a category was cleared', () => {
+    // An empty string is the user saying "no category" — a change, even
+    // though it is not a value.
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { categoryId: '' });
+    expect(unsavedWork(next).hasWork).toBe(true);
+  });
+
+  it('is false for an edit whose value is undefined', () => {
+    // `undefined` is how the state says "the user has not touched this".
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { memo: undefined });
+    expect(unsavedWork(next).hasWork).toBe(false);
+  });
+
+  it('does not count the trust level', () => {
+    // The trust level is a global view preference, not work on a row.
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = withTrustLevel(state, 'trusted');
+    expect(next.trustLevel).toBe('trusted');
+    expect(unsavedWork(next).hasWork).toBe(false);
+  });
+
+  it('is false again once the work is undone', () => {
+    // Undoing puts the row back, so there is nothing left to lose.
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const decided = applyDecision(state, 't-1', 'accept');
+    const undone = applyDecision(decided, 't-1', 'pending');
+    expect(unsavedWork(undone).hasWork).toBe(false);
+  });
+
+  it('is true when only ONE of several rows was decided', () => {
+    const state = buildPreviewState(
+      [mkRow(), mkRow({ importedId: 't-2' })],
+      'cautious',
+    );
+    const next = applyDecision(state, 't-2', 'accept');
+    expect(unsavedWork(next).hasWork).toBe(true);
+  });
+
+  it('counts nothing for a fresh review', () => {
+    const state = buildPreviewState(
+      [mkRow(), mkRow({ importedId: 't-2' })],
+      'cautious',
+    );
+    expect(unsavedWork(state)).toEqual({
+      hasWork: false,
+      decided: 0,
+      edited: 0,
+    });
+  });
+
+  it('counts the decided rows', () => {
+    const state = buildPreviewState(
+      [mkRow(), mkRow({ importedId: 't-2' }), mkRow({ importedId: 't-3' })],
+      'cautious',
+    );
+    let next = applyDecision(state, 't-1', 'accept');
+    next = applyDecision(next, 't-2', 'drop');
+    expect(unsavedWork(next)).toEqual({ hasWork: true, decided: 2, edited: 0 });
+  });
+
+  it('counts the edited rows', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const next = updateEdits(state, 't-1', { memo: 'a note' });
+    expect(unsavedWork(next)).toEqual({ hasWork: true, decided: 0, edited: 1 });
+  });
+
+  it('counts a decided-and-edited row in both counts', () => {
+    const state = buildPreviewState([mkRow()], 'cautious');
+    const accepted = applyDecision(state, 't-1', 'accept');
+    const next = updateEdits(accepted, 't-1', { memo: 'a note' });
+    expect(unsavedWork(next)).toEqual({ hasWork: true, decided: 1, edited: 1 });
   });
 });

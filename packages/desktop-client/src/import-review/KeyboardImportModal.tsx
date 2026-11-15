@@ -24,6 +24,7 @@ import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { useModalState } from '#hooks/useModalState';
 
+import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
 import { HelpOverlay } from './HelpOverlay';
@@ -41,11 +42,15 @@ export type KeyboardImportModalProps = {
 /**
  * What the pane below the table is showing.
  *
- * The editor and the help overlay are the same pane: they cannot both be
- * open, because there is only one keyboard and only one of them may have
- * it.
+ * The editor, the help overlay and the confirmation are the same pane:
+ * they cannot both be open, because there is only one keyboard and only
+ * one of them may have it.
  */
-type PaneMode = { kind: 'editor'; field: EditorMode } | { kind: 'help' } | null;
+type PaneMode =
+  | { kind: 'editor'; field: EditorMode }
+  | { kind: 'help' }
+  | { kind: 'confirm' }
+  | null;
 
 /**
  * The keyboard-driven import review.
@@ -152,6 +157,36 @@ export function KeyboardImportModal({
     [review.payees],
   );
 
+  /**
+   * Close the review for good, throwing away whatever is in it.
+   *
+   * This is the only way to close the review WITHOUT applying it: the
+   * escape binding and the X button both come through `requestClose`, so
+   * both ask first when there is something to ask about.
+   */
+  const confirmClose = () => {
+    review.close();
+    onClose();
+  };
+
+  /**
+   * Close the review, asking first if there is anything to lose.
+   *
+   * A review the user has not touched has nothing to lose, so it closes
+   * straight away; one they have worked on asks first.
+   *
+   * A draft in the editor does not count: it was never committed, so the
+   * review does not know it exists. That is the same rule that makes
+   * escape in the editor cancel the edit rather than ask about it.
+   */
+  const requestClose = () => {
+    if (review.unsavedWork.hasWork) {
+      setPane({ kind: 'confirm' });
+      return;
+    }
+    confirmClose();
+  };
+
   const dispatch = (action: ReviewAction) => {
     switch (action) {
       case 'move-next':
@@ -217,8 +252,7 @@ export function KeyboardImportModal({
         });
         break;
       case 'close':
-        review.close();
-        onClose();
+        requestClose();
         break;
       case 'help':
         setPane(current =>
@@ -263,10 +297,15 @@ export function KeyboardImportModal({
       // bindings are switched off entirely.
       //
       // The `enabled` option does that work, not the scope. Switching a
-      // scope off goes through the hotkeys provider, and in this app the
-      // provider's state change does not reach the hook's listener: the
-      // review's keys kept firing after its scope was switched off.
-      // `enabled` is local to the hook, so it cannot fail that way.
+      // scope off happens in the provider, and the provider's state change
+      // reaches this hook only after React has flushed the passive effects
+      // that made it — one scheduler task after the commit that opened the
+      // pane. A keypress in that window still hits the review's `escape`,
+      // which discards the whole review.
+      //
+      // `enabled` is local to the hook and is part of its options, so the
+      // binding is torn down in the LAYOUT phase of the very same commit
+      // that opened the pane — before the browser can deliver another key.
       //
       // A guard inside the handler would not do either. `tab` would still
       // cycle the trust level, the arrow keys would still move the row
@@ -326,18 +365,29 @@ export function KeyboardImportModal({
     <Modal
       name={REVIEW_SCOPE}
       isLoading={isLoading}
-      // While the pane is open it owns the keyboard, and that includes the
-      // escape key: the pane's escape cancels the edit, it must not
-      // discard the review. React Aria dismisses the dialog on escape on
-      // its own, so it has to be told not to.
-      isKeyboardDismissDisabled={pane !== null}
+      // The review owns the escape key, always.
+      //
+      // React Aria dismisses the dialog on escape on its own, which would
+      // throw the review away — every decision and edit in it — without
+      // asking. So the dialog is told never to dismiss itself, and the
+      // review's own escape binding is the only escape there is. It asks
+      // before it throws anything away.
+      isKeyboardDismissDisabled
+      // A click outside the modal used to dismiss it the same way, so it
+      // is turned off: the ways out of the review are the escape key and
+      // the X button, and both of them ask first.
+      //
+      // The prop wins because upstream's `Modal` spreads the caller's
+      // props over the overlay's own AFTER it sets `isDismissable`, so
+      // this one replaces it.
+      isDismissable={false}
       containerProps={{ style: { width: 900, maxWidth: '100%' } }}
     >
       {() => (
         <>
           <ModalHeader
             title={t('Review import')}
-            leftContent={<ModalCloseButton onPress={review.close} />}
+            leftContent={<ModalCloseButton onPress={requestClose} />}
             rightContent={
               <Button
                 variant="primary"
@@ -346,7 +396,9 @@ export function KeyboardImportModal({
                     if (didChange) onClose();
                   });
                 }}
-                isDisabled={isLoading || rows.length === 0}
+                isDisabled={
+                  isLoading || rows.length === 0 || pane?.kind === 'confirm'
+                }
               >
                 <Trans>Import</Trans>
               </Button>
@@ -545,6 +597,15 @@ export function KeyboardImportModal({
             ) : null}
 
             {pane?.kind === 'help' ? <HelpOverlay /> : null}
+
+            {pane?.kind === 'confirm' ? (
+              <ConfirmPane
+                decided={review.unsavedWork.decided}
+                edited={review.unsavedWork.edited}
+                onKeep={() => setPane(null)}
+                onDiscard={confirmClose}
+              />
+            ) : null}
           </View>
         </>
       )}

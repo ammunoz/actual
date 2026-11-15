@@ -654,6 +654,295 @@ test.describe('Keyboard import review', () => {
     ).toHaveCount(0);
   });
 
+  test('escape closes a review the user has not touched', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Escape Clean',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    // Nothing has been decided or edited, so there is nothing to lose and
+    // nothing to ask about.
+    await page.keyboard.press('Escape');
+
+    await expect(dialog).not.toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(0);
+  });
+
+  test('escape asks before it throws the work away', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Escape Dirty',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // Accept a row: that is work, and escape must not throw it away.
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    await page.keyboard.press('Escape');
+
+    // The confirmation, and the review is still open underneath it.
+    const confirm = dialog.getByTestId('import-review-confirm');
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText('Rows decided: 1');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    // The work is still there: the confirmation did not decide anything.
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test('keeping the review brings back the work untouched', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Keep',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    await page.keyboard.press('Escape');
+    const confirm = dialog.getByTestId('import-review-confirm');
+    await expect(confirm).toBeVisible();
+
+    // Escape goes back to the review rather than throwing it away.
+    await page.keyboard.press('Escape');
+    await expect(confirm).not.toBeVisible();
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    // And the review still answers the keyboard: the button that had the
+    // focus is gone, and the focus must not have gone with the keyboard.
+    await page.keyboard.press('u');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test('the safe choice is the one that starts focused', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Focus',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+    await page.keyboard.press('Escape');
+
+    const confirm = dialog.getByTestId('import-review-confirm');
+    await expect(confirm).toBeVisible();
+
+    // Enter acts on whatever is focused, so the safe choice has to be the
+    // one that starts focused: a user who reaches for the keyboard
+    // without reading the pane keeps their work.
+    await expect(
+      confirm.getByRole('button', { name: 'Keep reviewing' }),
+    ).toBeFocused();
+
+    // So Enter keeps the work: the confirmation closes and the review is
+    // still there, with the decision intact.
+    await page.keyboard.press('Enter');
+    await expect(confirm).not.toBeVisible();
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test('discarding throws the review away and imports nothing', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Discard',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+    await page.keyboard.press('Escape');
+
+    const confirm = dialog.getByTestId('import-review-confirm');
+    await expect(confirm).toBeVisible();
+
+    // Move to the destructive choice and take it.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
+
+    await expect(dialog).not.toBeVisible();
+
+    // Nothing landed: the review was thrown away, not applied.
+    await expect(accountPage.transactionTableRow).toHaveCount(0);
+  });
+
+  test('undoing the work makes the review safe to close again', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Undo Close',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    // Undoing puts the row back, so there is nothing left to lose.
+    await page.keyboard.press('u');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+
+    await page.keyboard.press('Escape');
+    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('the X button asks before it throws the work away', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review X Button',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+
+    await dialog.getByRole('button', { name: 'Close' }).click();
+
+    const confirm = dialog.getByTestId('import-review-confirm');
+    await expect(confirm).toBeVisible();
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    // The confirmation takes the keyboard: the X button has the focus
+    // after the click, and the confirmation takes it back.
+    await expect(
+      confirm.getByRole('button', { name: 'Keep reviewing' }),
+    ).toBeFocused();
+  });
+
+  test('clicking outside does not throw the review away', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Outside Click',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('a');
+
+    // A click outside the dialog used to dismiss it and throw the work
+    // away with it. The click lands on the overlay behind the dialog, in
+    // the corner the dialog does not cover.
+    await page
+      .getByTestId('keyboard-import-transactions-modal')
+      .click({ position: { x: 5, y: 5 } });
+
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+
+    // The work is still there: the click did not throw it away either.
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test("the editor's escape cancels the edit without asking", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Editor Escape',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // There IS work in the review, so a confirmation would be right — but
+    // the escape in the editor cancels the EDIT, and there is nothing to
+    // ask about: the edit was never committed.
+    await page.keyboard.press('a');
+    await page.keyboard.press('e');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    await expect(editor).not.toBeVisible();
+    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+    await expect(dialog.getByText('Review import')).toBeVisible();
+  });
+
   test('the help overlay lists the keys', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Help',

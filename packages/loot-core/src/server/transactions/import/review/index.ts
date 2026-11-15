@@ -66,6 +66,7 @@ export {
   PREVIEW_STATE_NOT_FOUND,
   rowKey,
   summarize,
+  unsavedWork,
   updateEdits,
   withTrustLevel,
 } from './preview/preview-state';
@@ -75,6 +76,7 @@ export type {
   PreviewEdits,
   PreviewRow,
   PreviewSummary,
+  UnsavedWork,
 } from './preview/preview-state';
 
 export {

@@ -498,3 +498,59 @@ export function summarize(
     outflowCount,
   });
 }
+
+/**
+ * What the user would lose if the review were closed.
+ */
+export type UnsavedWork = {
+  /**
+   * Whether there is anything to lose.
+   *
+   * The review asks before it throws anything away, and this is what says
+   * whether there is anything to ask about.
+   */
+  hasWork: boolean;
+  /** Rows the user decided: accepted, overridden or dropped. */
+  decided: number;
+  /** Rows the user edited. */
+  edited: number;
+};
+
+/**
+ * Pure: count the work the user would lose if the review were closed.
+ *
+ * This is what decides whether closing the review needs a confirmation, and
+ * what the confirmation tells the user it would throw away. It is a
+ * question about the ROWS, not about the UI: a row the user decided or
+ * edited is work, and closing the review throws it away.
+ *
+ * What does NOT count:
+ *
+ *   - The trust level. It is a global view preference, not work on a row,
+ *     and it is not lost by closing the review.
+ *   - A row the user edited and then undid. The undo puts the row back,
+ *     so there is nothing left to lose.
+ *
+ * An edit counts even on a row the user has not decided yet: the user
+ * typed a note on that row, and closing the review throws the note away.
+ *
+ * An edit whose value is `undefined` does not count: `undefined` is how
+ * the state says "the user has not touched this".
+ */
+export function unsavedWork(state: ImportPreviewState): UnsavedWork {
+  let decided = 0;
+  let edited = 0;
+
+  for (const row of state.rows) {
+    if (row.decision !== 'pending') decided += 1;
+    if (Object.values(row.edits).some(value => value !== undefined)) {
+      edited += 1;
+    }
+  }
+
+  return Object.freeze({
+    hasWork: decided > 0 || edited > 0,
+    decided,
+    edited,
+  });
+}
