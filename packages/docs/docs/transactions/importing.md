@@ -25,24 +25,24 @@ To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key
 
 When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
 
-| Key | What it does |
-| --- | --- |
-| <Key k="j" />, <Key k="k" /> | Move to the next or previous row |
-| <Key k="g" />, <Key k="G" /> | Jump to the first or last row |
-| <Key k="a" /> | Accept the row and move on |
-| <Key k="r" /> | Drop the row and move on |
-| <Key k="u" /> | Undo the last decision |
-| <Key k="e" /> | Edit the payee |
-| <Key k="c" /> | Edit the category |
-| <Key k="m" /> | Edit the notes |
-| <Key k="d" /> | Edit the date |
-| <Key k="s" /> | Split the row across categories |
-| <Key k="t" /> | Make the row a transfer |
-| <Key k="Tab" /> | Change how careful Actual is about the rows |
-| <Key k="A" />, <Key k="R" /> | Accept or drop every row |
-| <Key k="w" /> | Put the review aside, and pick it up again later |
-| <Key mod="ctrl" k="s" /> | Apply the import |
-| <Key k="?" /> | Show the keys |
+| Key                          | What it does                                     |
+| ---------------------------- | ------------------------------------------------ |
+| <Key k="j" />, <Key k="k" /> | Move to the next or previous row                 |
+| <Key k="g" />, <Key k="G" /> | Jump to the first or last row                    |
+| <Key k="a" />                | Accept the row and move on                       |
+| <Key k="r" />                | Drop the row and move on                         |
+| <Key k="u" />                | Undo the last decision                           |
+| <Key k="e" />                | Edit the payee                                   |
+| <Key k="c" />                | Edit the category                                |
+| <Key k="m" />                | Edit the notes                                   |
+| <Key k="d" />                | Edit the date                                    |
+| <Key k="s" />                | Split the row across categories                  |
+| <Key k="t" />                | Make the row a transfer                          |
+| <Key k="Tab" />              | Change how careful Actual is about the rows      |
+| <Key k="A" />, <Key k="R" /> | Accept or drop every row                         |
+| <Key k="w" />                | Put the review aside, and pick it up again later |
+| <Key mod="ctrl" k="s" />     | Apply the import                                 |
+| <Key k="?" />                | Show the keys                                    |
 
 The review holds back the rows it is not sure about, and says why: a payee it does not know, a transaction that repeats an earlier one, or a row whose amount or date the file did not supply properly. You can accept a row anyway, or fix it and import it that way.
 
