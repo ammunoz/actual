@@ -186,6 +186,27 @@ describe('the update path of a transfer', () => {
     expect(updates[0].update.payee).toBe('p-transfer');
   });
 
+  it('keeps the FITID on the transaction it updates', () => {
+    // The row is excluded from the import payload, because it is updated
+    // in place. Actual's import UPDATE path is what writes `imported_id`
+    // on a matched row, so without it here the transaction would lose its
+    // dedup key — and the next import of the same file would add it a
+    // second time.
+    const state = buildTransferState({ memo: 'a note' });
+    const { updates } = buildUpdatePayload(state, opts);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.imported_id).toBe('fit-1');
+  });
+
+  it('does not clear the FITID of a row that has none', () => {
+    // A row without a FITID must not wipe the one the transaction
+    // already has.
+    const state = buildTransferState({ memo: 'a note' }, { importedId: '' });
+    const { updates } = buildUpdatePayload(state, opts);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].update.imported_id).toBeUndefined();
+  });
+
   it('sends nothing when the transfer is the one the resolver found', () => {
     // The resolver's transfer detection matched the vendor string
     // against an account name, so the row was already this transfer.

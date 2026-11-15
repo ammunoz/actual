@@ -121,6 +121,20 @@ export type ImportReviewUpdate = {
   /** The date, `YYYY-MM-DD`. */
   date: string;
   /**
+   * The bank's transaction id, when the row carried one.
+   *
+   * Actual's import UPDATE path writes `imported_id: trans.imported_id ||
+   * null`, so an imported row's FITID is part of the transaction. A row
+   * the review updates IN PLACE is excluded from the import, so without
+   * this the FITID would never be written — and the next import of the
+   * same file would not recognise the transaction and would add it a
+   * second time.
+   *
+   * It is only sent when the row HAS one: a row without a FITID must not
+   * clear the FITID the transaction already has.
+   */
+  imported_id?: string;
+  /**
    * The payee id, or `null` to CLEAR the payee.
    *
    * `null` is what a row whose transfer was removed needs: the

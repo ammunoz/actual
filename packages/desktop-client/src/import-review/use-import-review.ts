@@ -53,6 +53,10 @@ import { amountToInteger } from '@actual-app/core/shared/util';
 import type { ImportTransactionEntity } from '@actual-app/core/types/models';
 
 import {
+  findImportedTransactions,
+  matchRowsToTransactions,
+} from './already-imported';
+import {
   buildApplyPayload,
   buildPreviewPayload,
   buildUpdatePayload,
@@ -531,7 +535,30 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         if (cancelled) return;
 
-        const matched = new Map<string, string>();
+        // Which rows are ALREADY in the budget?
+        //
+        // The import preview cannot answer that: it reports the matched
+        // transaction only when the matched row's fields DIFFER from it, so
+        // a file imported a second time matches its own transactions
+        // exactly and the preview reports nothing. Asking the budget
+        // directly, by FITID, is the only way to learn the truth.
+        const importedIds = next.rows
+          .map(row => row.importedId)
+          .filter((id): id is string => typeof id === 'string');
+        const alreadyImported = await findImportedTransactions({
+          accountId,
+          importedIds,
+        });
+        if (cancelled) return;
+
+        const matched = new Map<string, string>(
+          matchRowsToTransactions(next.rows, alreadyImported),
+        );
+
+        // The preview still knows about one thing the FITID lookup cannot
+        // see: a row with NO FITID that Actual matched against an existing
+        // transaction by date and amount. Those matches are kept, because
+        // they are the same transaction the import itself would update.
         preview.updatedPreview?.forEach(entry => {
           const existing = entry.existing;
           if (!existing?.id) return;

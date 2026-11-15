@@ -203,6 +203,10 @@ describe('useImportReview', () => {
           return CATEGORIES;
         case 'transactions-parse-file':
           return PARSED;
+        case 'query':
+          // The review asks the budget which of its rows are already in
+          // it, by FITID. Nothing is in the budget yet.
+          return { data: [], dependencies: [] };
         case 'transactions-import':
           // The import reports a change, so the apply counts as having
           // changed something.
@@ -302,6 +306,111 @@ describe('useImportReview', () => {
     });
     expect(result.current.summary.accepted).toBe(0);
     expect(result.current.summary.pending).toBe(2);
+  });
+
+  it('updates a row that is already in the budget, in place', async () => {
+    // The budget already holds the first row's FITID.
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          return {
+            data: [{ id: 'txn-1', imported_id: 'FITID-1' }],
+            dependencies: [],
+          };
+        case 'transaction-update':
+          return {};
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(0, { memo: 'a note from the review' });
+    });
+
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(sendMock).toHaveBeenCalledWith(
+      'transaction-update',
+      expect.objectContaining({
+        id: 'txn-1',
+        notes: 'a note from the review',
+      }),
+    );
+  });
+
+  it('updates the payee of a row that is already in the budget', async () => {
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          return {
+            data: [{ id: 'txn-1', imported_id: 'FITID-1' }],
+            dependencies: [],
+          };
+        case 'transaction-update':
+          return {};
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(
+        0,
+        { payeeCanonical: 'Demo Grocery Store' },
+        { chosenPayeeId: 'p-1' },
+      );
+    });
+
+    await act(async () => {
+      await result.current.apply();
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(sendMock).toHaveBeenCalledWith(
+      'transaction-update',
+      expect.objectContaining({
+        id: 'txn-1',
+        payee: 'p-1',
+      }),
+    );
   });
 
   it('undoes an edit', async () => {
@@ -408,6 +517,7 @@ describe('useImportReview', () => {
       if (name === 'accounts-get') return ACCOUNTS;
       if (name === 'get-categories') return CATEGORIES;
       if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'query') return { data: [], dependencies: [] };
       throw new Error(`unexpected send: ${name}`);
     }) as never);
 

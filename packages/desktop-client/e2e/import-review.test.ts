@@ -137,6 +137,80 @@ test.describe('Keyboard import review', () => {
     );
   });
 
+  test('a re-import keeps the edit the user made to an imported transaction', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Reimport',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+
+    // The first import puts the three transactions in the budget.
+    await importOfx();
+    let dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(3);
+
+    // The second import is the SAME file. Actual's import UPDATE path keeps
+    // the existing payee and category and throws the user's edit away, so
+    // the review has to recognise the transactions that are already in the
+    // budget and update them in place.
+    await importOfx();
+    dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user gives the first row a DIFFERENT payee.
+    //
+    // This is the case the import cannot handle on its own: Actual's
+    // import UPDATE path computes `payee: existing.payee || trans.payee`,
+    // so the payee the transaction already has WINS and the user's choice
+    // is thrown away. The review has to update the transaction in place.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await expect(input).toBeFocused();
+    // The text is filled into the field rather than typed, so the
+    // review's own bindings do not see the letters.
+    await input.fill('Demo Payroll Deposit');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveText(/Demo Payroll Deposit/);
+
+    await dialog.getByRole('button', { name: 'Import' }).click();
+
+    // The old payee is not used by any transaction any more, so Actual
+    // offers to merge it. The review has nothing to do with that.
+    const mergeModal = page.getByTestId('merge-unused-payees-modal');
+    if (await mergeModal.isVisible()) {
+      await mergeModal.getByRole('button', { name: 'Do nothing' }).click();
+    }
+    await expect(
+      page.getByTestId('keyboard-import-transactions-modal'),
+    ).not.toBeVisible();
+
+    // The edit landed on the transaction that was already there: no
+    // duplicate, and the payee the user chose.
+    await expect(accountPage.transactionTableRow).toHaveCount(3);
+    await expect(
+      accountPage.transactionTableRow.filter({
+        hasText: 'Demo Payroll Deposit',
+      }),
+    ).toHaveCount(2);
+    await expect(
+      accountPage.transactionTableRow.filter({ hasText: 'PURCHASE' }),
+    ).toHaveCount(0);
+  });
+
   test('the keyboard drives the review', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Keys',
