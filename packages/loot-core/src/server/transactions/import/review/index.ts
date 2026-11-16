@@ -37,20 +37,6 @@ export type { GateOutcome } from './resolver/flags';
 
 export { rebuildPreviewState } from './preview/rebuild';
 
-export {
-  accountForRow,
-  defaultGroups,
-  distinctAccounts,
-  groupAt,
-  groupRanges,
-  isSameRouting,
-  isValidRouting,
-  rowsOfGroup,
-  setAllRowsAccount,
-  setRowAccount,
-} from './routing/groups';
-export type { GroupRange, RowGroup } from './routing/groups';
-
 export { canonicalize, strip } from './resolver/strip';
 export type { StripResult, StripRule } from './resolver/strip';
 

@@ -11,7 +11,6 @@ import {
   effectiveAmountCents,
   effectiveTransferAccountId,
   gateRow,
-  groupRanges,
   isSplitRow,
   normalizePayeeName,
   rowKey,
@@ -36,7 +35,6 @@ import type { EditorMode } from './editor-mode';
 import { HelpOverlay } from './HelpOverlay';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
-import { RoutePane } from './RoutePane';
 import { RowEditor } from './RowEditor';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
@@ -67,7 +65,6 @@ type PaneMode =
   | { kind: 'editor'; field: EditorMode }
   | { kind: 'split' }
   | { kind: 'transfer' }
-  | { kind: 'route'; scope: 'row' | 'all' }
   | { kind: 'help' }
   | { kind: 'confirm' }
   | null;
@@ -266,42 +263,10 @@ export function KeyboardImportModal({
 
   const rows = review.state?.rows ?? [];
 
-  // The heading of each group of rows: the account its rows go into, and
-  // the rows it covers.
-  //
-  // The heading is what makes the routing visible: the review cannot
-  // tell where one bank statement ends and the next begins, so the
-  // partition is the user's to make, and the user has to be able to SEE
-  // it.
-  const groupHeadings = useMemo(() => {
-    const headings = new Map<number, { accountId: string; to: number }>();
-    for (const range of groupRanges(review.groups, rows.length)) {
-      headings.set(range.start, {
-        accountId: range.group.accountId,
-        to: range.end,
-      });
-    }
-    return headings;
-  }, [review.groups, rows.length]);
-
   const accountName = (id: string) =>
     accountNames.get(id) ?? t('Unknown account');
   const focused = rows[review.focusedIndex];
 
-  // The rows the routing choice covers. The pane covers the table, so
-  // the user cannot see them while the pane is open.
-  //
-  // No manual memo: the React Compiler memoizes this for us.
-  const focusedRange = (() => {
-    if (!focused) return undefined;
-    for (const range of groupRanges(review.groups, rows.length)) {
-      if (review.focusedIndex < range.start) continue;
-      if (review.focusedIndex > range.end) continue;
-      // The rows are numbered from one, the way a person counts them.
-      return { from: range.start + 1, to: range.end + 1 };
-    }
-    return undefined;
-  })();
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
     : undefined;
@@ -450,16 +415,6 @@ export function KeyboardImportModal({
         break;
       case 'close':
         requestClose();
-        break;
-      case 'route-row':
-        // The routing is a partition of the rows, and the boundary is
-        // the user's to place: the review cannot tell where one bank
-        // statement ends and the next begins.
-        if (!focused) break;
-        openPane({ kind: 'route', scope: 'row' });
-        break;
-      case 'route-all':
-        openPane({ kind: 'route', scope: 'all' });
         break;
       case 'edit-split': {
         // A row is EITHER a transfer OR a split, never both.
@@ -672,7 +627,6 @@ export function KeyboardImportModal({
                   isLoading ||
                   rows.length === 0 ||
                   pane?.kind === 'confirm' ||
-                  pane?.kind === 'route' ||
                   pane?.kind === 'split' ||
                   pane?.kind === 'transfer'
                 }
@@ -751,7 +705,6 @@ export function KeyboardImportModal({
               }}
             >
               {rows.map((row, index) => {
-                const heading = groupHeadings.get(index);
                 const isFocused = index === review.focusedIndex;
                 const amount = integerToAmount(
                   row.edits.amountCents ?? row.amountCents,
@@ -764,10 +717,9 @@ export function KeyboardImportModal({
                   <Fragment
                     key={row.previewKey ?? row.importedId ?? String(index)}
                   >
-                    {heading ? (
+                    {index === 0 ? (
                       <View
-                        data-testid="import-review-group"
-                        data-account={heading.accountId}
+                        data-testid="import-review-destination"
                         style={{
                           padding: '6px 10px 2px 10px',
                           borderBottom: `1px solid ${theme.tableBorder}`,
@@ -780,12 +732,8 @@ export function KeyboardImportModal({
                             fontWeight: 500,
                           }}
                         >
-                          {t('Rows {{from}}–{{to}} of {{account}}', {
-                            account: accountName(heading.accountId),
-                            // The rows are numbered from one, the way a
-                            // person counts them.
-                            from: index + 1,
-                            to: heading.to + 1,
+                          {t('Importing into {{account}}', {
+                            account: accountName(accountId),
                           })}
                         </Text>
                       </View>
@@ -999,36 +947,6 @@ export function KeyboardImportModal({
               />
             ) : null}
 
-            {pane?.kind === 'route' ? (
-              <RoutePane
-                scope={pane.scope}
-                accounts={review.accounts}
-                currentAccountId={
-                  pane.scope === 'row'
-                    ? (focused?.accountId ?? accountId)
-                    : (review.groups[0]?.accountId ?? accountId)
-                }
-                from={focusedRange?.from}
-                to={focusedRange?.to}
-                onCommit={nextAccountId => {
-                  const index = review.focusedIndex;
-                  const scope = pane.scope;
-                  openPane(null);
-                  void (
-                    scope === 'all'
-                      ? review.routeAll(nextAccountId)
-                      : review.routeRow(index, nextAccountId)
-                  ).catch(() => {
-                    // The routing could not be made: the budget could
-                    // not be asked, or it refused. The review says so
-                    // rather than the keypress looking like it did
-                    // nothing.
-                    setNotice(t('The rows could not be moved to that account'));
-                  });
-                }}
-              />
-            ) : null}
-
             {pane?.kind === 'transfer' && focused ? (
               <TransferPane
                 row={focused}
@@ -1036,8 +954,7 @@ export function KeyboardImportModal({
                 payees={review.payees}
                 // The transfer target cannot be the account the row is
                 // IN: a transaction cannot transfer to the account it is
-                // in. The row's account is the one that counts, and it
-                // changes when the user routes the row.
+                // in. The row's account is the one that counts.
                 sourceAccountId={focused.accountId}
                 onCommit={(edits: PreviewEdits) => {
                   review.edit(review.focusedIndex, edits);

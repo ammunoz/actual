@@ -15,8 +15,10 @@ import { Trans } from 'react-i18next';
  */
 export const HELP_LIMITATIONS = [
   <Trans key="accounts">
-    One file can hold several bank accounts, but Actual&apos;s parser drops the
-    bank&apos;s account id. Put the boundaries yourself with o.
+    A file is imported into the account you opened the review for. If your bank
+    put two accounts in one file, they all come here: Actual&apos;s parser drops
+    the bank&apos;s account id, so the review cannot tell one statement from the
+    next.
   </Trans>,
   <Trans key="vendor-map">
     The payee names you remember are remembered for the whole budget, not for

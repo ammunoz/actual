@@ -176,10 +176,9 @@ export function validateTransferRow(
   // A transaction cannot transfer to the account it is in.
   //
   // The transfer picker refuses it, and the resolver's auto-detect
-  // refuses it too. But a row can CHANGE accounts after a transfer was
-  // set: the user routes it into the account it transfers to, and the
-  // transfer is suddenly a transfer to itself. The row's account is the
-  // only thing that knows.
+  // refuses it too. But the picker can be shown a target the row's own
+  // account matches by name, and a row whose account is the target is a
+  // transfer to itself. The row's account is the only thing that knows.
   if (accountId === row.accountId) {
     return new TransferValidationError(
       'TRANSFER-002',
@@ -514,7 +513,7 @@ export function applyDecision(
 /**
  * Pure: put the user's work back on freshly resolved rows.
  *
- * A routing change re-resolves the rows, and the resolution is NOT the
+ * A re-resolution resolves the rows again, and the resolution is NOT the
  * user's work: the DECISION they made and the EDITS they typed are. This
  * carries them across from one state to another, matched by the row's KEY
  * and never by its position — so the work survives even if the rows were

@@ -815,9 +815,8 @@ describe('validateTransferRow', () => {
 
   it('refuses a transfer to the account the row is in', () => {
     // A transaction cannot transfer to the account it is in. The picker
-    // refuses it and the resolver's auto-detect refuses it too, but a
-    // row can CHANGE accounts after a transfer was set: the user routes
-    // it into the account it transfers to.
+    // refuses it and the resolver's auto-detect refuses it too, but the
+    // row's own account is the only thing that knows.
     const row = mkRow({ accountId: 'a-2' });
     const error = validateTransferRow(
       { ...row, edits: { transferAccountId: 'a-2' } } as never,

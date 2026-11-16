@@ -13,22 +13,16 @@ import { useTranslation } from 'react-i18next';
 import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
-  defaultGroups,
-  distinctAccounts,
   emptyVendorMap,
   evaluateRow,
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
-  groupRanges,
-  isSameRouting,
   isSplitRow,
   isUsableDate,
   normalizePayeeName,
   rebuildPreviewState,
   rowKey,
-  setAllRowsAccount,
-  setRowAccount,
   SplitValidationError,
   summarize,
   TransferValidationError,
@@ -50,7 +44,6 @@ import type {
   ReviewPayee,
   ReviewRowInput,
   RowEvaluation,
-  RowGroup,
   TrustLevel,
   UnsavedWork,
   VendorMap,
@@ -125,21 +118,12 @@ type VendorChoice = {
 type UndoSnapshot = {
   state: ImportPreviewState;
   /**
-   * The routing the state was built for.
-   *
-   * The routing and the resolution have to travel together: a snapshot
-   * holds the rows as they were resolved for a routing, so restoring the
-   * rows without the routing would restore a resolution that belongs to
-   * accounts the review is no longer using.
-   */
-  groups: readonly RowGroup[];
-  /**
-   * The transactions the rows matched, for the same reason.
+   * The transactions the rows matched.
    *
    * A FITID matches within an account, so the matches belong to the
-   * routing as much as the resolution does. Restoring the rows without
-   * the matches would leave a row pointing at a transaction in the
-   * account it was routed AWAY from — and the apply step would edit that
+   * resolution as much as the rows do. Restoring the rows without the
+   * matches would leave a row pointing at a transaction that is no
+   * longer the one it matched — and the apply step would edit the wrong
    * transaction.
    */
   matchedTransactionIds: ReadonlyMap<string, string>;
@@ -288,22 +272,6 @@ export type ImportReviewState = {
   decideAll: (decision: PreviewDecision) => void;
   /** Replace a row's edits. */
   edit: (index: number, edits: PreviewEdits, opts?: EditOptions) => void;
-  /**
-   * The routing: which rows go to which account.
-   *
-   * A partition of the rows into contiguous groups, each with a
-   * destination account.
-   */
-  groups: readonly RowGroup[];
-  /**
-   * Put a row into another account.
-   *
-   * The rows are re-resolved, and the rows that are already in the budget
-   * are asked about again, so this takes a moment.
-   */
-  routeRow: (index: number, accountId: string) => Promise<boolean>;
-  /** Put every row into one account. */
-  routeAll: (accountId: string) => Promise<boolean>;
   /** Move the focus to an absolute index. */
   focus: (index: number) => void;
   /** Move the focus by a delta, clamped to the row range. */
@@ -436,23 +404,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [status, setStatus] = useState<ReviewStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<ImportPreviewState | null>(null);
-  // Which rows go to which account. The default is one group covering
-  // every row, with the account the review was opened for.
-  const [groups, setGroups] = useState<RowGroup[]>([]);
 
-  // The routing is in a ref as well as in state.
-  //
-  // A routing change is computed from the routing that is in effect NOW,
-  // and two changes can be in flight at once: the second overtakes the
-  // first, and it has to be computed from the first's result, not from
-  // the routing that was on screen when it was asked for.
-  const groupsRef = useRef<RowGroup[]>([]);
-
-  /** Put a routing into effect. */
-  const setRouting = useCallback((next: RowGroup[]) => {
-    groupsRef.current = next;
-    setGroups(next);
-  }, []);
   // The cursor is in a ref as well as in state.
   //
   // The undo snapshot has to record where the user WAS, and a change is
@@ -518,10 +470,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
   // The parsed rows BEFORE they were resolved.
   //
-  // A routing change re-resolves the rows, and the resolution has to
-  // start from the file rather than from a previous resolution: resolving
-  // a resolution would resolve the resolver's own output. The base rows
-  // are what the resolver is given, so they are kept.
+  // A re-resolution happens when the vendor map changes under the review,
+  // and the resolution has to start from the file rather than from a
+  // previous resolution: resolving a resolution would resolve the
+  // resolver's own output. The base rows are what the resolver is given,
+  // so they are kept.
   const baseRows = useRef<readonly ReviewRowInput[]>([]);
 
   // The changes the review remembers, so they can be undone. A snapshot is
@@ -534,9 +487,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // already-imported transaction be applied in place.
   //
   // It is STATE and not a ref, because the answer can arrive after the
-  // screen has moved on: a routing change asks the budget again, and the
-  // rows that are already in the budget change with the answer. A ref
-  // would be updated without anything redrawing.
+  // screen has moved on: the review asks the budget which of its rows
+  // are already in it, and the rows that are already in the budget
+  // change with the answer. A ref would be updated without anything
+  // redrawing.
   const [matchedTransactionIds, setMatchedTransactionIds] = useState<
     ReadonlyMap<string, string>
   >(new Map());
@@ -551,10 +505,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
   // Guards against a second apply starting while one is running.
   const applyingRef = useRef(false);
-
-  // Tells two routing changes apart. Each one asks the budget again, and
-  // a slower answer must not be applied over a newer routing.
-  const routeToken = useRef(0);
 
   /**
    * What the resolver resolves against.
@@ -601,12 +551,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * a row with NO FITID that Actual matched against an existing
    * transaction by date and amount. Those matches are kept, because they
    * are the same transaction the import itself would update. It is asked
-   * once per account, because that is the account it matches within.
+   * about the review's own account, because that is the account it
+   * matches within.
    */
   const lookupMatches = useCallback(
     async (
       rows: readonly PreviewRow[],
-      routing: readonly RowGroup[],
+      accountId: string,
       payeeList: readonly ReviewPayee[],
       categoryList: readonly ReviewCategory[],
     ): Promise<Map<string, string>> => {
@@ -615,7 +566,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         .filter((id): id is string => typeof id === 'string');
 
       const alreadyImported = await findImportedTransactions({
-        accountIds: distinctAccounts(routing),
+        accountId,
         importedIds,
       });
 
@@ -623,70 +574,67 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         matchRowsToTransactions(rows, alreadyImported),
       );
 
-      for (const accountId of distinctAccounts(routing)) {
-        const accountRows = rows.filter(row => row.accountId === accountId);
-        if (accountRows.length === 0) continue;
+      const accountRows = rows.filter(row => row.accountId === accountId);
+      if (accountRows.length === 0) return matched;
 
-        // The PREVIEW payload marks nothing as skipped: Actual skips a
-        // marked row before it reports the match, so a marked row would
-        // come back with no correlation at all.
-        let preview: {
-          updatedPreview?: {
-            existing?: { id?: string };
-            transaction?: unknown;
-          }[];
-        };
-        try {
-          preview = await send('transactions-import', {
-            accountId,
-            // The same cast as the import itself, for the same reason: a
-            // split leg's category is `null` when it has none, and
-            // upstream's type says `string | undefined`.
-            transactions: buildPreviewPayload(
-              { rows: accountRows, trustLevel: trustLevelRef.current },
-              {
-                accountId,
-                payees: payeeRefs(payeeList),
-                categories: categoryList.map(c => ({ id: c.id })),
-              },
-            ) as ImportTransactionEntity[],
-            isPreview: true,
-          });
-        } catch (err) {
-          // The preview REFUSES a row the import would refuse: a
-          // transfer whose target has no transfer payee, or a split
-          // whose legs do not add up. Such a row cannot be imported
-          // either way, so its match does not matter — and the apply
-          // step reports the refusal in the user's words.
-          //
-          // Only those refusals are swallowed. Anything else is a real
-          // failure and is passed on.
-          if (
-            !(err instanceof TransferValidationError) &&
-            !(err instanceof SplitValidationError)
-          ) {
-            throw err;
-          }
-          continue;
-        }
-
-        preview.updatedPreview?.forEach(entry => {
-          const existing = entry.existing;
-          if (!existing?.id) return;
-          // The preview echoes back the transaction we sent, so the
-          // transient preview key travels with it.
-          //
-          // Safe: the echo is the transaction we sent, plus whatever the
-          // rule engine added to it. The cast is only needed because the
-          // preview's type does not declare the transient field.
-          const key = (
-            entry.transaction as { _previewKey?: string } | undefined
-          )?._previewKey;
-          if (typeof key === 'string') {
-            matched.set(key, existing.id);
-          }
+      // The PREVIEW payload marks nothing as skipped: Actual skips a
+      // marked row before it reports the match, so a marked row would
+      // come back with no correlation at all.
+      let preview: {
+        updatedPreview?: {
+          existing?: { id?: string };
+          transaction?: unknown;
+        }[];
+      };
+      try {
+        preview = await send('transactions-import', {
+          accountId,
+          // The same cast as the import itself, for the same reason: a
+          // split leg's category is `null` when it has none, and
+          // upstream's type says `string | undefined`.
+          transactions: buildPreviewPayload(
+            { rows: accountRows, trustLevel: trustLevelRef.current },
+            {
+              accountId,
+              payees: payeeRefs(payeeList),
+              categories: categoryList.map(c => ({ id: c.id })),
+            },
+          ) as ImportTransactionEntity[],
+          isPreview: true,
         });
+      } catch (err) {
+        // The preview REFUSES a row the import would refuse: a
+        // transfer whose target has no transfer payee, or a split
+        // whose legs do not add up. Such a row cannot be imported
+        // either way, so its match does not matter — and the apply
+        // step reports the refusal in the user's words.
+        //
+        // Only those refusals are swallowed. Anything else is a real
+        // failure and is passed on.
+        if (
+          !(err instanceof TransferValidationError) &&
+          !(err instanceof SplitValidationError)
+        ) {
+          throw err;
+        }
+        return matched;
       }
+
+      preview.updatedPreview?.forEach(entry => {
+        const existing = entry.existing;
+        if (!existing?.id) return;
+        // The preview echoes back the transaction we sent, so the
+        // transient preview key travels with it.
+        //
+        // Safe: the echo is the transaction we sent, plus whatever the
+        // rule engine added to it. The cast is only needed because the
+        // preview's type does not declare the transient field.
+        const key = (entry.transaction as { _previewKey?: string } | undefined)
+          ?._previewKey;
+        if (typeof key === 'string') {
+          matched.set(key, existing.id);
+        }
+      });
 
       return matched;
     },
@@ -792,10 +740,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           return;
         }
 
-        // The base rows are kept, so a routing change can re-resolve the
-        // rows. The session holds the RESOLVED rows, and the rebuild
-        // recomputes the flags, so the resolution they carry does not
-        // leak into the new one.
+        // The base rows are kept, so the rows can be resolved again. The
+        // session holds the RESOLVED rows, and the rebuild recomputes
+        // the flags, so the resolution they carry does not leak into the
+        // new one.
         baseRows.current = saved.rows;
         // A review reads the map once, whichever way it was opened. The
         // session's rows are the rows the user approved, resolved as they
@@ -817,17 +765,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         editedRowKeys.current = new Set(saved.editedRowKeys);
         vendorChoices.current = new Map(saved.vendorChoices);
 
-        // The routing of a picked-up review is the one it was saved
-        // with. The session's routing was checked when it was read, so
-        // it covers the rows exactly.
-        const savedGroups = saved.groups;
-        setRouting(savedGroups);
-
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
         const matched = await lookupMatches(
           state.rows,
-          savedGroups,
+          accountId,
           payeeList,
           categoryList,
         );
@@ -953,25 +895,20 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           ),
         );
 
-        // The rows are kept BEFORE they are resolved: a routing change
-        // re-resolves them, and a resolution has to start from the file
-        // rather than from a previous resolution.
+        // The rows are kept BEFORE they are resolved: a re-resolution
+        // happens when the vendor map changes under the review, and a
+        // resolution has to start from the file rather than from a
+        // previous resolution.
         baseRows.current = raw;
-
-        // The default routing is one group covering every row, with the
-        // account the review was opened for.
-        const nextGroups = defaultGroups(raw.length, accountId);
 
         const next = rebuildPreviewState({
           base: raw,
-          groups: nextGroups,
           trustLevel: trustLevelRef.current,
           resolveOpts: resolveOptsFor(payeeList, accountList),
         });
         resolvedMapRawRef.current = vendorMapRawRef.current;
 
         setState(next);
-        setRouting(nextGroups);
         setCursor(0);
 
         if (cancelled) return;
@@ -979,7 +916,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // Which rows are ALREADY in the budget?
         const matched = await lookupMatches(
           next.rows,
-          nextGroups,
+          accountId,
           payeeList,
           categoryList,
         );
@@ -1009,7 +946,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     lookupMatches,
     resolveOptsFor,
     setCursor,
-    setRouting,
   ]);
 
   /**
@@ -1142,16 +1078,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * recorded.
    */
   const pushUndo = useCallback(
-    (
-      current: ImportPreviewState,
-      routing: readonly RowGroup[],
-      cursor: number,
-    ): UndoSnapshot | undefined => {
+    (current: ImportPreviewState, cursor: number): UndoSnapshot | undefined => {
       const stack = undoStack.current;
       if (stack[stack.length - 1]?.state === current) return undefined;
       const snapshot: UndoSnapshot = {
         state: current,
-        groups: routing,
         matchedTransactionIds,
         editedRowKeys: new Set(editedRowKeys.current),
         vendorChoices: new Map(vendorChoices.current),
@@ -1164,23 +1095,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     [matchedTransactionIds],
   );
 
-  /**
-   * Take a snapshot back off the undo stack.
-   *
-   * A change that did not happen must not leave a snapshot behind: the
-   * snapshot would restore the state the review is already in, so undoing
-   * it would be a keypress that does nothing.
-   *
-   * It is only taken off if it is still the TOP one. A snapshot the user
-   * made in the meantime is on top by then, and that one is the user's.
-   */
-  const dropUndo = useCallback((snapshot: UndoSnapshot | undefined) => {
-    if (!snapshot) return;
-    const stack = undoStack.current;
-    if (stack[stack.length - 1] !== snapshot) return;
-    undoStack.current = stack.slice(0, -1);
-  }, []);
-
   const decide = useCallback(
     (index: number, decision: PreviewDecision) => {
       // The cursor as it is NOW. Accepting a row moves the cursor on, and
@@ -1191,7 +1105,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current, groupsRef.current, cursor);
+        pushUndo(current, cursor);
         return applyDecision(current, rowKey(row), decision);
       });
     },
@@ -1207,7 +1121,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (pending.length === 0) return current;
         // One snapshot for the whole bulk action, so one undo takes it
         // all back.
-        pushUndo(current, groupsRef.current, cursor);
+        pushUndo(current, cursor);
         // The domain's `applyDecision` finds its row by key, so applying
         // it once per row is quadratic in the number of rows. An import
         // file has hundreds of rows at most, so this is cheap, and going
@@ -1228,7 +1142,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current, groupsRef.current, cursor);
+        pushUndo(current, cursor);
         // Remember that the user touched this row, so the apply step can
         // update the matched transaction in place.
         editedRowKeys.current = new Set([
@@ -1257,134 +1171,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       });
     },
     [pushUndo, payees],
-  );
-
-  /**
-   * Do the routing: re-resolve the rows, ask the budget again, and
-   * commit.
-   */
-  const applyRoutingRows = useCallback(
-    async (
-      nextGroups: RowGroup[],
-      token: number,
-      snapshot: UndoSnapshot | undefined,
-    ): Promise<void> => {
-      const next = rebuildPreviewState({
-        base: baseRows.current,
-        groups: nextGroups,
-        previous: state ?? undefined,
-        trustLevel,
-        resolveOpts: resolveOptsFor(payees, accounts),
-      });
-      const raw = vendorMapRawRef.current;
-
-      const matched = await lookupMatches(
-        next.rows,
-        nextGroups,
-        payees,
-        categories,
-      );
-      // A newer routing change, or an undo, overtook this one. The
-      // snapshot goes with it: the change did not happen.
-      if (routeToken.current !== token) {
-        dropUndo(snapshot);
-        return;
-      }
-
-      // The map the rows were resolved with is recorded only now: a
-      // routing change that was overtaken did not happen, so it does not
-      // get to say which map the review has seen.
-      resolvedMapRawRef.current = raw;
-
-      setMatchedTransactionIds(matched);
-      setRouting(nextGroups);
-      setState(next);
-    },
-    [
-      accounts,
-      categories,
-      dropUndo,
-      lookupMatches,
-      payees,
-      resolveOptsFor,
-      setRouting,
-      state,
-      trustLevel,
-    ],
-  );
-
-  /**
-   * Put the rows into a new routing.
-   *
-   * The rows are re-resolved, because the resolution depends on the
-   * account a row is in: a row whose vendor string is exactly a budget
-   * account's name is a TRANSFER to that account, unless the row is IN
-   * it.
-   *
-   * The rows that are already in the budget are asked about AGAIN, for
-   * the same reason: a FITID matches within an account, and the rows
-   * have changed accounts.
-   *
-   * The change is undoable: the snapshot holds the rows AND the routing
-   * they were resolved for.
-   */
-  const applyRouting = useCallback(
-    async (nextGroups: RowGroup[]): Promise<boolean> => {
-      if (!state) return false;
-      // A routing that did not change is not a change: re-resolving
-      // every row for nothing would cost a lot and gain nothing.
-      if (isSameRouting(nextGroups, groupsRef.current)) return true;
-
-      // The token tells two routing changes apart. Each one asks the
-      // budget again, and a slower answer must not be applied over a
-      // newer routing.
-      const token = ++routeToken.current;
-
-      // The snapshot goes on BEFORE the budget is asked: the user has
-      // asked for the change, and it has to be undoable while it is
-      // being made. If the change does not happen, it comes back off.
-      const snapshot = pushUndo(
-        state,
-        groupsRef.current,
-        focusedIndexRef.current,
-      );
-
-      try {
-        await applyRoutingRows(nextGroups, token, snapshot);
-        return true;
-      } catch (err) {
-        dropUndo(snapshot);
-        throw err;
-      }
-    },
-    [applyRoutingRows, dropUndo, pushUndo, state],
-  );
-
-  /** Put a row into another account. */
-  const routeRow = useCallback(
-    (index: number, nextAccountId: string): Promise<boolean> =>
-      applyRouting(
-        setRowAccount(
-          groupsRef.current,
-          index,
-          nextAccountId,
-          state?.rows.length ?? 0,
-        ),
-      ),
-    [applyRouting, state],
-  );
-
-  /** Put every row into one account. */
-  const routeAll = useCallback(
-    (nextAccountId: string): Promise<boolean> =>
-      applyRouting(
-        setAllRowsAccount(
-          groupsRef.current,
-          nextAccountId,
-          state?.rows.length ?? 0,
-        ),
-      ),
-    [applyRouting, state],
   );
 
   const isAlreadyImported = useCallback(
@@ -1431,20 +1217,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     const last = stack[stack.length - 1];
     if (!last) return;
     undoStack.current = stack.slice(0, -1);
-    // A routing change that is still in flight must not land on top of
-    // the undo: the user undid the routing, and a late answer would put
-    // it back.
-    routeToken.current += 1;
     // The set of edited rows is part of the snapshot: undoing an edit back
     // to nothing has to remove the row again, or the apply step would
     // write a no-op update for it.
     editedRowKeys.current = new Set(last.editedRowKeys);
     vendorChoices.current = new Map(last.vendorChoices);
-    // The matches travel with the routing they were found in. A row that
-    // points at a transaction in the account it was routed away from
-    // would have that transaction edited.
+    // The matches travel with the rows they were found for. A row that
+    // points at a transaction it no longer matches would have that
+    // transaction edited.
     setMatchedTransactionIds(last.matchedTransactionIds);
-    setRouting([...last.groups]);
     setState(last.state);
     // The cursor goes back to where it was. Accepting a row moves it on,
     // so without this the undo leaves the user looking at the next row
@@ -1454,7 +1235,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // the rows without it would leave the map applied to a resolution it
     // never saw — and the map would be lost for the rest of the review.
     resolvedMapRawRef.current = last.resolvedMapRaw;
-  }, [setCursor, setRouting]);
+  }, [setCursor]);
 
   const cycleTrustLevel = useCallback(() => {
     setTrustLevel(current => {
@@ -1487,7 +1268,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
     const next = rebuildPreviewState({
       base: baseRows.current,
-      groups: groupsRef.current,
       previous: state,
       trustLevel: trustLevelRef.current,
       resolveOpts: resolveOptsFor(payees, accounts),
@@ -1538,9 +1318,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return matchedTransactionIds.has(rowKey(row));
       });
 
-      // ---- Phase 1: build, for every group --------------------------
+      // ---- Phase 1: build -------------------------------------------
       //
-      // Every payload is built BEFORE anything is written.
+      // The payload is built BEFORE anything is written.
       //
       // Building it can refuse the import: a transfer whose target has no
       // transfer payee, or a split whose legs do not add up. A refusal
@@ -1549,59 +1329,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // that is what happened. Built first, a refusal happens with
       // nothing written.
       //
-      // With several groups this matters more, not less: a refusal in the
-      // SECOND group must not leave the first group written either.
-      //
-      // The routing and the rows are set together, but a review with no
-      // routing at all would import nothing, and the user asked for an
-      // import. One group with the account the review was opened for is
-      // what the review did before routing existed.
-      const routing =
-        groups.length > 0
-          ? groups
-          : defaultGroups(state.rows.length, accountId);
+      // Every row of the file goes into the account the review was opened
+      // for, so there is one payload.
+      const { updates } = buildUpdatePayload(state, {
+        accountId,
+        matchedTransactionIds,
+        payees: payeeRefs(payees),
+        categories: categories.map(c => ({ id: c.id })),
+        editedRowKeys: editedRowKeys.current,
+      });
 
-      const plans = groupRanges(routing, state.rows.length).map(range => {
-        const groupAccountId = range.group.accountId;
-        const groupRows = state.rows.slice(range.start, range.end + 1);
-        const groupState: ImportPreviewState = {
-          rows: groupRows,
-          trustLevel: state.trustLevel,
-        };
+      // The rows that are about to be updated are excluded from the
+      // import, so the import's update path cannot undo them.
+      const updatedRowKeys = new Set(updates.map(u => u.rowKey));
 
-        // Rows the user edited AND that matched an existing transaction
-        // are updated in place: Actual's import UPDATE path keeps the
-        // existing payee and category, so an edit sent through
-        // `transactions-import` would be silently discarded.
-        const { updates } = buildUpdatePayload(groupState, {
-          accountId: groupAccountId,
-          matchedTransactionIds,
-          payees: payeeRefs(payees),
-          categories: categories.map(c => ({ id: c.id })),
-          editedRowKeys: editedRowKeys.current,
-        });
+      // The splits that are reconciled are excluded too: the
+      // reconciliation writes the parent and its legs, and the import
+      // would take the parent's FITID-matched row down its update path,
+      // which cannot touch the legs.
+      for (const row of splitRows) {
+        updatedRowKeys.add(rowKey(row));
+      }
 
-        // The rows that are about to be updated are excluded from the
-        // import, so the import's update path cannot undo them.
-        const updatedRowKeys = new Set(updates.map(u => u.rowKey));
-
-        // The splits that are reconciled are excluded too: the
-        // reconciliation writes the parent and its legs, and the import
-        // would take the parent's FITID-matched row down its update path,
-        // which cannot touch the legs.
-        for (const row of splitRows) {
-          if (row.accountId !== groupAccountId) continue;
-          updatedRowKeys.add(rowKey(row));
-        }
-
-        const payload = buildApplyPayload(groupState, {
-          accountId: groupAccountId,
-          payees: payeeRefs(payees),
-          categories: categories.map(c => ({ id: c.id })),
-          updatedRowKeys,
-        });
-
-        return { accountId: groupAccountId, updates, payload };
+      const payload = buildApplyPayload(state, {
+        accountId,
+        payees: payeeRefs(payees),
+        categories: categories.map(c => ({ id: c.id })),
+        updatedRowKeys,
       });
 
       // ---- Phase 2: write -------------------------------------------
@@ -1619,18 +1373,17 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // cannot create a payee from a name, because `payee_name` is not a
       // column on the transaction.
       //
-      // The payees are created ONCE, before any import runs, and the
-      // names are collected across every group. `payee-create` does NOT
-      // dedupe by name — it always inserts — so a payee two groups need
-      // would otherwise be created twice, and an import that creates the
-      // same payee would leave a duplicate behind.
+      // The payees are created ONCE, before the import runs, and the
+      // names are collected across the updates. `payee-create` does NOT
+      // dedupe by name — it always inserts — so a payee that both an
+      // update and the import need would otherwise be created twice, and
+      // an import that creates the same payee would leave a duplicate
+      // behind.
       const createdPayeeIds = new Map<string, string>();
       const namesToCreate = new Set<string>();
-      for (const plan of plans) {
-        for (const { payeeNameToCreate } of plan.updates) {
-          if (payeeNameToCreate !== undefined) {
-            namesToCreate.add(payeeNameToCreate);
-          }
+      for (const { payeeNameToCreate } of updates) {
+        if (payeeNameToCreate !== undefined) {
+          namesToCreate.add(payeeNameToCreate);
         }
       }
       for (const name of namesToCreate) {
@@ -1640,30 +1393,26 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         }
       }
 
-      // The updates, group by group.
-      for (const plan of plans) {
-        for (const { update, payeeNameToCreate } of plan.updates) {
-          if (payeeNameToCreate !== undefined) {
-            const payeeId = createdPayeeIds.get(payeeNameToCreate);
-            if (!payeeId) {
-              // The payee could not be created, so the update would go
-              // through WITHOUT the payee the user chose - the edit would
-              // be silently dropped while the apply reported success.
-              // Better to say so.
-              setStatus('reviewing');
-              setError(t('The payee could not be created'));
-              return false;
-            }
-            update.payee = payeeId;
+      // The updates.
+      for (const { update, payeeNameToCreate } of updates) {
+        if (payeeNameToCreate !== undefined) {
+          const payeeId = createdPayeeIds.get(payeeNameToCreate);
+          if (!payeeId) {
+            // The payee could not be created, so the update would go
+            // through WITHOUT the payee the user chose - the edit would
+            // be silently dropped while the apply reported success.
+            // Better to say so.
+            setStatus('reviewing');
+            setError(t('The payee could not be created'));
+            return false;
           }
-          await send('transaction-update', update);
-          didChange = true;
+          update.payee = payeeId;
         }
+        await send('transaction-update', update);
+        didChange = true;
       }
 
-      const imports = plans.filter(plan => plan.payload.length > 0);
-
-      if (imports.length === 0) {
+      if (payload.length === 0) {
         // Every row was updated in place. The updates above were written,
         // so this is a SUCCESS, not a failure with nothing to do.
         setStatus('reviewing');
@@ -1682,86 +1431,79 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return false;
       }
 
-      // The imports, group by group.
+      // The import.
       //
       // The updates above are already written by the time the import runs,
       // so the two are not atomic: if the import fails, the updates stay.
       // That is deliberate — the updates are the user's explicit edits and
       // re-sending them would be a no-op — but it is worth knowing.
-      //
-      // The first group that fails stops the rest. A partial import is
-      // harder to reason about than a clean stop, and the user can fix
-      // the group and apply again.
-      for (const plan of imports) {
-        const accountName =
-          accounts.find(account => account.id === plan.accountId)?.name ??
-          plan.accountId;
-        let importErrors: { message: string }[] | undefined;
-        let added: string[] = [];
-        let updated: string[] = [];
-        try {
-          const result = await send('transactions-import', {
-            accountId: plan.accountId,
-            // The cast is here, and only here, because upstream types a
-            // split leg's `category` as `string | undefined` while its
-            // runtime accepts `null` — and the difference is load-bearing:
-            // upstream's `makeChild` decides inherit-vs-override with
-            // `"category" in data`, so a leg WITHOUT the key inherits the
-            // parent's category. `null` says "no category" outright.
-            //
-            // Widening the call instead would push the same problem into
-            // every caller of `transactions-import`.
-            transactions: plan.payload as ImportTransactionEntity[],
-            isPreview: false,
-          });
-          importErrors = result.errors;
-          added = result.added ?? [];
-          updated = result.updated ?? [];
-        } catch (err) {
-          setStatus('reviewing');
-          // The updates above were already written, so the message says
-          // which half failed: the user has to know that their edits are
-          // in the budget even though the import did not go through.
-          setError(
-            didChange
-              ? t(
-                  'The edits were saved, but the import into {{account}} failed: {{message}}',
-                  {
-                    account: accountName,
-                    message: err instanceof Error ? err.message : String(err),
-                  },
-                )
-              : t('The import into {{account}} failed: {{message}}', {
+      const accountName =
+        accounts.find(account => account.id === accountId)?.name ?? accountId;
+      let importErrors: { message: string }[] | undefined;
+      let added: string[] = [];
+      let updated: string[] = [];
+      try {
+        const result = await send('transactions-import', {
+          accountId,
+          // The cast is here, and only here, because upstream types a
+          // split leg's `category` as `string | undefined` while its
+          // runtime accepts `null` — and the difference is load-bearing:
+          // upstream's `makeChild` decides inherit-vs-override with
+          // `"category" in data`, so a leg WITHOUT the key inherits the
+          // parent's category. `null` says "no category" outright.
+          //
+          // Widening the call instead would push the same problem into
+          // every caller of `transactions-import`.
+          transactions: payload as ImportTransactionEntity[],
+          isPreview: false,
+        });
+        importErrors = result.errors;
+        added = result.added ?? [];
+        updated = result.updated ?? [];
+      } catch (err) {
+        setStatus('reviewing');
+        // The updates above were already written, so the message says
+        // which half failed: the user has to know that their edits are
+        // in the budget even though the import did not go through.
+        setError(
+          didChange
+            ? t(
+                'The edits were saved, but the import into {{account}} failed: {{message}}',
+                {
                   account: accountName,
                   message: err instanceof Error ? err.message : String(err),
-                }),
-          );
-          return false;
-        }
-        if (importErrors && importErrors.length > 0) {
-          setStatus('reviewing');
-          // The edits above are already written, so the message says so:
-          // the user has to know that their edits are in the budget even
-          // though the import did not go through.
-          setError(
-            didChange
-              ? t(
-                  'The edits were saved, but the import into {{account}} failed: {{message}}',
-                  { account: accountName, message: importErrors[0].message },
-                )
-              : t('The import into {{account}} failed: {{message}}', {
-                  account: accountName,
-                  message: importErrors[0].message,
-                }),
-          );
-          return false;
-        }
-
-        // Whether anything actually changed, from what the server reports
-        // — not from the absence of errors. A payload of only dropped rows
-        // imports nothing.
-        didChange = didChange || added.length > 0 || updated.length > 0;
+                },
+              )
+            : t('The import into {{account}} failed: {{message}}', {
+                account: accountName,
+                message: err instanceof Error ? err.message : String(err),
+              }),
+        );
+        return false;
       }
+      if (importErrors && importErrors.length > 0) {
+        setStatus('reviewing');
+        // The edits above are already written, so the message says so:
+        // the user has to know that their edits are in the budget even
+        // though the import did not go through.
+        setError(
+          didChange
+            ? t(
+                'The edits were saved, but the import into {{account}} failed: {{message}}',
+                { account: accountName, message: importErrors[0].message },
+              )
+            : t('The import into {{account}} failed: {{message}}', {
+                account: accountName,
+                message: importErrors[0].message,
+              }),
+        );
+        return false;
+      }
+
+      // Whether anything actually changed, from what the server reports
+      // — not from the absence of errors. A payload of only dropped rows
+      // imports nothing.
+      didChange = didChange || added.length > 0 || updated.length > 0;
     } catch (err) {
       setStatus('reviewing');
       // A split that does not fit its row is reported in the user's
@@ -1807,7 +1549,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     accounts,
     categories,
     clearFromStore,
-    groups,
     matchedTransactionIds,
     reconcileSplits,
     state,
@@ -1830,7 +1571,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
     const session = buildSession({
       accountId,
-      groups: groupsRef.current,
       filename,
       trustLevel,
       focusedIndex,
@@ -1904,9 +1644,6 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     decide,
     decideAll,
     edit,
-    groups,
-    routeRow,
-    routeAll,
     focus,
     moveFocus,
     undo,

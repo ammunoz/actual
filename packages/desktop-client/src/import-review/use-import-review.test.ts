@@ -327,79 +327,34 @@ describe('useImportReview', () => {
     expect(result.current.unsavedWork.hasWork).toBe(false);
   });
 
-  it('puts a row into another account', async () => {
+  it('imports every row into the account the review was opened for', async () => {
     const { result } = await renderReview();
 
     await act(async () => {
-      await result.current.routeRow(1, 'a-2');
+      await result.current.apply();
     });
 
-    // The rows are partitioned at the row the user routed.
-    expect(result.current.groups).toEqual([
-      { start: 0, accountId: 'a-1' },
-      { start: 1, accountId: 'a-2' },
-    ]);
-    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
-      'a-1',
-      'a-2',
-    ]);
-  });
-
-  it('keeps the decisions and the edits when the routing changes', async () => {
-    const { result } = await renderReview();
-
-    act(() => {
-      result.current.decide(0, 'accept');
-      result.current.edit(0, { memo: 'a note from the review' });
-    });
-
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-
-    // The resolution is the resolver's; the decision and the edit are
-    // the user's.
-    expect(result.current.state?.rows[0].decision).toBe('accept');
-    expect(result.current.state?.rows[0].edits.memo).toBe(
-      'a note from the review',
+    // Upstream's import takes ONE account per call, and every row of the
+    // file goes into the account the review was opened for.
+    const imports = sendMock.mock.calls.filter(
+      call => call[0] === 'transactions-import' && call[1]?.isPreview === false,
     );
+    expect(imports).toHaveLength(1);
+    expect(imports[0][1]?.accountId).toBe('a-1');
   });
 
-  it('undoes a routing change', async () => {
-    const { result } = await renderReview();
+  it('asks the budget about the account the rows go into', async () => {
+    await renderReview();
 
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-    expect(result.current.groups).toHaveLength(2);
-
-    act(() => {
-      result.current.undo();
-    });
-
-    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-1' }]);
-    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
-      'a-1',
-      'a-1',
-    ]);
-  });
-
-  it('asks the budget about every account the rows go to', async () => {
-    const { result } = await renderReview();
-
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-
-    // The FITID lookup covers every account: a FITID is only unique
-    // within one, so a row is matched against its OWN account.
+    // The FITID lookup is scoped to the account: a FITID is only unique
+    // within one, so a row is matched against the account it is in.
     const queryCalls = sendMock.mock.calls.filter(call => call[0] === 'query');
     const lookup = queryCalls[queryCalls.length - 1];
     expect(lookup?.[1]).toEqual(
       expect.objectContaining({
         filterExpressions: [
           {
-            account: { $oneof: ['a-1', 'a-2'] },
+            account: { $oneof: ['a-1'] },
             imported_id: { $oneof: ['FITID-1', 'FITID-2'] },
           },
         ],
@@ -407,64 +362,7 @@ describe('useImportReview', () => {
     );
   });
 
-  it('puts every row into one account', async () => {
-    const { result } = await renderReview();
-
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-    await act(async () => {
-      await result.current.routeAll('a-2');
-    });
-
-    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-2' }]);
-    expect(result.current.state?.rows.map(row => row.accountId)).toEqual([
-      'a-2',
-      'a-2',
-    ]);
-  });
-
-  it('imports each group into its own account', async () => {
-    const { result } = await renderReview();
-
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-    await act(async () => {
-      await result.current.apply();
-    });
-
-    // Upstream's import takes ONE account per call, so a review that
-    // routes its rows into two accounts imports twice.
-    const imports = sendMock.mock.calls.filter(
-      call => call[0] === 'transactions-import' && call[1]?.isPreview === false,
-    );
-    expect(imports.map(call => call[1]?.accountId)).toEqual(['a-1', 'a-2']);
-  });
-
-  it('routes the rows even when one of them cannot be imported', async () => {
-    const { result } = await renderReview();
-
-    // A transfer to an account with no transfer payee cannot be
-    // imported. The preview refuses it, and the refusal is swallowed:
-    // the row will not import either way, and the apply step reports it
-    // in the user's words.
-    act(() => {
-      result.current.edit(1, { transferAccountId: 'a-2' });
-    });
-
-    await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-
-    expect(result.current.status).toBe('reviewing');
-    expect(result.current.groups).toEqual([
-      { start: 0, accountId: 'a-1' },
-      { start: 1, accountId: 'a-2' },
-    ]);
-  });
-
-  it('creates a payee two groups need only once', async () => {
+  it('creates a payee two rows need only once', async () => {
     sendMock.mockImplementation((async (name: string) => {
       switch (name) {
         case 'payees-get':
@@ -476,12 +374,12 @@ describe('useImportReview', () => {
         case 'transactions-parse-file':
           return PARSED;
         case 'query':
-          // Both rows are already in the budget, in the accounts they
-          // are routed to.
+          // Both rows are already in the budget, in the account they are
+          // imported into.
           return {
             data: [
               { id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' },
-              { id: 'txn-2', imported_id: 'FITID-2', account: 'a-2' },
+              { id: 'txn-2', imported_id: 'FITID-2', account: 'a-1' },
             ],
             dependencies: [],
           };
@@ -509,14 +407,11 @@ describe('useImportReview', () => {
     });
 
     await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-    await act(async () => {
       await result.current.apply();
     });
 
     // `payee-create` does not dedupe by name — it always inserts — so a
-    // payee two groups need has to be created once.
+    // payee two rows need has to be created once.
     const creates = sendMock.mock.calls.filter(
       call => call[0] === 'payee-create',
     );
@@ -524,24 +419,21 @@ describe('useImportReview', () => {
     expect(creates[0][1]).toEqual({ name: 'Brand New Payee' });
   });
 
-  it('writes nothing when a group cannot be imported', async () => {
+  it('writes nothing when a row cannot be imported', async () => {
     const { result } = await renderReview();
 
     // A transfer to an account with no transfer payee cannot be
-    // imported, and the refusal happens while the payloads are built.
+    // imported, and the refusal happens while the payload is built.
     act(() => {
       result.current.edit(1, { transferAccountId: 'a-2' });
     });
 
     await act(async () => {
-      await result.current.routeRow(1, 'a-2');
-    });
-    await act(async () => {
       await result.current.apply();
     });
 
-    // The FIRST group was not written either: every payload is built
-    // before anything is written.
+    // Nothing was written: the payload is built before anything is
+    // written.
     const imports = sendMock.mock.calls.filter(
       call => call[0] === 'transactions-import' && call[1]?.isPreview === false,
     );
@@ -552,118 +444,11 @@ describe('useImportReview', () => {
     expect(updates).toHaveLength(0);
   });
 
-  it('undoes a routing change with the matches it had', async () => {
-    sendMock.mockImplementation((async (name: string) => {
-      switch (name) {
-        case 'payees-get':
-          return PAYEES;
-        case 'accounts-get':
-          return ACCOUNTS;
-        case 'get-categories':
-          return CATEGORIES;
-        case 'transactions-parse-file':
-          return PARSED;
-        case 'query':
-          // The transaction with this FITID is in a-1 and nowhere else.
-          return {
-            data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' }],
-            dependencies: [],
-          };
-        case 'transactions-import':
-          return {
-            updatedPreview: [],
-            added: [{ id: 'trx-1' }],
-            updated: [],
-            errors: [],
-          };
-        default:
-          throw new Error(`unexpected send: ${name}`);
-      }
-    }) as never);
-
-    const { result } = await renderReview();
-
-    // The row is in a-1, where the transaction with that FITID is.
-    expect(result.current.isAlreadyImported('row-0')).toBe(true);
-
-    await act(async () => {
-      await result.current.routeRow(0, 'a-2');
-    });
-    // The row is in a-2 now, where there is no transaction with that
-    // FITID.
-    expect(result.current.isAlreadyImported('row-0')).toBe(false);
-
-    act(() => {
-      result.current.undo();
-    });
-
-    // The undo restores the matches too. A row that pointed at a
-    // transaction in the account it was routed AWAY from would have that
-    // transaction edited.
-    expect(result.current.isAlreadyImported('row-0')).toBe(true);
-  });
-
-  it('drops a routing change that an undo overtook', async () => {
-    // The second lookup hangs until the test lets it go, so the change
-    // is still being made when the user undoes.
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    let lookups = 0;
-
-    sendMock.mockImplementation((async (name: string) => {
-      switch (name) {
-        case 'payees-get':
-          return PAYEES;
-        case 'accounts-get':
-          return ACCOUNTS;
-        case 'get-categories':
-          return CATEGORIES;
-        case 'transactions-parse-file':
-          return PARSED;
-        case 'query':
-          lookups += 1;
-          if (lookups > 1) await gate;
-          return { data: [], dependencies: [] };
-        case 'transactions-import':
-          return {
-            updatedPreview: [],
-            added: [{ id: 'trx-1' }],
-            updated: [],
-            errors: [],
-          };
-        default:
-          throw new Error(`unexpected send: ${name}`);
-      }
-    }) as never);
-
-    const { result } = await renderReview();
-
-    let routing: Promise<boolean> | undefined;
-    act(() => {
-      routing = result.current.routeRow(1, 'a-2');
-    });
-
-    act(() => {
-      result.current.undo();
-    });
-
-    await act(async () => {
-      release?.();
-      await routing;
-    });
-
-    // The change never happened, so the routing is as it was.
-    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-1' }]);
-  });
-
   // A review that was put aside: two rows, both pending.
   const SAVED_SESSION = {
-    v: 2,
+    v: 3,
     savedAt: '2026-09-07T12:00:00.000Z',
     accountId: 'a-1',
-    groups: [{ start: 0, accountId: 'a-1' }],
     filename: '/tmp/demo.ofx',
     trustLevel: 'cautious' as const,
     focusedIndex: 0,
@@ -700,30 +485,6 @@ describe('useImportReview', () => {
     vendorChoices: [],
     fingerprint: 'abc123',
   };
-
-  it('routes a review that was picked up again', async () => {
-    const view = renderHook(() =>
-      useImportReview({
-        accountId: 'a-1',
-        filename: '/tmp/demo.ofx',
-        session: SAVED_SESSION,
-        onImported: vi.fn(),
-      }),
-    );
-    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
-
-    await act(async () => {
-      await view.result.current.routeRow(1, 'a-2');
-    });
-
-    // The rows are still there: a picked-up review can be routed like
-    // any other.
-    expect(view.result.current.state?.rows).toHaveLength(2);
-    expect(view.result.current.state?.rows.map(row => row.accountId)).toEqual([
-      'a-1',
-      'a-2',
-    ]);
-  });
 
   it('puts the cursor on a row of the review it picked up', async () => {
     // The session was saved from a review with more rows than this one

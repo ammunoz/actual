@@ -6,12 +6,10 @@ import { buildPreviewState } from './preview-state';
 import { rebuildPreviewState } from './rebuild';
 
 /**
- * A routing change moves rows between accounts, and that can change what
- * a row means: a row whose vendor string is exactly a budget account's
- * name is a TRANSFER to that account, unless the row is IN that account,
- * in which case it cannot be.
+ * A re-resolution can happen while the review is open — the vendor map is
+ * a synced preference and can arrive late or change under the review.
  *
- * What a routing change must never do is throw away the user's work: the
+ * What a re-resolution must never do is throw away the user's work: the
  * decision they made and the edits they typed are theirs, and they are
  * carried across by the row's key.
  */
@@ -38,24 +36,19 @@ function resolveOpts() {
 }
 
 describe('rebuildPreviewState', () => {
-  it('puts the rows into the accounts the routing says', () => {
+  it('keeps the account every row is imported into', () => {
     const base = [row(), row({ previewKey: 'row-1' })];
-    const previous = buildPreviewState([], 'cautious');
 
     const next = rebuildPreviewState({
       base,
-      groups: [
-        { start: 0, accountId: 'a-checking' },
-        { start: 1, accountId: 'a-savings' },
-      ],
-      previous,
+      previous: buildPreviewState([], 'cautious'),
       trustLevel: 'cautious',
       resolveOpts: resolveOpts(),
     });
 
     expect(next.rows.map(r => r.accountId)).toEqual([
       'a-checking',
-      'a-savings',
+      'a-checking',
     ]);
   });
 
@@ -81,10 +74,6 @@ describe('rebuildPreviewState', () => {
 
     const next = rebuildPreviewState({
       base,
-      groups: [
-        { start: 0, accountId: 'a-checking' },
-        { start: 1, accountId: 'a-savings' },
-      ],
       previous: {
         ...started,
         rows: started.rows.map((r, index) =>
@@ -127,7 +116,6 @@ describe('rebuildPreviewState', () => {
 
     const next = rebuildPreviewState({
       base,
-      groups: [{ start: 0, accountId: 'a-checking' }],
       previous: {
         ...started,
         rows: [
@@ -146,25 +134,21 @@ describe('rebuildPreviewState', () => {
   it('makes a row a transfer only when the account is not its own', () => {
     // The vendor string is exactly an account's name, so the row looks
     // like a transfer to it — unless the row is IN that account.
-    const base = [row({ payeeRaw: 'Demo Savings' })];
-
-    const intoSavings = rebuildPreviewState({
-      base,
-      groups: [{ start: 0, accountId: 'a-savings' }],
+    const inSavings = rebuildPreviewState({
+      base: [row({ payeeRaw: 'Demo Savings', accountId: 'a-savings' })],
       previous: buildPreviewState([], 'cautious'),
       trustLevel: 'cautious',
       resolveOpts: resolveOpts(),
     });
-    expect(intoSavings.rows[0].matchedTransferAccountId).toBeUndefined();
+    expect(inSavings.rows[0].matchedTransferAccountId).toBeUndefined();
 
-    const intoChecking = rebuildPreviewState({
-      base,
-      groups: [{ start: 0, accountId: 'a-checking' }],
+    const inChecking = rebuildPreviewState({
+      base: [row({ payeeRaw: 'Demo Savings' })],
       previous: buildPreviewState([], 'cautious'),
       trustLevel: 'cautious',
       resolveOpts: resolveOpts(),
     });
-    expect(intoChecking.rows[0].matchedTransferAccountId).toBe('a-savings');
+    expect(inChecking.rows[0].matchedTransferAccountId).toBe('a-savings');
   });
 
   it('resolves the rows again rather than reusing the old resolution', () => {
@@ -173,7 +157,6 @@ describe('rebuildPreviewState', () => {
     const base = [row()];
     const next = rebuildPreviewState({
       base,
-      groups: [{ start: 0, accountId: 'a-checking' }],
       previous: buildPreviewState([], 'cautious'),
       trustLevel: 'cautious',
       resolveOpts: resolveOpts(),

@@ -14,14 +14,14 @@ vi.mock('#queries/aqlQuery', () => ({
 const mockedAqlQuery = vi.mocked(aqlQuery);
 
 describe('findImportedTransactions', () => {
-  it('asks for the transactions that carry the FITIDs, in the accounts', async () => {
+  it('asks for the transactions that carry the FITIDs, in the account', async () => {
     mockedAqlQuery.mockResolvedValue({
       data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'acct-1' }],
       dependencies: [],
     });
 
     await findImportedTransactions({
-      accountIds: ['acct-1'],
+      accountId: 'acct-1',
       importedIds: ['FITID-1'],
     });
 
@@ -29,7 +29,7 @@ describe('findImportedTransactions', () => {
     const query = mockedAqlQuery.mock.calls[0][0];
     expect(query.state.table).toBe('transactions');
     // The account and the FITIDs are ONE filter: the transaction has to
-    // be in one of these accounts AND carry one of these FITIDs.
+    // be in the account AND carry one of these FITIDs.
     expect(query.state.filterExpressions).toEqual([
       {
         account: { $oneof: ['acct-1'] },
@@ -42,7 +42,7 @@ describe('findImportedTransactions', () => {
     mockedAqlQuery.mockClear();
 
     const found = await findImportedTransactions({
-      accountIds: ['acct-1'],
+      accountId: 'acct-1',
       importedIds: [],
     });
 
@@ -54,7 +54,7 @@ describe('findImportedTransactions', () => {
     mockedAqlQuery.mockClear();
 
     const found = await findImportedTransactions({
-      accountIds: [],
+      accountId: '',
       importedIds: ['FITID-1'],
     });
 
@@ -62,39 +62,35 @@ describe('findImportedTransactions', () => {
     expect(found.size).toBe(0);
   });
 
-  it('asks once for each distinct FITID and account', async () => {
+  it('asks once for each distinct FITID', async () => {
     mockedAqlQuery.mockResolvedValue({ data: [], dependencies: [] });
 
     await findImportedTransactions({
-      accountIds: ['acct-1', 'acct-1', 'acct-2'],
+      accountId: 'acct-1',
       importedIds: ['FITID-1', 'FITID-1', 'FITID-2'],
     });
 
     const query = mockedAqlQuery.mock.calls[0][0];
     expect(query.state.filterExpressions).toEqual([
       {
-        account: { $oneof: ['acct-1', 'acct-2'] },
+        account: { $oneof: ['acct-1'] },
         imported_id: { $oneof: ['FITID-1', 'FITID-2'] },
       },
     ]);
   });
 
-  it('maps each transaction to the account and the FITID that found it', async () => {
+  it('maps a transaction to the account and the FITID that found it', async () => {
     mockedAqlQuery.mockResolvedValue({
-      data: [
-        { id: 'txn-1', imported_id: 'FITID-1', account: 'acct-1' },
-        { id: 'txn-2', imported_id: 'FITID-1', account: 'acct-2' },
-      ],
+      data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'acct-1' }],
       dependencies: [],
     });
 
     const found = await findImportedTransactions({
-      accountIds: ['acct-1', 'acct-2'],
+      accountId: 'acct-1',
       importedIds: ['FITID-1'],
     });
 
     expect(found.get('acct-1')?.get('FITID-1')).toBe('txn-1');
-    expect(found.get('acct-2')?.get('FITID-1')).toBe('txn-2');
   });
 
   it('keeps the first transaction when two carry the same FITID', async () => {
@@ -107,7 +103,7 @@ describe('findImportedTransactions', () => {
     });
 
     const found = await findImportedTransactions({
-      accountIds: ['acct-1'],
+      accountId: 'acct-1',
       importedIds: ['FITID-1'],
     });
 
@@ -125,7 +121,7 @@ describe('findImportedTransactions', () => {
     });
 
     const found = await findImportedTransactions({
-      accountIds: ['acct-1'],
+      accountId: 'acct-1',
       importedIds: ['FITID-1'],
     });
 

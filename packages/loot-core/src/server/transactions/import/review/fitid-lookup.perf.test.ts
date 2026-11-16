@@ -8,8 +8,8 @@ import { q } from '#shared/query';
  *
  * When the review opens, it asks the budget which of the file's rows are
  * already in it: "the transactions in these accounts whose bank id is one
- * of these N ids". That question is asked once per parse and once per
- * routing change, so its cost is felt every time the review opens.
+ * of these N ids". That question is asked once per parse, so its cost is
+ * felt every time the review opens.
  *
  * The query is the one in `packages/desktop-client/src/import-review/
  * already-imported.ts` — copied, because the core cannot import the
@@ -53,6 +53,11 @@ import { q } from '#shared/query';
  * transactions, and the same question, and the answer comes back in
  * under a millisecond — because the review only asked about the
  * hundredth of them that was in the account it was importing into.
+ *
+ * The review asks about ONE account — every row of a file goes into the
+ * account the review was opened for — so the first two lines are the ones
+ * that apply. The lines about a hundred accounts are headroom: they say
+ * what the question would cost if it were ever asked about more.
  */
 
 const RUN = process.env.FITID_PERF === '1';
@@ -79,8 +84,7 @@ const RUNS = 5;
  *              about ONE of them. This is the control: the budget grows
  *              while the answer stays the same size.
  *   `all`    — a hundred accounts hold everything, and the review asks
- *              about all of them at once, which is what routing the rows
- *              over many accounts does.
+ *              about all of them at once.
  */
 const SCENARIOS = [
   { name: 'one account', accounts: 1, asked: 1 },
@@ -128,7 +132,7 @@ function fileIds(count: number): string[] {
  * The question the review asks, as the review asks it.
  *
  * The accounts are the ones the rows go into: one account, or every
- * account the rows were routed to.
+ * account a review could be asked about at once.
  */
 function lookup(ids: readonly string[], accounts: readonly string[]) {
   return aqlQuery(

@@ -30,8 +30,8 @@
  * The account is part of the question, not an afterthought: a FITID is
  * only unique WITHIN an account, and a transaction in another account
  * that happens to share a FITID is a different transaction entirely.
- * Matching it would edit the wrong row. So the lookup covers every
- * account the review routes to, and each row is matched against its OWN
+ * Matching it would edit the wrong row. So the lookup is scoped to the
+ * account the rows go into, and each row is matched against its OWN
  * account.
  *
  * This file is the only place in the feature that knows how that question
@@ -86,13 +86,13 @@ export type ImportedTransactions = ReadonlyMap<
  * nothing to ask: no query is sent.
  */
 export async function findImportedTransactions(opts: {
-  /** The accounts the review routes rows into. */
-  accountIds: readonly string[];
+  /** The account the rows go into. */
+  accountId: string;
   /** The FITIDs the file supplied. */
   importedIds: readonly string[];
 }): Promise<ImportedTransactions> {
   const ids = [...new Set(opts.importedIds.filter(id => id.length > 0))];
-  const accounts = [...new Set(opts.accountIds.filter(id => id.length > 0))];
+  const accounts = opts.accountId ? [opts.accountId] : [];
   if (ids.length === 0 || accounts.length === 0) return new Map();
 
   const { data } = await aqlQuery(

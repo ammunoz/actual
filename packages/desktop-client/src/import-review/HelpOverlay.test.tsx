@@ -24,8 +24,6 @@ describe('the help overlay', () => {
     // The overlay is rendered from the keymap, so a binding cannot be
     // added without showing up here.
     expect(screen.getByText('Next row')).toBeInTheDocument();
-    expect(
-      screen.getByText('Import these rows into another account'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Edit split')).toBeInTheDocument();
   });
 });

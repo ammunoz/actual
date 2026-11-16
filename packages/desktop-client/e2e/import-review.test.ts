@@ -47,20 +47,6 @@ test.describe('Keyboard import review', () => {
   }
 
   /**
-   * Import the fixture with TWO bank statements.
-   *
-   * Actual's OFX parser flattens every statement into one list and drops
-   * the bank's account id, so the review cannot tell the statements apart.
-   * The user routes the rows to the accounts they belong to.
-   */
-  async function importMultiAccountOfx() {
-    const fileChooserPromise = page.waitForEvent('filechooser');
-    await accountPage.page.getByRole('button', { name: 'Import' }).click();
-    const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(join(__dirname, 'data/demo-import-multi.ofx'));
-  }
-
-  /**
    * Import the fixture with two rows the trust level holds back.
    *
    * The second transaction has no payee name at all: a vendor string that
@@ -94,6 +80,11 @@ test.describe('Keyboard import review', () => {
     await expect(dialog).toBeVisible();
     // The review's own header, not Actual's import modal.
     await expect(dialog.getByText('Review import')).toBeVisible();
+    // The heading says where the rows are going: the account the review
+    // was opened for. It is the only place the destination is shown.
+    await expect(dialog.getByTestId('import-review-destination')).toContainText(
+      'Keyboard Review',
+    );
   });
 
   test('falls back to Actual own import modal when the feature is off', async () => {
@@ -301,134 +292,6 @@ test.describe('Keyboard import review', () => {
     await expect(
       dialog.getByTestId('import-review-notes').first(),
     ).toContainText('a note from the review');
-  });
-
-  test('routes the rows of a two-statement file to another account', async () => {
-    const checkingName = 'Keyboard Review Routing Check';
-    const savingsName = 'Keyboard Review Routing Savings';
-
-    accountPage = await navigation.createAccount({
-      name: checkingName,
-      offBudget: false,
-      balance: 0,
-    });
-    await accountPage.waitFor();
-    // A second account for the rows the user routes away. The account is
-    // added from the BUDGET page: an account page has an "Edit account
-    // name" button of its own, and the add form's name field would not
-    // be the only thing the name matches.
-    await navigation.goToBudgetPage();
-    await navigation.createAccount({
-      name: savingsName,
-      offBudget: false,
-      balance: 0,
-    });
-    await navigation.goToAccountPage(checkingName);
-
-    await enableKeyboardReview();
-    await importMultiAccountOfx();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Review import')).toBeVisible();
-
-    const rows = dialog.getByTestId('import-review-row');
-    await expect(rows).toHaveCount(4);
-
-    // Everything is in the account the review was opened for, and the
-    // heading says so.
-    const headings = dialog.getByTestId('import-review-group');
-    await expect(headings).toHaveCount(1);
-    await expect(headings.first()).toContainText(checkingName);
-
-    // The user routes the last two rows into the other account.
-    await page.keyboard.press('j');
-    await page.keyboard.press('j');
-    await page.keyboard.press('o');
-
-    const pane = dialog.getByTestId('import-review-route');
-    await expect(pane).toBeVisible();
-    const input = pane.getByTestId('import-review-route-account');
-    await input.fill(savingsName);
-    await page.keyboard.press('Enter');
-
-    // The routing is visible: two headings, one per account.
-    await expect(dialog.getByTestId('import-review-group')).toHaveCount(2);
-    await expect(
-      dialog.getByTestId('import-review-group').nth(1),
-    ).toContainText(savingsName);
-
-    await dialog.getByRole('button', { name: 'Import' }).click();
-    await expect(dialog).not.toBeVisible();
-
-    // The rows landed in the accounts the user chose.
-    await expect(accountPage.transactionTableRow).toHaveCount(2);
-    await navigation.goToAccountPage(savingsName);
-    await expect(
-      page.getByTestId('row').filter({ hasText: 'Demo Savings One' }),
-    ).toHaveCount(1);
-    await expect(
-      page.getByTestId('row').filter({ hasText: 'Demo Savings Two' }),
-    ).toHaveCount(1);
-  });
-
-  test('a saved review keeps the routing', async () => {
-    const checkingName = 'Keyboard Review Session Check';
-    const savingsName = 'Keyboard Review Session Savings';
-
-    accountPage = await navigation.createAccount({
-      name: checkingName,
-      offBudget: false,
-      balance: 0,
-    });
-    await accountPage.waitFor();
-    await navigation.goToBudgetPage();
-    await navigation.createAccount({
-      name: savingsName,
-      offBudget: false,
-      balance: 0,
-    });
-    await navigation.goToAccountPage(checkingName);
-
-    await enableKeyboardReview();
-    await importMultiAccountOfx();
-
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Review import')).toBeVisible();
-    // The rows are there: the review is still parsing before that, and
-    // there is no row to route while it is.
-    await expect(dialog.getByTestId('import-review-row')).toHaveCount(4);
-
-    // The user routes the last two rows into the other account.
-    await page.keyboard.press('j');
-    await page.keyboard.press('j');
-    await page.keyboard.press('o');
-    const pane = dialog.getByTestId('import-review-route');
-    await expect(pane).toBeVisible();
-    await pane.getByTestId('import-review-route-account').fill(savingsName);
-    await page.keyboard.press('Enter');
-    await expect(dialog.getByTestId('import-review-group')).toHaveCount(2);
-
-    // The review is put aside.
-    await page.keyboard.press('w');
-    await expect(
-      page.getByTestId('keyboard-import-transactions-modal'),
-    ).not.toBeVisible();
-
-    // And picked up again from the command bar.
-    await page.keyboard.press('ControlOrMeta+k');
-    const commandBar = page.getByRole('combobox', { name: 'Command Bar' });
-    await expect(commandBar).toBeVisible();
-    await commandBar.fill('Resume the import review');
-    await page.keyboard.press('Enter');
-    await expect(commandBar).not.toBeVisible();
-
-    await expect(dialog.getByText('Review import')).toBeVisible();
-    // The routing came back with the review: the rows still go where
-    // the user put them.
-    await expect(dialog.getByTestId('import-review-group')).toHaveCount(2);
-    await expect(
-      dialog.getByTestId('import-review-group').nth(1),
-    ).toContainText(savingsName);
   });
 
   test('the keyboard drives the review', async () => {
