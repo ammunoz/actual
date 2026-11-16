@@ -133,6 +133,16 @@ type UndoSnapshot = {
    * accounts the review is no longer using.
    */
   groups: readonly RowGroup[];
+  /**
+   * The transactions the rows matched, for the same reason.
+   *
+   * A FITID matches within an account, so the matches belong to the
+   * routing as much as the resolution does. Restoring the rows without
+   * the matches would leave a row pointing at a transaction in the
+   * account it was routed AWAY from — and the apply step would edit that
+   * transaction.
+   */
+  matchedTransactionIds: ReadonlyMap<string, string>;
   editedRowKeys: ReadonlySet<string>;
   /**
    * The vendor-map entries the review had earned when the snapshot was
@@ -719,6 +729,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           return;
         }
 
+        // The base rows are kept, so a routing change can re-resolve the
+        // rows. The session holds the RESOLVED rows, and the rebuild
+        // recomputes the flags, so the resolution they carry does not
+        // leak into the new one.
+        baseRows.current = saved.rows;
+
         const state = sessionToPreviewState(saved);
         setState(state);
         setTrustLevel(saved.trustLevel);
@@ -1032,21 +1048,41 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
    * recorded.
    */
   const pushUndo = useCallback(
-    (current: ImportPreviewState, routing: readonly RowGroup[]) => {
+    (
+      current: ImportPreviewState,
+      routing: readonly RowGroup[],
+    ): UndoSnapshot | undefined => {
       const stack = undoStack.current;
-      if (stack[stack.length - 1]?.state === current) return;
-      undoStack.current = [
-        ...stack.slice(-(MAX_UNDO_STEPS - 1)),
-        {
-          state: current,
-          groups: routing,
-          editedRowKeys: new Set(editedRowKeys.current),
-          vendorChoices: new Map(vendorChoices.current),
-        },
-      ];
+      if (stack[stack.length - 1]?.state === current) return undefined;
+      const snapshot: UndoSnapshot = {
+        state: current,
+        groups: routing,
+        matchedTransactionIds,
+        editedRowKeys: new Set(editedRowKeys.current),
+        vendorChoices: new Map(vendorChoices.current),
+      };
+      undoStack.current = [...stack.slice(-(MAX_UNDO_STEPS - 1)), snapshot];
+      return snapshot;
     },
-    [],
+    [matchedTransactionIds],
   );
+
+  /**
+   * Take a snapshot back off the undo stack.
+   *
+   * A change that did not happen must not leave a snapshot behind: the
+   * snapshot would restore the state the review is already in, so undoing
+   * it would be a keypress that does nothing.
+   *
+   * It is only taken off if it is still the TOP one. A snapshot the user
+   * made in the meantime is on top by then, and that one is the user's.
+   */
+  const dropUndo = useCallback((snapshot: UndoSnapshot | undefined) => {
+    if (!snapshot) return;
+    const stack = undoStack.current;
+    if (stack[stack.length - 1] !== snapshot) return;
+    undoStack.current = stack.slice(0, -1);
+  }, []);
 
   const decide = useCallback(
     (index: number, decision: PreviewDecision) => {
@@ -1121,6 +1157,53 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   );
 
   /**
+   * Do the routing: re-resolve the rows, ask the budget again, and
+   * commit.
+   */
+  const applyRoutingRows = useCallback(
+    async (
+      nextGroups: RowGroup[],
+      token: number,
+      snapshot: UndoSnapshot | undefined,
+    ): Promise<void> => {
+      const next = rebuildPreviewState({
+        base: baseRows.current,
+        groups: nextGroups,
+        previous: state ?? undefined,
+        trustLevel,
+        resolveOpts: resolveOptsFor(payees, accounts),
+      });
+
+      const matched = await lookupMatches(
+        next.rows,
+        nextGroups,
+        payees,
+        categories,
+      );
+      // A newer routing change, or an undo, overtook this one. The
+      // snapshot goes with it: the change did not happen.
+      if (routeToken.current !== token) {
+        dropUndo(snapshot);
+        return;
+      }
+
+      setMatchedTransactionIds(matched);
+      setGroups(nextGroups);
+      setState(next);
+    },
+    [
+      accounts,
+      categories,
+      dropUndo,
+      lookupMatches,
+      payees,
+      resolveOptsFor,
+      state,
+      trustLevel,
+    ],
+  );
+
+  /**
    * Put the rows into a new routing.
    *
    * The rows are re-resolved, because the resolution depends on the
@@ -1142,45 +1225,25 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // every row for nothing would cost a lot and gain nothing.
       if (isSameRouting(nextGroups, groups)) return true;
 
-      // The token tells two routing changes apart. The budget is asked
-      // again for each one, and a slower answer must not be applied over
-      // a newer routing.
+      // The token tells two routing changes apart. Each one asks the
+      // budget again, and a slower answer must not be applied over a
+      // newer routing.
       const token = ++routeToken.current;
 
-      pushUndo(state, groups);
+      // The snapshot goes on BEFORE the budget is asked: the user has
+      // asked for the change, and it has to be undoable while it is
+      // being made. If the change does not happen, it comes back off.
+      const snapshot = pushUndo(state, groups);
 
-      const next = rebuildPreviewState({
-        base: baseRows.current,
-        groups: nextGroups,
-        previous: state,
-        trustLevel,
-        resolveOpts: resolveOptsFor(payees, accounts),
-      });
-
-      const matched = await lookupMatches(
-        next.rows,
-        nextGroups,
-        payees,
-        categories,
-      );
-      if (routeToken.current !== token) return false;
-
-      setMatchedTransactionIds(matched);
-      setGroups(nextGroups);
-      setState(next);
-      return true;
+      try {
+        await applyRoutingRows(nextGroups, token, snapshot);
+        return true;
+      } catch (err) {
+        dropUndo(snapshot);
+        throw err;
+      }
     },
-    [
-      accounts,
-      categories,
-      groups,
-      lookupMatches,
-      payees,
-      pushUndo,
-      resolveOptsFor,
-      state,
-      trustLevel,
-    ],
+    [applyRoutingRows, dropUndo, groups, pushUndo, state],
   );
 
   /** Put a row into another account. */
@@ -1221,11 +1284,19 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     const last = stack[stack.length - 1];
     if (!last) return;
     undoStack.current = stack.slice(0, -1);
+    // A routing change that is still in flight must not land on top of
+    // the undo: the user undid the routing, and a late answer would put
+    // it back.
+    routeToken.current += 1;
     // The set of edited rows is part of the snapshot: undoing an edit back
     // to nothing has to remove the row again, or the apply step would
     // write a no-op update for it.
     editedRowKeys.current = new Set(last.editedRowKeys);
     vendorChoices.current = new Map(last.vendorChoices);
+    // The matches travel with the routing they were found in. A row that
+    // points at a transaction in the account it was routed away from
+    // would have that transaction edited.
+    setMatchedTransactionIds(last.matchedTransactionIds);
     setGroups([...last.groups]);
     setState(last.state);
   }, []);

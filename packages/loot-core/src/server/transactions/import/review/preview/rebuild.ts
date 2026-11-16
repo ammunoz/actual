@@ -22,6 +22,10 @@
  * Pure: every helper returns a new state; no input is mutated.
  */
 
+import {
+  fileFlags,
+  flagDuplicateFitids,
+} from '#server/transactions/import/review/resolver/flags';
 import { resolvePayees } from '#server/transactions/import/review/resolver/payee-resolver';
 import type { ResolveOpts } from '#server/transactions/import/review/resolver/payee-resolver';
 import { accountForRow } from '#server/transactions/import/review/routing/groups';
@@ -67,7 +71,15 @@ export function rebuildPreviewState(opts: {
     return { ...row, accountId };
   });
 
-  const resolved = resolvePayees(routed, opts.resolveOpts);
+  // The flags are computed afresh: the file's own flags are carried over,
+  // the duplicate-FITID flags are raised again from the rows, and the
+  // resolver's flags are raised again by the resolver. Carrying the
+  // resolver's flags over would raise them twice, and the rows would
+  // collect a copy of every flag on every routing change.
+  const cleaned = routed.map(row => ({ ...row, flags: fileFlags(row) }));
+  const flagged = flagDuplicateFitids(cleaned);
+
+  const resolved = resolvePayees(flagged, opts.resolveOpts);
   const fresh = buildPreviewState(resolved, opts.trustLevel);
 
   return withCarriedWork(fresh, opts.previous ?? fresh);

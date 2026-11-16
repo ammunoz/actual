@@ -552,6 +552,176 @@ describe('useImportReview', () => {
     expect(updates).toHaveLength(0);
   });
 
+  it('undoes a routing change with the matches it had', async () => {
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          // The transaction with this FITID is in a-1 and nowhere else.
+          return {
+            data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' }],
+            dependencies: [],
+          };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [{ id: 'trx-1' }],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    // The row is in a-1, where the transaction with that FITID is.
+    expect(result.current.isAlreadyImported('row-0')).toBe(true);
+
+    await act(async () => {
+      await result.current.routeRow(0, 'a-2');
+    });
+    // The row is in a-2 now, where there is no transaction with that
+    // FITID.
+    expect(result.current.isAlreadyImported('row-0')).toBe(false);
+
+    act(() => {
+      result.current.undo();
+    });
+
+    // The undo restores the matches too. A row that pointed at a
+    // transaction in the account it was routed AWAY from would have that
+    // transaction edited.
+    expect(result.current.isAlreadyImported('row-0')).toBe(true);
+  });
+
+  it('drops a routing change that an undo overtook', async () => {
+    // The second lookup hangs until the test lets it go, so the change
+    // is still being made when the user undoes.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let lookups = 0;
+
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          lookups += 1;
+          if (lookups > 1) await gate;
+          return { data: [], dependencies: [] };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [{ id: 'trx-1' }],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+
+    let routing: Promise<boolean> | undefined;
+    act(() => {
+      routing = result.current.routeRow(1, 'a-2');
+    });
+
+    act(() => {
+      result.current.undo();
+    });
+
+    await act(async () => {
+      release?.();
+      await routing;
+    });
+
+    // The change never happened, so the routing is as it was.
+    expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-1' }]);
+  });
+
+  it('routes a review that was picked up again', async () => {
+    const session = {
+      v: 1,
+      savedAt: '2026-09-07T12:00:00.000Z',
+      accountId: 'a-1',
+      filename: '/tmp/demo.ofx',
+      trustLevel: 'cautious' as const,
+      focusedIndex: 0,
+      rows: [
+        {
+          accountId: 'a-1',
+          importedId: 'FITID-1',
+          date: '2026-09-07',
+          amountCents: -2500,
+          payeeRaw: 'Demo Vendor',
+          previewKey: 'row-0',
+          payeeCanonical: 'Demo Vendor',
+          payeeMatchSource: 'existing-prefix' as const,
+          flags: [],
+          decision: 'pending' as const,
+          edits: {},
+        },
+        {
+          accountId: 'a-1',
+          importedId: 'FITID-2',
+          date: '2026-09-08',
+          amountCents: -1000,
+          payeeRaw: 'Demo Other',
+          previewKey: 'row-1',
+          payeeCanonical: 'Demo Other',
+          payeeMatchSource: 'existing-prefix' as const,
+          flags: [],
+          decision: 'pending' as const,
+          edits: {},
+        },
+      ],
+      editedRowKeys: [],
+      vendorChoices: [],
+      fingerprint: 'abc123',
+    };
+
+    const view = renderHook(() =>
+      useImportReview({
+        accountId: 'a-1',
+        filename: '/tmp/demo.ofx',
+        session,
+        onImported: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
+
+    await act(async () => {
+      await view.result.current.routeRow(1, 'a-2');
+    });
+
+    // The rows are still there: a picked-up review can be routed like
+    // any other.
+    expect(view.result.current.state?.rows).toHaveLength(2);
+    expect(view.result.current.state?.rows.map(row => row.accountId)).toEqual([
+      'a-1',
+      'a-2',
+    ]);
+  });
+
   it('undoes a bulk accept in ONE step', async () => {
     // A bulk action is one change, so it is one undo — not one undo per
     // row.

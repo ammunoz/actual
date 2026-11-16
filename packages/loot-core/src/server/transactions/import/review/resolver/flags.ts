@@ -179,6 +179,27 @@ export function flagDuplicateFitids<
 }
 
 /**
+ * Pure: the flags the FILE raises about a row.
+ *
+ * A row's flags are a mixture: some describe the file (its amount is
+ * unreadable, its date is impossible) and some describe the RESOLUTION
+ * (the resolver did not know the payee, it looks like a transfer). The
+ * second kind is recomputed every time the rows are resolved, so carrying
+ * it over would raise it a second time.
+ *
+ * The duplicate-FITID flags are the file's too, but they are recomputed
+ * from the rows themselves (`flagDuplicateFitids`), so they are left out
+ * here as well: the function that raises them is the one that knows
+ * whether they apply.
+ */
+export function fileFlags(row: { flags?: readonly Flag[] }): readonly Flag[] {
+  return (row.flags ?? []).filter(
+    flag =>
+      flag.kind === 'amount-mismatch' || flag.kind === 'date-out-of-range',
+  );
+}
+
+/**
  * Pure: the gate outcome for a single flag kind under a trust level.
  */
 export function outcomeFor(

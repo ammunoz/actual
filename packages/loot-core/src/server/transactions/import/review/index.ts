@@ -28,6 +28,7 @@ export type {
 } from './types';
 
 export {
+  fileFlags,
   flagDuplicateFitids,
   flagFor,
   isHardBlock,
