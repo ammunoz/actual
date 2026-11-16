@@ -658,53 +658,54 @@ describe('useImportReview', () => {
     expect(result.current.groups).toEqual([{ start: 0, accountId: 'a-1' }]);
   });
 
-  it('routes a review that was picked up again', async () => {
-    const session = {
-      v: 2,
-      savedAt: '2026-09-07T12:00:00.000Z',
-      accountId: 'a-1',
-      groups: [{ start: 0, accountId: 'a-1' }],
-      filename: '/tmp/demo.ofx',
-      trustLevel: 'cautious' as const,
-      focusedIndex: 0,
-      rows: [
-        {
-          accountId: 'a-1',
-          importedId: 'FITID-1',
-          date: '2026-09-07',
-          amountCents: -2500,
-          payeeRaw: 'Demo Vendor',
-          previewKey: 'row-0',
-          payeeCanonical: 'Demo Vendor',
-          payeeMatchSource: 'existing-prefix' as const,
-          flags: [],
-          decision: 'pending' as const,
-          edits: {},
-        },
-        {
-          accountId: 'a-1',
-          importedId: 'FITID-2',
-          date: '2026-09-08',
-          amountCents: -1000,
-          payeeRaw: 'Demo Other',
-          previewKey: 'row-1',
-          payeeCanonical: 'Demo Other',
-          payeeMatchSource: 'existing-prefix' as const,
-          flags: [],
-          decision: 'pending' as const,
-          edits: {},
-        },
-      ],
-      editedRowKeys: [],
-      vendorChoices: [],
-      fingerprint: 'abc123',
-    };
+  // A review that was put aside: two rows, both pending.
+  const SAVED_SESSION = {
+    v: 2,
+    savedAt: '2026-09-07T12:00:00.000Z',
+    accountId: 'a-1',
+    groups: [{ start: 0, accountId: 'a-1' }],
+    filename: '/tmp/demo.ofx',
+    trustLevel: 'cautious' as const,
+    focusedIndex: 0,
+    rows: [
+      {
+        accountId: 'a-1',
+        importedId: 'FITID-1',
+        date: '2026-09-07',
+        amountCents: -2500,
+        payeeRaw: 'Demo Vendor',
+        previewKey: 'row-0',
+        payeeCanonical: 'Demo Vendor',
+        payeeMatchSource: 'existing-prefix' as const,
+        flags: [],
+        decision: 'pending' as const,
+        edits: {},
+      },
+      {
+        accountId: 'a-1',
+        importedId: 'FITID-2',
+        date: '2026-09-08',
+        amountCents: -1000,
+        payeeRaw: 'Demo Other',
+        previewKey: 'row-1',
+        payeeCanonical: 'Demo Other',
+        payeeMatchSource: 'existing-prefix' as const,
+        flags: [],
+        decision: 'pending' as const,
+        edits: {},
+      },
+    ],
+    editedRowKeys: [],
+    vendorChoices: [],
+    fingerprint: 'abc123',
+  };
 
+  it('routes a review that was picked up again', async () => {
     const view = renderHook(() =>
       useImportReview({
         accountId: 'a-1',
         filename: '/tmp/demo.ofx',
-        session,
+        session: SAVED_SESSION,
         onImported: vi.fn(),
       }),
     );
@@ -721,6 +722,27 @@ describe('useImportReview', () => {
       'a-1',
       'a-2',
     ]);
+  });
+
+  it('puts the cursor on a row of the review it picked up', async () => {
+    // The session was saved from a review with more rows than this one
+    // has, so its cursor points at a row that is not here.
+    //
+    // The session is a constant: a new object on every render would
+    // re-open the review on every render, and the review would never
+    // settle.
+    const session = { ...SAVED_SESSION, focusedIndex: 99 };
+    const view = renderHook(() =>
+      useImportReview({
+        accountId: 'a-1',
+        filename: '/tmp/demo.ofx',
+        session,
+        onImported: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
+
+    expect(view.result.current.focusedIndex).toBe(1);
   });
 
   it('undoes a bulk accept in ONE step', async () => {
@@ -971,6 +993,70 @@ describe('useImportReview', () => {
       result.current.undo();
     });
     expect(result.current.state?.rows[0].decision).toBe('pending');
+  });
+
+  it('undo puts the cursor back on the row it undid', async () => {
+    const { result } = await renderReview();
+
+    // Accepting the first row moves the cursor on to the second one —
+    // so the undo has to bring it back, or the row the user undid is off
+    // screen.
+    act(() => {
+      result.current.decide(0, 'accept');
+      result.current.moveFocus(1);
+    });
+    expect(result.current.focusedIndex).toBe(1);
+
+    act(() => {
+      result.current.undo();
+    });
+
+    expect(result.current.state?.rows[0].decision).toBe('pending');
+    expect(result.current.focusedIndex).toBe(0);
+  });
+
+  it('keeps the cursor on a row', async () => {
+    const { result } = await renderReview();
+
+    // There are two rows, so the cursor cannot go past the second one.
+    act(() => {
+      result.current.moveFocus(5);
+    });
+    expect(result.current.focusedIndex).toBe(1);
+
+    // And it can still move up from there — a cursor that had walked
+    // past the end would come back to the end instead of to the row
+    // above it.
+    act(() => {
+      result.current.moveFocus(-1);
+    });
+    expect(result.current.focusedIndex).toBe(0);
+
+    // And it cannot go before the first one.
+    act(() => {
+      result.current.moveFocus(-5);
+    });
+    expect(result.current.focusedIndex).toBe(0);
+  });
+
+  it('can move up from the last row', async () => {
+    const { result } = await renderReview();
+
+    // The cursor is on the last row and the user moves down: nothing
+    // happens, because there is nothing below. But the cursor must not
+    // have walked PAST the last row either — otherwise moving up would
+    // bring it back to the last row instead of to the one above it, and
+    // the key would look broken.
+    act(() => {
+      result.current.focus(1);
+      result.current.moveFocus(1);
+    });
+    expect(result.current.focusedIndex).toBe(1);
+
+    act(() => {
+      result.current.moveFocus(-1);
+    });
+    expect(result.current.focusedIndex).toBe(0);
   });
 
   it('does not write the vendor map while the review is open', async () => {

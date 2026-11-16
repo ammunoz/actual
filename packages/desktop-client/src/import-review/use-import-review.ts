@@ -153,6 +153,14 @@ type UndoSnapshot = {
    * user took back would decide the next import on their behalf.
    */
   vendorChoices: ReadonlyMap<string, VendorChoice>;
+  /**
+   * Where the cursor was when the change was made.
+   *
+   * Accepting a row moves the cursor on, so without this an undo would
+   * leave the cursor on the NEXT row — and the row the user just undid
+   * would be off screen.
+   */
+  focusedIndex: number;
 };
 
 /**
@@ -435,7 +443,21 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     groupsRef.current = next;
     setGroups(next);
   }, []);
+  // The cursor is in a ref as well as in state.
+  //
+  // The undo snapshot has to record where the user WAS, and a change is
+  // made from a callback that was created before the cursor moved. A
+  // ref is read at the moment it is used, so it is always the cursor the
+  // user is looking at — and a change that moves the cursor on records
+  // the cursor it started from.
   const [focusedIndex, setFocusedIndex] = useState(0);
+  const focusedIndexRef = useRef(0);
+
+  /** Move the cursor to a row. */
+  const setCursor = useCallback((index: number) => {
+    focusedIndexRef.current = index;
+    setFocusedIndex(index);
+  }, []);
   const [trustLevel, setTrustLevel] = useState<TrustLevel>('cautious');
   const [payees, setPayees] = useState<readonly ReviewPayee[]>([]);
   const [accounts, setAccounts] = useState<readonly ReviewAccount[]>([]);
@@ -752,7 +774,14 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         const state = sessionToPreviewState(saved);
         setState(state);
         setTrustLevel(saved.trustLevel);
-        setFocusedIndex(saved.focusedIndex);
+        // The cursor has to be a row of THIS review: the session may
+        // have been saved from a review with more rows.
+        setCursor(
+          Math.min(
+            Math.max(0, saved.focusedIndex),
+            Math.max(0, state.rows.length - 1),
+          ),
+        );
         editedRowKeys.current = new Set(saved.editedRowKeys);
         vendorChoices.current = new Map(saved.vendorChoices);
 
@@ -910,7 +939,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         setState(next);
         setRouting(nextGroups);
-        setFocusedIndex(0);
+        setCursor(0);
 
         if (cancelled) return;
 
@@ -946,6 +975,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     session,
     lookupMatches,
     resolveOptsFor,
+    setCursor,
     setRouting,
   ]);
 
@@ -1072,6 +1102,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     (
       current: ImportPreviewState,
       routing: readonly RowGroup[],
+      cursor: number,
     ): UndoSnapshot | undefined => {
       const stack = undoStack.current;
       if (stack[stack.length - 1]?.state === current) return undefined;
@@ -1081,6 +1112,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         matchedTransactionIds,
         editedRowKeys: new Set(editedRowKeys.current),
         vendorChoices: new Map(vendorChoices.current),
+        focusedIndex: cursor,
       };
       undoStack.current = [...stack.slice(-(MAX_UNDO_STEPS - 1)), snapshot];
       return snapshot;
@@ -1107,26 +1139,31 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
   const decide = useCallback(
     (index: number, decision: PreviewDecision) => {
+      // The cursor as it is NOW. Accepting a row moves the cursor on, and
+      // the snapshot has to record where the user was, not where the
+      // cursor ended up.
+      const cursor = focusedIndexRef.current;
       setState(current => {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current, groups);
+        pushUndo(current, groupsRef.current, cursor);
         return applyDecision(current, rowKey(row), decision);
       });
     },
-    [groups, pushUndo],
+    [pushUndo],
   );
 
   const decideAll = useCallback(
     (decision: PreviewDecision) => {
+      const cursor = focusedIndexRef.current;
       setState(current => {
         if (!current) return current;
         const pending = current.rows.filter(row => row.decision === 'pending');
         if (pending.length === 0) return current;
         // One snapshot for the whole bulk action, so one undo takes it
         // all back.
-        pushUndo(current, groups);
+        pushUndo(current, groupsRef.current, cursor);
         // The domain's `applyDecision` finds its row by key, so applying
         // it once per row is quadratic in the number of rows. An import
         // file has hundreds of rows at most, so this is cheap, and going
@@ -1138,15 +1175,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return next;
       });
     },
-    [groups, pushUndo],
+    [pushUndo],
   );
   const edit = useCallback(
     (index: number, edits: PreviewEdits, opts?: EditOptions) => {
+      const cursor = focusedIndexRef.current;
       setState(current => {
         if (!current) return current;
         const row = current.rows[index];
         if (!row) return current;
-        pushUndo(current, groups);
+        pushUndo(current, groupsRef.current, cursor);
         // Remember that the user touched this row, so the apply step can
         // update the matched transaction in place.
         editedRowKeys.current = new Set([
@@ -1174,7 +1212,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         return updateEdits(current, rowKey(row), edits);
       });
     },
-    [groups, pushUndo, payees],
+    [pushUndo, payees],
   );
 
   /**
@@ -1255,7 +1293,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The snapshot goes on BEFORE the budget is asked: the user has
       // asked for the change, and it has to be undoable while it is
       // being made. If the change does not happen, it comes back off.
-      const snapshot = pushUndo(state, groupsRef.current);
+      const snapshot = pushUndo(
+        state,
+        groupsRef.current,
+        focusedIndexRef.current,
+      );
 
       try {
         await applyRoutingRows(nextGroups, token, snapshot);
@@ -1302,13 +1344,37 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     [matchedTransactionIds],
   );
 
-  const focus = useCallback((index: number) => {
-    setFocusedIndex(index);
-  }, []);
+  /**
+   * Put the cursor on a row.
+   *
+   * The row has to exist: a cursor past the end of the review is a
+   * cursor that cannot move, because every move is clamped back into
+   * range and the user sees nothing happen.
+   */
+  const focus = useCallback(
+    (index: number) => {
+      const last = Math.max(0, (state?.rows.length ?? 0) - 1);
+      setCursor(Math.min(last, Math.max(0, index)));
+    },
+    [setCursor, state],
+  );
 
-  const moveFocus = useCallback((delta: number) => {
-    setFocusedIndex(current => Math.max(0, current + delta));
-  }, []);
+  /**
+   * Move the cursor, and keep it on a row.
+   *
+   * Both ends are clamped. The upper end matters more than it looks:
+   * accepting the last row moves the cursor past it, and a cursor that
+   * is past the end makes "up" a no-op — the cursor goes from one past
+   * the end back to the last row, which looks like nothing happened.
+   */
+  const moveFocus = useCallback(
+    (delta: number) => {
+      const last = Math.max(0, (state?.rows.length ?? 0) - 1);
+      const next = Math.min(last, Math.max(0, focusedIndexRef.current + delta));
+      setCursor(next);
+    },
+    [setCursor, state],
+  );
 
   const undo = useCallback(() => {
     const stack = undoStack.current;
@@ -1330,7 +1396,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     setMatchedTransactionIds(last.matchedTransactionIds);
     setRouting([...last.groups]);
     setState(last.state);
-  }, [setRouting]);
+    // The cursor goes back to where it was. Accepting a row moves it on,
+    // so without this the undo leaves the user looking at the next row
+    // while the row they undid is off screen.
+    setCursor(last.focusedIndex);
+  }, [setCursor, setRouting]);
 
   const cycleTrustLevel = useCallback(() => {
     setTrustLevel(current => {
