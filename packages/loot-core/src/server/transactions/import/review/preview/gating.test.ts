@@ -31,10 +31,8 @@ function mkRow(
 function flag(kind: PreviewRow['flags'][number]['kind']): Flag {
   const codes: Record<string, Flag['code']> = {
     'unknown-payee': 'PAYEE-UNK-001',
-    'payee-rule-conflict': 'PAYEE-RULE-001',
     'amount-mismatch': 'AMT-MISMATCH-001',
     'date-out-of-range': 'DATE-RANGE-001',
-    'needs-review': 'AMT-MISMATCH-001',
     duplicate: 'FITID-DUP-001',
     'fuzzy-payee-match': 'PAYEE-FUZZY-001',
     'would-create-payee': 'PAYEE-NEW-001',

@@ -111,7 +111,7 @@ export function RowEditor({
   const payeeText = initialTextForMode('payee', row);
   const payeeId = resolvePayeeId(row, payeeText, payeeSuggestions);
 
-  const categoryId = row.edits.categoryId ?? row.matchedCategoryId;
+  const categoryId = row.edits.categoryId;
   const initialCategoryName =
     categorySuggestions.find(suggestion => suggestion.id === categoryId)
       ?.name ?? '';
@@ -176,9 +176,10 @@ export function RowEditor({
               // An empty name CLEARS the category: the row is imported
               // without one and Actual's rules decide.
               //
-              // It cannot be `undefined`, which means "the user has not
-              // picked one" — and the payload builder falls back to the
-              // category the resolver found for that.
+              // It is not `undefined`, which means "the user has not
+              // picked one": a cleared category is work the user did, and
+              // the review has to be able to tell it from a row they
+              // never looked at.
               categoryId: suggestion ? suggestion.id : '',
             });
           }}

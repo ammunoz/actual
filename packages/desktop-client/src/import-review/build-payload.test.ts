@@ -741,14 +741,11 @@ describe('buildApplyPayload — the trust-level gate', () => {
 });
 
 describe('buildApplyPayload — a cleared category', () => {
-  it('sends the category the resolver found when the user has not picked one', () => {
-    const state = buildPreviewState(
-      buildState([mkRow()]).rows.map(row => ({
-        ...row,
-        matchedCategoryId: 'c-groceries',
-      })),
-      'cautious',
-    );
+  it('sends the category the user picked', () => {
+    const built = buildPreviewState(buildState([mkRow()]).rows, 'cautious');
+    const state = updateEdits(built, rowKey(built.rows[0]), {
+      categoryId: 'c-groceries',
+    });
     const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,
@@ -758,19 +755,24 @@ describe('buildApplyPayload — a cleared category', () => {
   });
 
   it('omits the category when the user cleared it', () => {
-    // `undefined` means "the user has not picked one", so it falls back to
-    // the resolver's category. An EMPTY string is how the user says "no
-    // category", and it has to be spelled out.
-    const built = buildPreviewState(
-      buildState([mkRow()]).rows.map(row => ({
-        ...row,
-        matchedCategoryId: 'c-groceries',
-      })),
-      'cautious',
-    );
+    // The resolver does not pick a category, so a row the user has not
+    // given one to has none — and Actual's own rules decide. An EMPTY
+    // string is how the user says "no category": it reaches the import
+    // the same way, but the review knows the user touched the field.
+    const built = buildPreviewState(buildState([mkRow()]).rows, 'cautious');
     const state = updateEdits(built, rowKey(built.rows[0]), {
       categoryId: '',
     });
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+    });
+    expect(payload[0].category).toBeUndefined();
+  });
+
+  it('sends no category when the user has not picked one', () => {
+    const state = buildPreviewState(buildState([mkRow()]).rows, 'cautious');
     const payload = buildApplyPayload(state, {
       accountId: 'a-1',
       payees: PAYEES,

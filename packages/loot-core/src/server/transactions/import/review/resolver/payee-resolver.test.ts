@@ -1,7 +1,6 @@
 import type {
   ReviewAccount,
   ReviewPayee,
-  ReviewPayeeRule,
   ReviewRowInput,
   VendorMap,
 } from '#server/transactions/import/review/types';
@@ -35,162 +34,9 @@ function mkRow(overrides: Partial<ReviewRowInput> = {}): ReviewRowInput {
   };
 }
 
-function mkRule(overrides: Partial<ReviewPayeeRule> = {}): ReviewPayeeRule {
-  return {
-    pattern: 'Demo',
-    patternKind: 'contains',
-    canonicalName: 'Demo Canonical',
-    enabled: true,
-    ...overrides,
-  };
-}
-
 function mkVendorMap(entries: Record<string, string>): VendorMap {
   return { v: 1, updatedAt: FIXED_NOW, entries };
 }
-
-describe('resolvePayees — layer 1 (rules)', () => {
-  it('matches a `contains` rule', () => {
-    const row = mkRow({ payeeRaw: 'POS PURCHASE 9999 Demo Vendor Co.' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Vendor', canonicalName: 'Demo Vendor Co.' }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeCanonical).toBe('Demo Vendor Co.');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('matches `contains` case-insensitively', () => {
-    const row = mkRow({ payeeRaw: 'POS PURCHASE 9999 demo vendor co.' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'DEMO VENDOR', canonicalName: 'Demo Vendor Co.' }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeCanonical).toBe('Demo Vendor Co.');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('matches a `prefix` rule', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor Inc.' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          patternKind: 'prefix',
-          pattern: 'Demo Vendor',
-          canonicalName: 'Demo Vendor Co.',
-        }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeCanonical).toBe('Demo Vendor Co.');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('matches a `regex` rule with `i` flag', () => {
-    const row = mkRow({ payeeRaw: 'demo vendor 123' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          patternKind: 'regex',
-          pattern: '^demo\\s+vendor\\s+\\d+$',
-          patternFlags: 'i',
-          canonicalName: 'Demo Vendor Co.',
-        }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeCanonical).toBe('Demo Vendor Co.');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('matches a `regex` rule without `i` flag case-sensitively', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor 123' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          patternKind: 'regex',
-          pattern: '^demo vendor \\d+$',
-          canonicalName: 'Demo Vendor Co.',
-        }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeMatchSource).toBe('strip-fallback');
-  });
-
-  it('skips disabled rules', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          pattern: 'Demo Vendor',
-          canonicalName: 'Demo Vendor Co.',
-          enabled: false,
-        }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeMatchSource).not.toBe('rule');
-    expect(out?.payeeCanonical).toBe('Demo Vendor');
-  });
-
-  it('longest-rule wins when multiple rules match', () => {
-    const row = mkRow({ payeeRaw: 'Demo Coffee Shop Downtown' });
-    const short = mkRule({ pattern: 'Demo', canonicalName: 'Demo Short' });
-    const long = mkRule({
-      pattern: 'Demo Coffee Shop',
-      canonicalName: 'Demo Coffee Shop',
-    });
-    const [out] = resolvePayees([row], {
-      rules: [short, long],
-      existingPayees: [],
-    });
-    expect(out?.payeeCanonical).toBe('Demo Coffee Shop');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('rule beats existing-prefix even when prefix is longer', () => {
-    const row = mkRow({ payeeRaw: 'Demo Coffee Shop Downtown' });
-    const [out] = resolvePayees([row], {
-      rules: [mkRule({ pattern: 'Demo', canonicalName: 'Demo From Rule' })],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeCanonical).toBe('Demo From Rule');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('propagates rule.categoryId to ResolvedRow.matchedCategoryId', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor Co.' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          pattern: 'Demo Vendor',
-          canonicalName: 'Demo Vendor Co.',
-          categoryId: 'demo-c-rent',
-        }),
-      ],
-      existingPayees: [],
-    });
-    expect(out?.matchedCategoryId).toBe('demo-c-rent');
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('omits matchedCategoryId when the rule has no categoryId', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor Co.' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Vendor', canonicalName: 'Demo Vendor Co.' }),
-      ],
-      existingPayees: [],
-    });
-    expect(out?.matchedCategoryId).toBeUndefined();
-    expect('matchedCategoryId' in (out ?? {})).toBe(false);
-  });
-});
 
 describe('resolvePayees — layer 2 (existing-prefix)', () => {
   it('matches an existing payee with prefix length >= 4 mid-word', () => {
@@ -291,15 +137,21 @@ describe('resolvePayees — transfer detection', () => {
     expect(out?.matchedTransferAccountId).toBe('a-checking');
   });
 
-  it('a rule beats transfer detection (a rule mapping an account name is deliberate)', () => {
+  it('an account name is a transfer, even when a payee has that name', () => {
+    // There is no layer of user rules: Actual's own rules run during the
+    // import, and a second rules system would have to agree with them.
+    // So an account name is a transfer even when the budget has a payee
+    // with the same name.
+    const payees: readonly ReviewPayee[] = [
+      { id: 'p-savings', name: 'Demo Savings' },
+    ];
     const row = mkRow({ payeeRaw: 'Demo Savings' });
     const [out] = resolvePayees([row], {
-      rules: [mkRule({ pattern: 'Demo Savings', canonicalName: 'Demo Payee' })],
-      existingPayees: EXISTING,
+      existingPayees: payees,
       accounts: ACCOUNTS,
     });
-    expect(out?.payeeMatchSource).toBe('rule');
-    expect(out?.matchedTransferAccountId).toBeUndefined();
+    expect(out?.payeeMatchSource).toBe('transfer');
+    expect(out?.matchedTransferAccountId).toBe('a-savings');
   });
 
   it('transfer payees are excluded from prefix and fuzzy matching', () => {
@@ -344,33 +196,17 @@ describe('resolvePayees — transfer detection', () => {
 
   it('does not alias the caller flags array into the result', () => {
     const flags = [
-      { kind: 'needs-review' as const, code: 'FITID-DUP-001' as const },
+      { kind: 'duplicate' as const, code: 'FITID-DUP-001' as const },
     ];
     const row = mkRow({ flags });
     const [out] = resolvePayees([row], { existingPayees: [] });
     expect(out?.flags).not.toBe(flags);
     expect(out?.flags).toEqual(flags);
   });
-
-  it('skips a rule whose pattern is not a valid regular expression', () => {
-    // A broken rule must not abort the whole import.
-    const row = mkRow({ payeeRaw: 'Demo Vendor' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({
-          patternKind: 'regex',
-          pattern: '([unclosed',
-          canonicalName: 'Demo From Rule',
-        }),
-      ],
-      existingPayees: EXISTING,
-    });
-    expect(out?.payeeMatchSource).not.toBe('rule');
-  });
 });
 
-describe('resolvePayees — layer 3 (strip fallback) and layer 4 (none)', () => {
-  it('falls back to strip when no rule and no existing-prefix match', () => {
+describe('resolvePayees — layer 4 (strip fallback) and layer 5 (none)', () => {
+  it('falls back to strip when there is no existing-prefix match', () => {
     const row = mkRow({ payeeRaw: 'Demo Unknown Vendor 1234' });
     const [out] = resolvePayees([row], { existingPayees: EXISTING });
     expect(out?.payeeCanonical).toBe('Demo Unknown Vendor');
@@ -396,18 +232,7 @@ describe('resolvePayees — empty inputs', () => {
     expect(resolvePayees([], { existingPayees: EXISTING })).toEqual([]);
   });
 
-  it('still applies rules + strip fallback when existingPayees is empty', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Vendor', canonicalName: 'Demo Vendor Co.' }),
-      ],
-      existingPayees: [],
-    });
-    expect(out?.payeeMatchSource).toBe('rule');
-  });
-
-  it('still applies strip fallback when both existingPayees and rules are empty', () => {
+  it('still applies strip fallback when existingPayees is empty', () => {
     const row = mkRow({ payeeRaw: 'Demo Vendor' });
     const [out] = resolvePayees([row], { existingPayees: [] });
     expect(out?.payeeMatchSource).toBe('strip-fallback');
@@ -429,18 +254,6 @@ describe('resolvePayees — immutability', () => {
     const [out] = resolvePayees([row], { existingPayees: EXISTING });
     expect(row).not.toHaveProperty('payeeCanonical');
     expect(out).not.toBe(row);
-  });
-
-  it('does not mutate the input rules array', () => {
-    const rules = [
-      mkRule({ pattern: 'Demo Vendor', canonicalName: 'Demo Vendor Co.' }),
-    ];
-    const copy = [...rules];
-    resolvePayees([mkRow({ payeeRaw: 'Demo Vendor' })], {
-      rules,
-      existingPayees: EXISTING,
-    });
-    expect(rules).toEqual(copy);
   });
 
   it('does not mutate the input existingPayees array or its items', () => {
@@ -488,14 +301,9 @@ describe('resolvePayees — flag wiring', () => {
     expect(out?.flags).toEqual([]);
   });
 
-  it('does NOT attach PAYEE-UNK-001 when source is rule', () => {
-    const row = mkRow({ payeeRaw: 'Demo Vendor' });
-    const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Vendor', canonicalName: 'Demo Vendor Co.' }),
-      ],
-      existingPayees: EXISTING,
-    });
+  it('does NOT attach PAYEE-UNK-001 when the payee was matched', () => {
+    const row = mkRow({ payeeRaw: 'Demo Coffee Shop' });
+    const [out] = resolvePayees([row], { existingPayees: EXISTING });
     expect(out?.flags).toEqual([]);
   });
 
@@ -524,13 +332,10 @@ describe('resolvePayees — flag wiring', () => {
 });
 
 describe('resolvePayees — Layer 0 (vendor map)', () => {
-  it('exact key match wins over user rules', () => {
+  it('exact key match wins over the prefix match', () => {
     const row = mkRow({ payeeRaw: 'Demo Coffee Shop Downtown' });
     const vendorMap = mkVendorMap({ 'Demo Coffee Shop Downtown': 'p-coffee' });
     const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Coffee', canonicalName: 'WRONG RULE HIT' }),
-      ],
       existingPayees: EXISTING,
       vendorMap,
     });
@@ -549,17 +354,14 @@ describe('resolvePayees — Layer 0 (vendor map)', () => {
     expect(out?.payeeMatchSource).toBe('vendor-map');
   });
 
-  it('falls through to Layer 1 when vendor map has no entry', () => {
+  it('falls through when the vendor map has no entry', () => {
     const row = mkRow({ payeeRaw: 'Demo Coffee Shop' });
     const vendorMap = mkVendorMap({ 'UNRELATED RAW': 'p-coffee' });
     const [out] = resolvePayees([row], {
-      rules: [
-        mkRule({ pattern: 'Demo Coffee', canonicalName: 'Demo Coffee Shop' }),
-      ],
       existingPayees: EXISTING,
       vendorMap,
     });
-    expect(out?.payeeMatchSource).toBe('rule');
+    expect(out?.payeeMatchSource).toBe('existing-prefix');
   });
 
   it('falls through to Layer 2 when vendor map entry points to a missing payee id', () => {

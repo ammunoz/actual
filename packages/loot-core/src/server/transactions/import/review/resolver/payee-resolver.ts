@@ -3,7 +3,6 @@
  *
  *   0. vendor map (exact key match on `payeeRaw` against the user's
  *      per-budget dictionary of explicit confirmations)
- *   1. user payee rules (sorted by pattern length desc, enabled only)
  *   t. transfer detection: exact case-insensitive match of `payeeRaw`
  *      against a budget account name — the row becomes a transfer,
  *      flagged `transfer-detected` so the review says so
@@ -12,16 +11,19 @@
  *   3. fuzzy LCS-ratio match against canonicalized raw (if enabled;
  *      transfer payees excluded from candidates)
  *   4. `canonicalize(strip(raw))` fallback
- *   else -> 'none' (canonical = '')
+ *   5. else -> 'none' (canonical = '')
  *
- * The vendor map (Layer 0) wins over user rules (Layer 1) because the
- * dictionary represents explicit user confirmations; a heuristic rule should
- * never override a deliberate mapping.
+ * The vendor map (Layer 0) wins over everything else because the
+ * dictionary represents explicit user confirmations; a heuristic match
+ * should never override a deliberate mapping.
  *
- * The transfer layer sits after rules (a user rule mapping an
- * account-named string to a vendor is deliberate) and before prefix/fuzzy
- * matching (an exact account-name hit must beat a fuzzy payee hit). Layers
- * 2 and 3 exclude transfer payees: their display name IS an account name, so
+ * There is no layer of user payee rules. Actual has its own rules, and they
+ * already run during the import — a second, parallel rules system would
+ * have to agree with them, and would not.
+ *
+ * The transfer layer sits before prefix/fuzzy matching (an exact
+ * account-name hit must beat a fuzzy payee hit). The prefix and fuzzy
+ * layers exclude transfer payees: their display name IS an account name, so
  * matching against them would silently convert ordinary transactions into
  * transfers.
  *
@@ -48,7 +50,6 @@ import type {
   ResolvedRow,
   ReviewAccount,
   ReviewPayee,
-  ReviewPayeeRule,
   ReviewRowInput,
   VendorMap,
 } from '#server/transactions/import/review/types';
@@ -74,8 +75,6 @@ export type ResolveOpts = {
    * no-op.
    */
   accounts?: readonly ReviewAccount[];
-  /** User payee rules. Optional; when absent, Layer 1 is a no-op. */
-  rules?: readonly ReviewPayeeRule[];
   /** The vendor dictionary. Optional; when absent, Layer 0 is a no-op. */
   vendorMap?: VendorMap;
   /** Fuzzy options. Optional; when absent, Layer 3 is disabled. */
@@ -86,10 +85,6 @@ type IndexEntry = {
   id: string;
   lower: string;
   original: string;
-};
-
-type CompiledRule = ReviewPayeeRule & {
-  readonly _re?: RegExp;
 };
 
 const MIN_PREFIX_LEN_BOUNDARY_FREE = 4;
@@ -110,7 +105,6 @@ export function resolvePayees(
   rows: readonly ReviewRowInput[],
   opts: ResolveOpts,
 ): readonly ResolvedRow[] {
-  const sortedRules = compileRules(opts.rules ?? []);
   const existingIndex = buildExistingIndex(opts.existingPayees);
   // Transfer-detection index: exact case-insensitive account-name lookup.
   // Includes closed accounts (still valid transfer targets).
@@ -118,14 +112,13 @@ export function resolvePayees(
 
   const out: ResolvedRow[] = [];
   for (const row of rows) {
-    out.push(resolveOne(row, sortedRules, existingIndex, accountsIndex, opts));
+    out.push(resolveOne(row, existingIndex, accountsIndex, opts));
   }
   return out;
 }
 
 function resolveOne(
   row: ReviewRowInput,
-  rules: readonly CompiledRule[],
   existingIndex: readonly IndexEntry[],
   accountsIndex: readonly IndexEntry[],
   opts: ResolveOpts,
@@ -141,21 +134,9 @@ function resolveOne(
         return resolved(row, hit.original, 'vendor-map', hit.id);
       }
       // Stale entry: the payee id from the dictionary no longer exists in
-      // the budget's payee list. Fall through to Layer 1. We do NOT prune
+      // the budget's payee list. Fall through to transfer detection, and
+      // then to Layer 2. We do NOT prune
       // the stale entry here — that would mutate the caller-provided store.
-    }
-  }
-
-  // Layer 1: user payee rules.
-  for (const rule of rules) {
-    if (ruleMatches(rule, raw)) {
-      return resolved(
-        row,
-        rule.canonicalName,
-        'rule',
-        undefined,
-        rule.categoryId,
-      );
     }
   }
 
@@ -249,7 +230,6 @@ function resolved(
   canonical: string,
   source: PayeeMatchSource,
   matchedPayeeId: string | undefined,
-  matchedCategoryId?: string,
 ): ResolvedRow {
   const out: ResolvedRow = {
     ...row,
@@ -260,42 +240,7 @@ function resolved(
     flags: row.flags ? [...row.flags] : [],
   };
   if (matchedPayeeId !== undefined) out.matchedPayeeId = matchedPayeeId;
-  if (matchedCategoryId !== undefined) {
-    out.matchedCategoryId = matchedCategoryId;
-  }
   return out;
-}
-
-/**
- * Pure: compile the rules into matchable form, longest pattern first so a
- * more specific rule wins over a broader one.
- */
-function compileRules(
-  rules: readonly ReviewPayeeRule[],
-): readonly CompiledRule[] {
-  // A rule whose pattern is not a valid regular expression is skipped
-  // rather than thrown: the pattern comes from the user's own rules, and one
-  // broken rule must not abort the whole import.
-  const compiled: CompiledRule[] = [];
-  const ordered = [...rules]
-    .filter(r => r.enabled)
-    .sort((a, b) => b.pattern.length - a.pattern.length);
-  for (const rule of ordered) {
-    if (rule.patternKind !== 'regex') {
-      compiled.push(rule);
-      continue;
-    }
-    try {
-      compiled.push({
-        ...rule,
-        _re: new RegExp(rule.pattern, rule.patternFlags ?? ''),
-      });
-    } catch {
-      // An invalid pattern: the rule cannot match, so it is skipped.
-      continue;
-    }
-  }
-  return compiled;
 }
 
 function buildExistingIndex(
@@ -349,21 +294,4 @@ function findLongestPrefix(
     }
   }
   return null;
-}
-
-function ruleMatches(rule: CompiledRule, raw: string): boolean {
-  switch (rule.patternKind) {
-    case 'contains': {
-      return raw.toLowerCase().includes(rule.pattern.toLowerCase());
-    }
-    case 'prefix': {
-      return raw.toLowerCase().startsWith(rule.pattern.toLowerCase());
-    }
-    case 'regex': {
-      return (rule._re as RegExp).test(raw);
-    }
-    default: {
-      return false;
-    }
-  }
 }

@@ -27,10 +27,8 @@ export type TrustLevel = 'paranoid' | 'cautious' | 'trusted';
  * vendors — no bank-specific labels.
  */
 export type FlagKind =
-  | 'needs-review'
   | 'duplicate'
   | 'unknown-payee'
-  | 'payee-rule-conflict'
   | 'amount-mismatch'
   | 'date-out-of-range'
   | 'fuzzy-payee-match'
@@ -46,7 +44,6 @@ export type FlagCode =
   | 'FITID-DUP-001'
   | 'FITID-DUP-002'
   | 'PAYEE-UNK-001'
-  | 'PAYEE-RULE-001'
   | 'AMT-MISMATCH-001'
   | 'DATE-RANGE-001'
   | 'DATE-RANGE-002'
@@ -138,32 +135,11 @@ export type ReviewCategory = {
  */
 export type PayeeMatchSource =
   | 'vendor-map'
-  | 'rule'
   | 'existing-prefix'
   | 'fuzzy'
   | 'strip-fallback'
   | 'transfer'
   | 'none';
-
-/**
- * A user-authored payee rule. These are read from Actual's own rule
- * storage so that the second, parallel rules system is not needed: Actual's
- * rules already run during import.
- */
-export type ReviewPayeeRule = {
-  /** The pattern to test the raw vendor string against. */
-  pattern: string;
-  /** How the pattern is interpreted. */
-  patternKind: 'contains' | 'prefix' | 'regex';
-  /** Regex flags, when `patternKind` is `regex`. */
-  patternFlags?: string;
-  /** The canonical payee name this rule resolves to. */
-  canonicalName: string;
-  /** Optional category hint. */
-  categoryId?: string;
-  /** Disabled rules are skipped. */
-  enabled: boolean;
-};
 
 /**
  * The per-budget dictionary of confirmed raw-vendor-name → payee id
@@ -189,8 +165,8 @@ export type ResolvedRow = ReviewRowInput & {
   payeeMatchSource: PayeeMatchSource;
   /**
    * Budget payee id, when the match came from the budget's payee list
-   * (vendor map, prefix, fuzzy). Undefined for rule matches and the
-   * strip fallback, which produce a synthetic name.
+   * (vendor map, prefix, fuzzy). Undefined for the strip fallback and
+   * for no match at all, which produce a synthetic name.
    */
   matchedPayeeId?: string;
   /**
@@ -199,8 +175,6 @@ export type ResolvedRow = ReviewRowInput & {
    * the row a payee or takes the transfer away.
    */
   matchedTransferAccountId?: string;
-  /** Budget category id, when a rule supplied a category hint. */
-  matchedCategoryId?: string;
   /** Flags attached during resolution. */
   flags: readonly Flag[];
 };

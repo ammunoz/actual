@@ -84,7 +84,7 @@ describe('the row editor', () => {
     // other "Groceries".
     render(
       <RowEditor
-        row={mkRow({ matchedCategoryId: 'c-food-2' })}
+        row={mkRow({ edits: { categoryId: 'c-food-2' } })}
         mode="category"
         payees={[]}
         categories={CATEGORIES}

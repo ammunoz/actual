@@ -21,7 +21,6 @@ export type {
   ReviewAccount,
   ReviewCategory,
   ReviewPayee,
-  ReviewPayeeRule,
   ReviewRowInput,
   TrustLevel,
   VendorMap,

@@ -105,9 +105,7 @@ export function SplitPane({ row, categories, onCommit }: SplitPaneProps) {
   // category, so the remaining work is only "give each leg its own
   // category".
   const [legs, setLegs] = useState<DraftLeg[]>(() => {
-    const source =
-      row.edits.splits ??
-      seedSplit(target, row.edits.categoryId ?? row.matchedCategoryId);
+    const source = row.edits.splits ?? seedSplit(target, row.edits.categoryId);
     return source.map(leg => ({ id: nextLegId(), leg }));
   });
 

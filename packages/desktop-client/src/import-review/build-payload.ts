@@ -230,14 +230,15 @@ function buildPayload(
 
     // A stale category id is dropped rather than sent: the apply step is
     // the only component that knows which ids are live.
+    //
+    // There is no fallback: the resolver does not pick a category, so
+    // until the user picks one the row has none, and Actual's own rules
+    // decide.
     const categoryId =
-      row.edits.categoryId !== undefined
-        ? liveCategoryIds.has(row.edits.categoryId)
-          ? row.edits.categoryId
-          : undefined
-        : row.matchedCategoryId && liveCategoryIds.has(row.matchedCategoryId)
-          ? row.matchedCategoryId
-          : undefined;
+      row.edits.categoryId !== undefined &&
+      liveCategoryIds.has(row.edits.categoryId)
+        ? row.edits.categoryId
+        : undefined;
 
     const payload: ImportReviewTransaction = {
       account: opts.accountId,

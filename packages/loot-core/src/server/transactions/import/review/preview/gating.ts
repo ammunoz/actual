@@ -229,8 +229,6 @@ export function effectiveFlags(
         return false;
 
       case 'duplicate':
-      case 'payee-rule-conflict':
-      case 'needs-review':
       default:
         // Nothing the user does in the review clears these: a repeated
         // FITID is a property of the file, not of the row's edits.

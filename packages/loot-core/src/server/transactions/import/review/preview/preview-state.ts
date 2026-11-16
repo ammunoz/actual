@@ -58,15 +58,14 @@ export type PreviewEdits = {
   /**
    * User-assigned budget category id.
    *
-   *   `undefined` → the user has not picked one; the apply step falls back
-   *                 to the category the resolver found, and Actual's rules
-   *                 pick whatever default applies.
+   *   `undefined` → the user has not picked one; no category is sent, and
+   *                 Actual's rules pick whatever default applies.
    *   `''`        → the user CLEARED the category; the row is imported
    *                 without one.
    *
-   * The two are different, and `undefined` cannot mean both: the payload
-   * builder falls back to the resolver's category when the field is
-   * undefined, so a cleared category has to be spelled out.
+   * The two are different in the review's own bookkeeping — a cleared
+   * category is work the user did — even though they reach the import the
+   * same way.
    */
   categoryId?: string;
   /**
@@ -556,7 +555,7 @@ export function withCarriedWork(
 /**
  * Pure: return a new state with the row identified by `key` updated to have
  * the given `newEdits`, **preserving its existing `decision`**. All other
- * row fields (flags, matchedCategoryId, etc.) are preserved.
+ * row fields (flags, etc.) are preserved.
  *
  * Companion to `applyDecision`: where `applyDecision` is the TERMINAL step
  * (the row's commit decision), `updateEdits` is the INTERMEDIATE step (an

@@ -33,14 +33,9 @@ describe('flagFor', () => {
 
   it('preserves the note field when provided', () => {
     const row = mkRow();
-    const out = flagFor(
-      row,
-      'payee-rule-conflict',
-      'PAYEE-RULE-001',
-      'r-a|r-b',
-    );
+    const out = flagFor(row, 'unknown-payee', 'PAYEE-UNK-001', 'r-a|r-b');
     expect(out.flags).toEqual([
-      { kind: 'payee-rule-conflict', code: 'PAYEE-RULE-001', note: 'r-a|r-b' },
+      { kind: 'unknown-payee', code: 'PAYEE-UNK-001', note: 'r-a|r-b' },
     ]);
   });
 
@@ -101,10 +96,8 @@ describe('flagFor', () => {
 describe('outcomeFor (matrix lookup)', () => {
   const KINDS: readonly FlagKind[] = [
     'unknown-payee',
-    'payee-rule-conflict',
     'amount-mismatch',
     'date-out-of-range',
-    'needs-review',
     'duplicate',
     'fuzzy-payee-match',
     'would-create-payee',
@@ -116,11 +109,6 @@ describe('outcomeFor (matrix lookup)', () => {
     Record<FlagKind, Readonly<Record<TrustLevel, 'block' | 'skip' | 'warn'>>>
   > = {
     'unknown-payee': { paranoid: 'block', cautious: 'block', trusted: 'warn' },
-    'payee-rule-conflict': {
-      paranoid: 'block',
-      cautious: 'block',
-      trusted: 'warn',
-    },
     // The two hard blocks: broken data is blocked at every trust level.
     'amount-mismatch': {
       paranoid: 'block',
@@ -132,7 +120,6 @@ describe('outcomeFor (matrix lookup)', () => {
       cautious: 'block',
       trusted: 'block',
     },
-    'needs-review': { paranoid: 'block', cautious: 'warn', trusted: 'warn' },
     duplicate: { paranoid: 'block', cautious: 'skip', trusted: 'warn' },
     'fuzzy-payee-match': {
       paranoid: 'block',
@@ -172,8 +159,6 @@ describe('isHardBlock', () => {
     expect(isHardBlock('unknown-payee')).toBe(false);
     expect(isHardBlock('duplicate')).toBe(false);
     expect(isHardBlock('fuzzy-payee-match')).toBe(false);
-    expect(isHardBlock('payee-rule-conflict')).toBe(false);
-    expect(isHardBlock('needs-review')).toBe(false);
     expect(isHardBlock('would-create-payee')).toBe(false);
     expect(isHardBlock('transfer-detected')).toBe(false);
   });

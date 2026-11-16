@@ -7,10 +7,8 @@
  *     | kind                 | paranoid | cautious | trusted |
  *     |----------------------|----------|----------|---------|
  *     | unknown-payee        | block    | block    | warn    |
- *     | payee-rule-conflict  | block    | block    | warn    |
  *     | amount-mismatch      | block    | block    | block   |
  *     | date-out-of-range    | block    | block    | block   |
- *     | needs-review         | block    | warn     | warn    |
  *     | duplicate            | block    | skip     | warn    |
  *     | fuzzy-payee-match    | block    | warn     | warn    |
  *     | would-create-payee   | warn     | warn     | warn    |
@@ -55,11 +53,6 @@ const OUTCOME_MATRIX: Readonly<
     cautious: 'block',
     trusted: 'warn',
   }),
-  'payee-rule-conflict': Object.freeze({
-    paranoid: 'block',
-    cautious: 'block',
-    trusted: 'warn',
-  }),
   // The two hard blocks: the row's data is broken, so it cannot be
   // imported correctly at any trust level. See `isHardBlock`.
   'amount-mismatch': Object.freeze({
@@ -71,11 +64,6 @@ const OUTCOME_MATRIX: Readonly<
     paranoid: 'block',
     cautious: 'block',
     trusted: 'block',
-  }),
-  'needs-review': Object.freeze({
-    paranoid: 'block',
-    cautious: 'warn',
-    trusted: 'warn',
   }),
   duplicate: Object.freeze({
     paranoid: 'block',

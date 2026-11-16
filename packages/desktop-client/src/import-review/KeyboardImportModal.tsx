@@ -229,7 +229,7 @@ export function KeyboardImportModal({
     if (effectiveTransferAccountId(row) !== undefined) {
       return { label: t('Transfer'), muted: true };
     }
-    const categoryId = row.edits.categoryId ?? row.matchedCategoryId;
+    const categoryId = row.edits.categoryId;
     if (!categoryId) return { label: t('Categorize'), muted: true };
     const name = categoryNames.get(categoryId);
     // A category that no longer exists is dropped at the apply step, so
@@ -244,8 +244,6 @@ export function KeyboardImportModal({
     switch (kind) {
       case 'unknown-payee':
         return t('No payee in your budget matches this vendor');
-      case 'payee-rule-conflict':
-        return t('A rule disagrees with the payee for this row');
       case 'amount-mismatch':
         // The reason describes the ROW, not where the problem came from:
         // the flag is derived from the value that would be sent, so it may
@@ -253,8 +251,6 @@ export function KeyboardImportModal({
         return t('This row has no usable amount');
       case 'date-out-of-range':
         return t('This row has no usable date');
-      case 'needs-review':
-        return t('This row needs a look');
       case 'duplicate':
         return t('This transaction repeats an earlier one');
       case 'fuzzy-payee-match':
