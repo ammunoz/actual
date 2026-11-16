@@ -37,6 +37,59 @@ export type ReviewAction =
   | 'close'
   | 'help';
 
+/**
+ * Every action the review has, in one list.
+ *
+ * The union above says what an action may BE; this says what the actions
+ * ARE. TypeScript cannot read a union's members at runtime, so a test
+ * that says "every action has a binding" needs the list.
+ *
+ * The two are kept honest by the compiler: the list must hold only real
+ * actions, and the check below fails to compile if the union grows an
+ * action the list does not have. An action nobody bound would otherwise
+ * fall into the dispatch's default branch and do nothing at all — a
+ * keypress that looks like the review is broken.
+ */
+export const REVIEW_ACTIONS = Object.freeze([
+  'move-next',
+  'move-prev',
+  'move-first',
+  'move-last',
+  'accept',
+  'accept-confirm',
+  'accept-override',
+  'drop',
+  'undo',
+  'edit-payee',
+  'edit-category',
+  'edit-memo',
+  'edit-amount',
+  'edit-date',
+  'edit-transfer',
+  'edit-split',
+  'route-row',
+  'route-all',
+  'cycle-flag',
+  'save-session',
+  'accept-all',
+  'drop-all',
+  'apply',
+  'close',
+  'help',
+] as const satisfies readonly ReviewAction[]);
+
+/**
+ * The list covers the whole union.
+ *
+ * If an action is added to `ReviewAction` and not to `REVIEW_ACTIONS`,
+ * this stops being `true` and the file does not compile.
+ */
+type EveryActionIsListed =
+  Exclude<ReviewAction, (typeof REVIEW_ACTIONS)[number]> extends never
+    ? true
+    : never;
+export const REVIEW_ACTIONS_COVER_EVERY_ACTION: EveryActionIsListed = true;
+
 export type KeyBinding = {
   /**
    * The keys, in `react-hotkeys-hook`'s own syntax, comma separated.

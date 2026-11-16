@@ -515,14 +515,29 @@ export function KeyboardImportModal({
           current?.kind === 'help' ? null : { kind: 'help' },
         );
         break;
-      default: {
+      case 'edit-payee':
+      case 'edit-category':
+      case 'edit-memo':
+      case 'edit-amount':
+      case 'edit-date': {
         // The field editors. Each one opens the pane for the field the
-        // action names; an action with no editor yet — the transfer
-        // editor, which is its own slice — does nothing.
+        // action names.
         const field = EDITOR_FOR_ACTION[action];
-        if (field && focused) {
+        if (focused) {
           openPane({ kind: 'editor', field });
         }
+        break;
+      }
+      default: {
+        // Every action has a case above.
+        //
+        // The assignment does not compile if an action is added without
+        // one: the switch would leave it in this branch, and `action`
+        // would not be `never`. An action nobody handled would otherwise
+        // do nothing at all, and the keypress would look like the review
+        // is broken.
+        const unhandled: never = action;
+        void unhandled;
         break;
       }
     }

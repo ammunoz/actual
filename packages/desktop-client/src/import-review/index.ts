@@ -46,7 +46,7 @@ export {
   parseAmountText,
   parseDateText,
 } from './editor-mode';
-export type { EditorMode, EditorSuggestion } from './editor-mode';
+export type { EditorAction, EditorMode, EditorSuggestion } from './editor-mode';
 
 export { EditorPicker } from './EditorPicker';
 export type { EditorPickerProps } from './EditorPicker';

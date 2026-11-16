@@ -17,8 +17,6 @@ import { isUsableDate } from '@actual-app/core/server/transactions/import/review
 import type { PreviewRow } from '@actual-app/core/server/transactions/import/review/index';
 import { amountToInteger, integerToAmount } from '@actual-app/core/shared/util';
 
-import type { ReviewAction } from './keymap';
-
 /**
  * The field the editor pane is editing.
  *
@@ -29,17 +27,34 @@ import type { ReviewAction } from './keymap';
 export type EditorMode = 'payee' | 'category' | 'memo' | 'amount' | 'date';
 
 /**
- * The editor each edit action opens.
+ * The actions that open a field editor.
+ *
+ * The transfer and split editors are their own surfaces, so they are not
+ * here: they get their own case in the dispatch.
  */
-export const EDITOR_FOR_ACTION: Readonly<
-  Partial<Record<ReviewAction, EditorMode>>
-> = Object.freeze({
-  'edit-payee': 'payee',
-  'edit-category': 'category',
-  'edit-memo': 'memo',
-  'edit-amount': 'amount',
-  'edit-date': 'date',
-});
+export type EditorAction =
+  | 'edit-payee'
+  | 'edit-category'
+  | 'edit-memo'
+  | 'edit-amount'
+  | 'edit-date';
+
+/**
+ * The editor each edit action opens.
+ *
+ * The record is EXHAUSTIVE over the actions that open an editor, not a
+ * partial one over every action the review has: an action that opens an
+ * editor and is not listed here would fall into the dispatch's default
+ * branch and do nothing.
+ */
+export const EDITOR_FOR_ACTION: Readonly<Record<EditorAction, EditorMode>> =
+  Object.freeze({
+    'edit-payee': 'payee',
+    'edit-category': 'category',
+    'edit-memo': 'memo',
+    'edit-amount': 'amount',
+    'edit-date': 'date',
+  });
 
 /**
  * A thing the user can pick from a list.

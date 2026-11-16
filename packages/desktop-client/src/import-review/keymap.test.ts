@@ -3,6 +3,8 @@ import {
   actionForHotkey,
   KEYMAP,
   nextTrustLevel,
+  REVIEW_ACTIONS,
+  REVIEW_ACTIONS_COVER_EVERY_ACTION,
   TRUST_LEVELS,
 } from './keymap';
 
@@ -17,12 +19,32 @@ describe('KEYMAP', () => {
     expect(new Set(actions).size).toBe(actions.length);
   });
 
-  it('every binding has a label in the help catalogue', () => {
-    // The labels live outside the keymap so the extractor can find them,
-    // so this is what keeps the two in step.
-    expect(
-      KEYMAP.every(binding => HELP_LABELS[binding.action] !== undefined),
-    ).toBe(true);
+  it('binds every action the review has', () => {
+    // An action nobody bound would fall into the dispatch's default
+    // branch and do nothing: the keypress would look like the review is
+    // broken, and nothing would say why.
+    const bound = new Set(KEYMAP.map(binding => binding.action));
+    const unbound = REVIEW_ACTIONS.filter(action => !bound.has(action));
+    expect(unbound).toEqual([]);
+  });
+
+  it('lists every action once', () => {
+    // A duplicate would satisfy every check and hide an action: the
+    // list would look complete while one of the actions was never
+    // really there.
+    expect(new Set(REVIEW_ACTIONS).size).toBe(REVIEW_ACTIONS.length);
+    // The compiler checks that the list covers the union; this is the
+    // same check, said out loud.
+    expect(REVIEW_ACTIONS_COVER_EVERY_ACTION).toBe(true);
+  });
+
+  it('has a label for every action the review has', () => {
+    // The help overlay says what every key does. An action with no label
+    // would be a key the overlay does not mention.
+    const unlabelled = REVIEW_ACTIONS.filter(
+      action => HELP_LABELS[action] === undefined,
+    );
+    expect(unlabelled).toEqual([]);
   });
 
   it('does NOT bind h/l (Actual OFX parser drops ACCTID)', () => {

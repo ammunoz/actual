@@ -36,9 +36,17 @@ describe('EDITOR_FOR_ACTION', () => {
     expect(EDITOR_FOR_ACTION['edit-date']).toBe('date');
   });
 
-  it('has no editor for the actions that are not field edits', () => {
-    expect(EDITOR_FOR_ACTION.accept).toBeUndefined();
-    expect(EDITOR_FOR_ACTION['cycle-flag']).toBeUndefined();
+  it('has an editor only for the field edits', () => {
+    // The record is exhaustive over the field edits, so an action that
+    // opens a different surface — the transfer, the split — is not in it
+    // at all, and cannot be added to it by accident.
+    expect(Object.keys(EDITOR_FOR_ACTION).sort()).toEqual([
+      'edit-amount',
+      'edit-category',
+      'edit-date',
+      'edit-memo',
+      'edit-payee',
+    ]);
   });
 });
 
