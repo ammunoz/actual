@@ -174,6 +174,19 @@ export function validateTransferRow(
 ): TransferValidationError | null {
   const accountId = effectiveTransferAccountId(row);
   if (accountId === undefined) return null;
+  // A transaction cannot transfer to the account it is in.
+  //
+  // The transfer picker refuses it, and the resolver's auto-detect
+  // refuses it too. But a row can CHANGE accounts after a transfer was
+  // set: the user routes it into the account it transfers to, and the
+  // transfer is suddenly a transfer to itself. The row's account is the
+  // only thing that knows.
+  if (accountId === row.accountId) {
+    return new TransferValidationError(
+      'TRANSFER-002',
+      'TRANSFER-002: the transfer target is the account the row is in',
+    );
+  }
   if (liveTransferAccountIds.has(accountId)) return null;
   return new TransferValidationError(
     'TRANSFER-001',

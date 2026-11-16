@@ -774,4 +774,26 @@ describe('validateTransferRow', () => {
     const next = updateEdits(state, 't-1', { transferAccountId: '' });
     expect(validateTransferRow(next.rows[0], new Set())).toBeNull();
   });
+
+  it('refuses a transfer to the account the row is in', () => {
+    // A transaction cannot transfer to the account it is in. The picker
+    // refuses it and the resolver's auto-detect refuses it too, but a
+    // row can CHANGE accounts after a transfer was set: the user routes
+    // it into the account it transfers to.
+    const row = mkRow({ accountId: 'a-2' });
+    const error = validateTransferRow(
+      { ...row, edits: { transferAccountId: 'a-2' } } as never,
+      new Set(['a-1', 'a-2']),
+    );
+    expect(error?.code).toBe('TRANSFER-002');
+  });
+
+  it('allows a transfer to another account', () => {
+    const row = mkRow({ accountId: 'a-1' });
+    const error = validateTransferRow(
+      { ...row, edits: { transferAccountId: 'a-2' } } as never,
+      new Set(['a-1', 'a-2']),
+    );
+    expect(error).toBeNull();
+  });
 });

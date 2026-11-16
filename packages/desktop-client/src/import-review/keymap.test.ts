@@ -37,6 +37,17 @@ describe('KEYMAP', () => {
     expect(KEYMAP.map(binding => binding.keys)).toContain('w');
   });
 
+  it('binds the routing keys', () => {
+    // The routing is how the user says which rows go to which account.
+    // `o` routes the rows from the cursor, `shift+o` routes every row.
+    const keys = KEYMAP.map(binding => binding.keys);
+    expect(keys).toContain('o');
+    expect(keys).toContain('shift+o');
+    const actions = KEYMAP.map(binding => binding.action);
+    expect(actions).toContain('route-row');
+    expect(actions).toContain('route-all');
+  });
+
   it('binds the movement keys', () => {
     const actions = KEYMAP.map(binding => binding.action);
     expect(actions).toContain('move-next');

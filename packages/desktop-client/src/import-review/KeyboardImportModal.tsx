@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -11,6 +11,7 @@ import {
   effectiveAmountCents,
   effectiveTransferAccountId,
   gateRow,
+  groupRanges,
   isSplitRow,
   normalizePayeeName,
   rowKey,
@@ -35,6 +36,7 @@ import type { EditorMode } from './editor-mode';
 import { HelpOverlay } from './HelpOverlay';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
+import { RoutePane } from './RoutePane';
 import { RowEditor } from './RowEditor';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
@@ -65,6 +67,7 @@ type PaneMode =
   | { kind: 'editor'; field: EditorMode }
   | { kind: 'split' }
   | { kind: 'transfer' }
+  | { kind: 'route'; scope: 'row' | 'all' }
   | { kind: 'help' }
   | { kind: 'confirm' }
   | null;
@@ -266,6 +269,27 @@ export function KeyboardImportModal({
   };
 
   const rows = review.state?.rows ?? [];
+
+  // The heading of each group of rows: the account its rows go into, and
+  // the rows it covers.
+  //
+  // The heading is what makes the routing visible: the review cannot
+  // tell where one bank statement ends and the next begins, so the
+  // partition is the user's to make, and the user has to be able to SEE
+  // it.
+  const groupHeadings = useMemo(() => {
+    const headings = new Map<number, { accountId: string; to: number }>();
+    for (const range of groupRanges(review.groups, rows.length)) {
+      headings.set(range.start, {
+        accountId: range.group.accountId,
+        to: range.end,
+      });
+    }
+    return headings;
+  }, [review.groups, rows.length]);
+
+  const accountName = (id: string) =>
+    review.accounts.find(account => account.id === id)?.name ?? id;
   const focused = rows[review.focusedIndex];
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
@@ -415,6 +439,16 @@ export function KeyboardImportModal({
         break;
       case 'close':
         requestClose();
+        break;
+      case 'route-row':
+        // The routing is a partition of the rows, and the boundary is
+        // the user's to place: the review cannot tell where one bank
+        // statement ends and the next begins.
+        if (!focused) break;
+        openPane({ kind: 'route', scope: 'row' });
+        break;
+      case 'route-all':
+        openPane({ kind: 'route', scope: 'all' });
         break;
       case 'edit-split': {
         // A row is EITHER a transfer OR a split, never both.
@@ -687,6 +721,7 @@ export function KeyboardImportModal({
               }}
             >
               {rows.map((row, index) => {
+                const heading = groupHeadings.get(index);
                 const isFocused = index === review.focusedIndex;
                 const amount = integerToAmount(
                   row.edits.amountCents ?? row.amountCents,
@@ -696,54 +731,83 @@ export function KeyboardImportModal({
                 const category = categoryCell(row);
                 const payee = payeeCell(row);
                 return (
-                  <View
+                  <Fragment
                     key={row.previewKey ?? row.importedId ?? String(index)}
-                    data-testid="import-review-row"
-                    data-focused={isFocused ? 'true' : 'false'}
-                    data-decision={row.decision}
-                    data-gate={evaluation?.gate ?? 'allow'}
-                    data-held={evaluation?.held ? 'true' : 'false'}
-                    style={{
-                      flexDirection: 'row',
-                      gap: 12,
-                      padding: '6px 10px',
-                      backgroundColor: isFocused
-                        ? theme.tableRowHeaderBackground
-                        : 'transparent',
-                    }}
                   >
-                    <Text style={{ width: 90 }}>
-                      {row.edits.date ?? row.date}
-                    </Text>
-                    <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
-                    <Text style={{ width: 120 }}>{payee.label}</Text>
-                    <Text
+                    {heading ? (
+                      <View
+                        data-testid="import-review-group"
+                        data-account={heading.accountId}
+                        style={{
+                          padding: '6px 10px 2px 10px',
+                          borderBottom: `1px solid ${theme.tableBorder}`,
+                          marginBottom: 2,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {t('{{account}} · rows {{from}}–{{to}}', {
+                            account: accountName(heading.accountId),
+                            // The rows are numbered from one, the way a
+                            // person counts them.
+                            from: index + 1,
+                            to: heading.to + 1,
+                          })}
+                        </Text>
+                      </View>
+                    ) : null}
+                    <View
+                      data-testid="import-review-row"
+                      data-focused={isFocused ? 'true' : 'false'}
+                      data-decision={row.decision}
+                      data-gate={evaluation?.gate ?? 'allow'}
+                      data-held={evaluation?.held ? 'true' : 'false'}
                       style={{
-                        width: 130,
-                        fontStyle: category.muted ? 'italic' : undefined,
-                        color: category.muted
-                          ? theme.pageTextSubdued
-                          : undefined,
+                        flexDirection: 'row',
+                        gap: 12,
+                        padding: '6px 10px',
+                        backgroundColor: isFocused
+                          ? theme.tableRowHeaderBackground
+                          : 'transparent',
                       }}
                     >
-                      {category.label}
-                    </Text>
-                    <FinancialText style={{ width: 100, textAlign: 'right' }}>
-                      {amount}
-                    </FinancialText>
-                    <Text
-                      style={{
-                        width: 90,
-                        textAlign: 'right',
-                        color:
-                          evaluation?.gate === 'block'
-                            ? theme.errorText
-                            : theme.warningText,
-                      }}
-                    >
-                      {badge}
-                    </Text>
-                  </View>
+                      <Text style={{ width: 90 }}>
+                        {row.edits.date ?? row.date}
+                      </Text>
+                      <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
+                      <Text style={{ width: 120 }}>{payee.label}</Text>
+                      <Text
+                        style={{
+                          width: 130,
+                          fontStyle: category.muted ? 'italic' : undefined,
+                          color: category.muted
+                            ? theme.pageTextSubdued
+                            : undefined,
+                        }}
+                      >
+                        {category.label}
+                      </Text>
+                      <FinancialText style={{ width: 100, textAlign: 'right' }}>
+                        {amount}
+                      </FinancialText>
+                      <Text
+                        style={{
+                          width: 90,
+                          textAlign: 'right',
+                          color:
+                            evaluation?.gate === 'block'
+                              ? theme.errorText
+                              : theme.warningText,
+                        }}
+                      >
+                        {badge}
+                      </Text>
+                    </View>
+                  </Fragment>
                 );
               })}
             </View>
@@ -905,12 +969,35 @@ export function KeyboardImportModal({
               />
             ) : null}
 
+            {pane?.kind === 'route' ? (
+              <RoutePane
+                scope={pane.scope}
+                accounts={review.accounts}
+                currentAccountId={
+                  pane.scope === 'row'
+                    ? (focused?.accountId ?? accountId)
+                    : (review.groups[0]?.accountId ?? accountId)
+                }
+                onCommit={nextAccountId => {
+                  const index = review.focusedIndex;
+                  void (pane.scope === 'all'
+                    ? review.routeAll(nextAccountId)
+                    : review.routeRow(index, nextAccountId));
+                  openPane(null);
+                }}
+              />
+            ) : null}
+
             {pane?.kind === 'transfer' && focused ? (
               <TransferPane
                 row={focused}
                 accounts={review.accounts}
                 payees={review.payees}
-                sourceAccountId={accountId}
+                // The transfer target cannot be the account the row is
+                // IN: a transaction cannot transfer to the account it is
+                // in. The row's account is the one that counts, and it
+                // changes when the user routes the row.
+                sourceAccountId={focused.accountId}
                 onCommit={(edits: PreviewEdits) => {
                   review.edit(review.focusedIndex, edits);
                   openPane(null);

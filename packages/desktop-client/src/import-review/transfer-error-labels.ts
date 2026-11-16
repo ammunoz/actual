@@ -26,6 +26,10 @@ export function transferErrorMessage(
       return t(
         'This row transfers to an account that has no transfer payee, so it cannot be imported as a transfer',
       );
+    case 'TRANSFER-002':
+      return t(
+        'This row transfers to the account it is in, so it cannot be imported as a transfer',
+      );
     default: {
       // The compiler says so when a code is added without a sentence.
       const exhaustive: never = code;

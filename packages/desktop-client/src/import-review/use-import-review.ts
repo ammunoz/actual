@@ -421,6 +421,20 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // Which rows go to which account. The default is one group covering
   // every row, with the account the review was opened for.
   const [groups, setGroups] = useState<RowGroup[]>([]);
+
+  // The routing is in a ref as well as in state.
+  //
+  // A routing change is computed from the routing that is in effect NOW,
+  // and two changes can be in flight at once: the second overtakes the
+  // first, and it has to be computed from the first's result, not from
+  // the routing that was on screen when it was asked for.
+  const groupsRef = useRef<RowGroup[]>([]);
+
+  /** Put a routing into effect. */
+  const setRouting = useCallback((next: RowGroup[]) => {
+    groupsRef.current = next;
+    setGroups(next);
+  }, []);
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [trustLevel, setTrustLevel] = useState<TrustLevel>('cautious');
   const [payees, setPayees] = useState<readonly ReviewPayee[]>([]);
@@ -747,7 +761,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // default: one group, with the account the review was opened
         // for.
         const savedGroups = defaultGroups(state.rows.length, saved.accountId);
-        setGroups(savedGroups);
+        setRouting(savedGroups);
 
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
@@ -896,7 +910,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         });
 
         setState(next);
-        setGroups(nextGroups);
+        setRouting(nextGroups);
         setFocusedIndex(0);
 
         if (cancelled) return;
@@ -926,7 +940,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     };
     // The vendor map is deliberately NOT a dependency: it is read through a
     // ref, because a write to it must never re-parse the file.
-  }, [filename, accountId, t, session, lookupMatches, resolveOptsFor]);
+  }, [
+    filename,
+    accountId,
+    t,
+    session,
+    lookupMatches,
+    resolveOptsFor,
+    setRouting,
+  ]);
 
   /**
    * Rewrite the legs of the splits that are already in the budget.
@@ -1188,7 +1210,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       }
 
       setMatchedTransactionIds(matched);
-      setGroups(nextGroups);
+      setRouting(nextGroups);
       setState(next);
     },
     [
@@ -1198,6 +1220,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       lookupMatches,
       payees,
       resolveOptsFor,
+      setRouting,
       state,
       trustLevel,
     ],
@@ -1223,7 +1246,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       if (!state) return false;
       // A routing that did not change is not a change: re-resolving
       // every row for nothing would cost a lot and gain nothing.
-      if (isSameRouting(nextGroups, groups)) return true;
+      if (isSameRouting(nextGroups, groupsRef.current)) return true;
 
       // The token tells two routing changes apart. Each one asks the
       // budget again, and a slower answer must not be applied over a
@@ -1233,7 +1256,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // The snapshot goes on BEFORE the budget is asked: the user has
       // asked for the change, and it has to be undoable while it is
       // being made. If the change does not happen, it comes back off.
-      const snapshot = pushUndo(state, groups);
+      const snapshot = pushUndo(state, groupsRef.current);
 
       try {
         await applyRoutingRows(nextGroups, token, snapshot);
@@ -1243,25 +1266,34 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         throw err;
       }
     },
-    [applyRoutingRows, dropUndo, groups, pushUndo, state],
+    [applyRoutingRows, dropUndo, pushUndo, state],
   );
 
   /** Put a row into another account. */
   const routeRow = useCallback(
     (index: number, nextAccountId: string): Promise<boolean> =>
       applyRouting(
-        setRowAccount(groups, index, nextAccountId, state?.rows.length ?? 0),
+        setRowAccount(
+          groupsRef.current,
+          index,
+          nextAccountId,
+          state?.rows.length ?? 0,
+        ),
       ),
-    [applyRouting, groups, state],
+    [applyRouting, state],
   );
 
   /** Put every row into one account. */
   const routeAll = useCallback(
     (nextAccountId: string): Promise<boolean> =>
       applyRouting(
-        setAllRowsAccount(groups, nextAccountId, state?.rows.length ?? 0),
+        setAllRowsAccount(
+          groupsRef.current,
+          nextAccountId,
+          state?.rows.length ?? 0,
+        ),
       ),
-    [applyRouting, groups, state],
+    [applyRouting, state],
   );
 
   const isAlreadyImported = useCallback(
@@ -1297,9 +1329,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // points at a transaction in the account it was routed away from
     // would have that transaction edited.
     setMatchedTransactionIds(last.matchedTransactionIds);
-    setGroups([...last.groups]);
+    setRouting([...last.groups]);
     setState(last.state);
-  }, []);
+  }, [setRouting]);
 
   const cycleTrustLevel = useCallback(() => {
     setTrustLevel(current => {

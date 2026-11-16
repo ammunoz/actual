@@ -24,7 +24,7 @@
  * Stable, greppable, value-free: they never carry an account id or a
  * payee name.
  */
-export type TransferErrorCode = 'TRANSFER-001';
+export type TransferErrorCode = 'TRANSFER-001' | 'TRANSFER-002';
 
 export class TransferValidationError extends Error {
   readonly code: TransferErrorCode;

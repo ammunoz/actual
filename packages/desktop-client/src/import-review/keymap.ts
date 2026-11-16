@@ -27,6 +27,8 @@ export type ReviewAction =
   | 'edit-date'
   | 'edit-transfer'
   | 'edit-split'
+  | 'route-row'
+  | 'route-all'
   | 'cycle-flag'
   | 'save-session'
   | 'accept-all'
@@ -83,6 +85,11 @@ export const REVIEW_SCOPE = 'keyboard-import-transactions';
  *
  * `w` puts the review aside: the decisions and the edits are saved on this
  * device, and the command bar brings the review back.
+ *
+ * `o` routes the rows to another account: the rows from the cursor to the
+ * next heading go into the account the user picks. `shift+o` routes every
+ * row into one account. The boundaries are the user's to place, because
+ * Actual's OFX parser discards the bank's account id.
  *
  * `ctrl+shift+a` is the override: it accepts a row the trust level is
  * holding back. It has a binding of its own rather than overloading
@@ -161,6 +168,16 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 's',
     action: 'edit-split',
+    showInHelp: true,
+  },
+  {
+    keys: 'o',
+    action: 'route-row',
+    showInHelp: true,
+  },
+  {
+    keys: 'shift+o',
+    action: 'route-all',
     showInHelp: true,
   },
   {
