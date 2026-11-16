@@ -34,7 +34,9 @@ import { useDispatch } from '#redux';
 import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
+import { hasOverridableHeldRow } from './held-rows';
 import { HelpOverlay } from './HelpOverlay';
+import { HintStrip } from './HintStrip';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
@@ -295,6 +297,11 @@ export function KeyboardImportModal({
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
     : undefined;
+
+  const anyHeldRowOverridable = useMemo(
+    () => hasOverridableHeldRow(review.evaluations),
+    [review.evaluations],
+  );
 
   // The notes the row would be imported with. An empty string means the
   // user cleared them, so there is nothing to show.
@@ -1088,6 +1095,18 @@ export function KeyboardImportModal({
                 onKeep={() => openPane(null)}
                 onDiscard={confirmClose}
               />
+            ) : null}
+
+            {/* The hint strip says the keys that drive the list — the
+                one thing that says nothing anywhere else. The help
+                overlay lists every key the review has, but it is only
+                reachable with `?` and it does not know what the user is
+                doing.
+
+                A pane that is open already says its own keys where
+                they matter, so the strip keeps quiet while one is. */}
+            {pane === null ? (
+              <HintStrip hasOverridableHeldRow={anyHeldRowOverridable} />
             ) : null}
           </View>
         </>

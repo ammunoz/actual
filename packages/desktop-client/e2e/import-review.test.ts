@@ -65,6 +65,23 @@ test.describe('Keyboard import review', () => {
     await fileChooser.setFiles(join(__dirname, 'data/demo-import-blocked.ofx'));
   }
 
+  /**
+   * Import the fixture with two rows that repeat one FITID.
+   *
+   * The second transaction repeats the first one's FITID, so the trust
+   * level SKIPS it at `cautious` — it is held back, and the override is
+   * what releases it. There is nothing BLOCKED here, so the summary's
+   * blocked count is zero.
+   */
+  async function importDuplicateOfx() {
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(
+      join(__dirname, 'data/demo-import-duplicate.ofx'),
+    );
+  }
+
   test('opens the keyboard review for an OFX file when it is enabled', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review',
@@ -419,6 +436,102 @@ test.describe('Keyboard import review', () => {
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'pending');
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test('the hint strip says the keys, and says the override when a row is held', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Hint Strip',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const hints = dialog.getByTestId('import-review-hints');
+    await expect(hints).toBeVisible();
+
+    // A row is held back — the second one has no payee name at all — so
+    // the strip says the one key that releases it.
+    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+    await expect(hints).toContainText('Ctrl+Shift+A');
+    await expect(hints).toContainText('accept anyway');
+
+    // The strip is the only place these keys are: the help overlay is
+    // behind `?`, and nothing else on screen says them.
+    await page.keyboard.press('Shift+Slash');
+    const help = dialog.getByTestId('import-review-help');
+    await expect(help).toBeVisible();
+
+    // While a pane is open the strip keeps quiet: the pane says its own
+    // keys, where they matter.
+    await expect(hints).not.toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(help).not.toBeVisible();
+    await expect(hints).toBeVisible();
+  });
+
+  test('the hint strip says the override for a SKIPPED row too', async () => {
+    // A duplicate FITID is SKIPPED at the cautious trust level, not
+    // blocked. It is still held back, and the override is still what
+    // releases it — so the strip has to say the override. The summary's
+    // "blocked" count does not include skipped rows, so asking the
+    // summary would miss this case entirely.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Hint Strip Skipped',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importDuplicateOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(2);
+
+    // The second row repeats the first one's FITID: skipped, and held.
+    await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
+    await expect(dialog.getByText('Skipped: 1')).toBeVisible();
+
+    // And nothing is BLOCKED — which is exactly the case the summary's
+    // blocked count would have missed.
+    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+
+    const hints = dialog.getByTestId('import-review-hints');
+    await expect(hints).toContainText('Ctrl+Shift+A');
+  });
+
+  test('the hint strip omits the override when nothing is held back', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Hint Strip Clean',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const hints = dialog.getByTestId('import-review-hints');
+    await expect(hints).toBeVisible();
+
+    // Nothing is held back, so the override is not mentioned: the strip
+    // says the keys, and only the keys that apply.
+    await expect(hints).not.toContainText('accept anyway');
+    await expect(hints).toContainText('j/k move');
+    await expect(hints).toContainText('a accept');
   });
 
   test('a row the trust level holds back is not imported', async () => {
