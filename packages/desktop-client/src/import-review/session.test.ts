@@ -41,6 +41,7 @@ function session(
       rows: PreviewRow[];
       trustLevel: 'paranoid' | 'cautious' | 'trusted';
     };
+    groups: readonly { start: number; accountId: string }[];
     editedRowKeys: ReadonlySet<string>;
     vendorChoices: ReadonlyMap<string, { raw: string; payeeId: string }>;
     savedAt: string;
@@ -48,6 +49,7 @@ function session(
 ): Session {
   return buildSession({
     accountId: 'a-1',
+    groups: [{ start: 0, accountId: 'a-1' }],
     filename: '/tmp/demo.ofx',
     trustLevel: 'cautious',
     focusedIndex: 0,
@@ -73,7 +75,36 @@ describe('buildSession', () => {
     expect(saved.vendorChoices).toEqual([
       ['row-0', { raw: 'POS PURCHASE', payeeId: 'p-1' }],
     ]);
-    expect(saved.v).toBe(1);
+    // The format version: a session written by an older version of the
+    // review is discarded rather than half-understood.
+    expect(saved.v).toBe(2);
+  });
+
+  it('holds the routing', () => {
+    // A session that came back without the routing would put every row
+    // into the account the review was opened for, which is not what the
+    // user had done.
+    const saved = session({
+      groups: [
+        { start: 0, accountId: 'a-1' },
+        { start: 1, accountId: 'a-2' },
+      ],
+    });
+
+    expect(saved.groups).toEqual([
+      { start: 0, accountId: 'a-1' },
+      { start: 1, accountId: 'a-2' },
+    ]);
+  });
+
+  it('refuses a routing that does not cover the rows', () => {
+    const broken = { ...session(), groups: [{ start: 3, accountId: 'a-1' }] };
+    expect(isUsableSession(broken)).toBe(false);
+  });
+
+  it('refuses a routing with no groups', () => {
+    const broken = { ...session(), groups: [] };
+    expect(isUsableSession(broken)).toBe(false);
   });
 
   it('holds the trust level and the row the user was on', () => {

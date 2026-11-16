@@ -15,8 +15,8 @@
  * a closed account is not somewhere transactions are imported into.
  */
 
-import { useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useMemo, useState } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
@@ -37,6 +37,14 @@ export type RoutePaneProps = {
   accounts: readonly ReviewAccount[];
   /** The account the rows are in now. */
   currentAccountId: string;
+  /**
+   * The rows the choice covers, numbered from one.
+   *
+   * The pane covers the table, so the user cannot see which rows are
+   * about to move while the pane is open.
+   */
+  from?: number;
+  to?: number;
   /** Commit the choice. */
   onCommit: (accountId: string) => void;
 };
@@ -45,9 +53,16 @@ export function RoutePane({
   scope,
   accounts,
   currentAccountId,
+  from,
+  to,
   onCommit,
 }: RoutePaneProps) {
   const { t } = useTranslation();
+
+  // A pick that is not an account: the field was cleared. There is
+  // nothing to route into, and saying so is better than a keypress that
+  // does nothing.
+  const [refused, setRefused] = useState(false);
 
   const suggestions = useMemo(
     () =>
@@ -71,8 +86,8 @@ export function RoutePane({
       }}
     >
       <Text>
-        {scope === 'row'
-          ? t('The rows from here to the next heading go into:')
+        {scope === 'row' && from !== undefined && to !== undefined
+          ? t('Rows {{from}}–{{to}} go into:', { from, to })
           : t('Every row goes into:')}
       </Text>
 
@@ -87,10 +102,20 @@ export function RoutePane({
         testId="import-review-route-account"
         errorText={t('No account matches that name')}
         onPick={suggestion => {
-          if (!suggestion) return;
+          if (!suggestion) {
+            setRefused(true);
+            return;
+          }
+          setRefused(false);
           onCommit(suggestion.id);
         }}
       />
+
+      {refused ? (
+        <Text style={{ color: theme.warningText }}>
+          <Trans>Pick an account to move the rows into</Trans>
+        </Text>
+      ) : null}
     </View>
   );
 }

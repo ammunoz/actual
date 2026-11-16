@@ -17,11 +17,13 @@
  * was looking at, and they are plain data.
  */
 
+import { isValidRouting } from '@actual-app/core/server/transactions/import/review/index';
 import type {
   ImportPreviewState,
   PreviewDecision,
   PreviewEdits,
   PreviewRow,
+  RowGroup,
   TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
 
@@ -31,7 +33,7 @@ import type {
  * A session written by an older version of the review is discarded rather
  * than half-understood.
  */
-export const SESSION_VERSION = 1;
+export const SESSION_VERSION = 2;
 
 /**
  * How big a session may be before the review refuses to save it.
@@ -61,8 +63,22 @@ export type ImportReviewSession = {
   v: number;
   /** When the session was saved. */
   savedAt: string;
-  /** The account the rows are imported into. */
+  /**
+   * The account the review was opened for.
+   *
+   * It is the DEFAULT routing — the account the rows go into when the
+   * user has not routed them anywhere else. The routing itself is in
+   * `groups`.
+   */
   accountId: string;
+  /**
+   * The routing: which rows go to which account.
+   *
+   * A session that came back without it would put every row into the
+   * account the review was opened for — which is what the review did
+   * before routing existed, and not what the user had done.
+   */
+  groups: RowGroup[];
   /** The file the rows came from, so the user can recognise the review. */
   filename: string;
   /** The trust level the gate was using. */
@@ -111,6 +127,7 @@ export function fingerprintRows(
  */
 export function buildSession(opts: {
   accountId: string;
+  groups: readonly RowGroup[];
   filename: string;
   trustLevel: TrustLevel;
   focusedIndex: number;
@@ -123,6 +140,7 @@ export function buildSession(opts: {
     v: SESSION_VERSION,
     savedAt: opts.savedAt,
     accountId: opts.accountId,
+    groups: opts.groups.map(group => ({ ...group })),
     filename: opts.filename,
     trustLevel: opts.trustLevel,
     focusedIndex: opts.focusedIndex,
@@ -162,6 +180,10 @@ export function isUsableSession(value: unknown): value is ImportReviewSession {
   if (!Array.isArray(session.editedRowKeys)) return false;
   if (!Array.isArray(session.vendorChoices)) return false;
   if (typeof session.focusedIndex !== 'number') return false;
+  // The routing has to cover the rows exactly: a session whose routing
+  // does not would put rows into an account the user never chose, or
+  // leave rows with no account at all.
+  if (!isValidRouting(session.groups, session.rows.length)) return false;
   if (
     session.trustLevel !== 'paranoid' &&
     session.trustLevel !== 'cautious' &&
@@ -245,6 +267,15 @@ export function staleRowNames(
 
   if (!accountIds.has(session.accountId)) {
     stale.add(session.accountId);
+  }
+
+  // Every account the rows go into has to still be there. A group's
+  // account may have been deleted while the review was put aside, and a
+  // row that lands in an account that is gone lands nowhere.
+  for (const group of session.groups) {
+    if (!accountIds.has(group.accountId)) {
+      stale.add(group.accountId);
+    }
   }
 
   for (const row of session.rows) {

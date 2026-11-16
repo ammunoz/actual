@@ -757,10 +757,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         vendorChoices.current = new Map(saved.vendorChoices);
 
         // The routing of a picked-up review is the one it was saved
-        // with. The session does not carry a routing yet, so it is the
-        // default: one group, with the account the review was opened
-        // for.
-        const savedGroups = defaultGroups(state.rows.length, saved.accountId);
+        // with. The session's routing was checked when it was read, so
+        // it covers the rows exactly.
+        const savedGroups = saved.groups;
         setRouting(savedGroups);
 
         // Which rows are ALREADY in the budget? Asked again, because the
@@ -1680,6 +1679,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
     const session = buildSession({
       accountId,
+      groups: groupsRef.current,
       filename,
       trustLevel,
       focusedIndex,

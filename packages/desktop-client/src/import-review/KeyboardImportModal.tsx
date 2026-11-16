@@ -289,8 +289,23 @@ export function KeyboardImportModal({
   }, [review.groups, rows.length]);
 
   const accountName = (id: string) =>
-    review.accounts.find(account => account.id === id)?.name ?? id;
+    accountNames.get(id) ?? t('Unknown account');
   const focused = rows[review.focusedIndex];
+
+  // The rows the routing choice covers. The pane covers the table, so
+  // the user cannot see them while the pane is open.
+  //
+  // No manual memo: the React Compiler memoizes this for us.
+  const focusedRange = (() => {
+    if (!focused) return undefined;
+    for (const range of groupRanges(review.groups, rows.length)) {
+      if (review.focusedIndex < range.start) continue;
+      if (review.focusedIndex > range.end) continue;
+      // The rows are numbered from one, the way a person counts them.
+      return { from: range.start + 1, to: range.end + 1 };
+    }
+    return undefined;
+  })();
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
     : undefined;
@@ -646,6 +661,7 @@ export function KeyboardImportModal({
                   isLoading ||
                   rows.length === 0 ||
                   pane?.kind === 'confirm' ||
+                  pane?.kind === 'route' ||
                   pane?.kind === 'split' ||
                   pane?.kind === 'transfer'
                 }
@@ -750,7 +766,7 @@ export function KeyboardImportModal({
                             fontWeight: 500,
                           }}
                         >
-                          {t('{{account}} · rows {{from}}–{{to}}', {
+                          {t('Rows {{from}}–{{to}} of {{account}}', {
                             account: accountName(heading.accountId),
                             // The rows are numbered from one, the way a
                             // person counts them.
@@ -978,12 +994,23 @@ export function KeyboardImportModal({
                     ? (focused?.accountId ?? accountId)
                     : (review.groups[0]?.accountId ?? accountId)
                 }
+                from={focusedRange?.from}
+                to={focusedRange?.to}
                 onCommit={nextAccountId => {
                   const index = review.focusedIndex;
-                  void (pane.scope === 'all'
-                    ? review.routeAll(nextAccountId)
-                    : review.routeRow(index, nextAccountId));
+                  const scope = pane.scope;
                   openPane(null);
+                  void (
+                    scope === 'all'
+                      ? review.routeAll(nextAccountId)
+                      : review.routeRow(index, nextAccountId)
+                  ).catch(() => {
+                    // The routing could not be made: the budget could
+                    // not be asked, or it refused. The review says so
+                    // rather than the keypress looking like it did
+                    // nothing.
+                    setNotice(t('The rows could not be moved to that account'));
+                  });
                 }}
               />
             ) : null}

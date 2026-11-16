@@ -660,9 +660,10 @@ describe('useImportReview', () => {
 
   it('routes a review that was picked up again', async () => {
     const session = {
-      v: 1,
+      v: 2,
       savedAt: '2026-09-07T12:00:00.000Z',
       accountId: 'a-1',
+      groups: [{ start: 0, accountId: 'a-1' }],
       filename: '/tmp/demo.ofx',
       trustLevel: 'cautious' as const,
       focusedIndex: 0,
