@@ -5,6 +5,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { Button } from '@actual-app/components/button';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
+import { TextOneLine } from '@actual-app/components/text-one-line';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 import {
@@ -19,6 +20,7 @@ import type {
   FlagKind,
   PreviewEdits,
   PreviewRow,
+  ReviewCategory,
   RowEvaluation,
   TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
@@ -167,6 +169,23 @@ export function KeyboardImportModal({
     [review.categories],
   );
 
+  // The category groups, for the same reason. Two categories with the
+  // same name in different groups are indistinguishable in the table,
+  // so the cell carries the group with the name.
+  const categoryGroupNames = useMemo(
+    () =>
+      new Map(
+        review.categories
+          .filter(
+            (category): category is ReviewCategory & { groupName: string } =>
+              typeof category.groupName === 'string' &&
+              category.groupName !== '',
+          )
+          .map(category => [category.id, category.groupName]),
+      ),
+    [review.categories],
+  );
+
   // The account names, for the same reason: a transfer row shows the
   // account it transfers to.
   const accountNames = useMemo(
@@ -210,7 +229,9 @@ export function KeyboardImportModal({
    * a split is a shape, not a place for money to go, and a row that
    * needs a category is a row that is not finished.
    */
-  const categoryCell = (row: PreviewRow): { label: string; muted: boolean } => {
+  const categoryCell = (
+    row: PreviewRow,
+  ): { label: string; group?: string; muted: boolean } => {
     if (isSplitRow(row.edits)) {
       return {
         // The count is NOT named `count`: i18next reads that as a
@@ -232,7 +253,11 @@ export function KeyboardImportModal({
     // A category that no longer exists is dropped at the apply step, so
     // the row is imported without one: "Categorize" says so.
     if (!name) return { label: t('Categorize'), muted: true };
-    return { label: name, muted: false };
+    return {
+      label: name,
+      group: categoryGroupNames.get(categoryId),
+      muted: false,
+    };
   };
 
   // Why a row is flagged, in the user's terms. The code beside it is the
@@ -748,42 +773,133 @@ export function KeyboardImportModal({
                         flexDirection: 'row',
                         gap: 12,
                         padding: '6px 10px',
+                        // The fixed columns do not shrink, so on a narrow
+                        // viewport the row is wider than the modal. The
+                        // scroll is scoped to the row, so the table does
+                        // not scroll sideways with the rest of the modal
+                        // body — the columns stay aligned with each
+                        // other.
+                        //
+                        // `overflowY` is explicit because CSS computes a
+                        // `visible` axis to `auto` when the other axis
+                        // is not visible. The row's height is its
+                        // content's height, so it never scrolls
+                        // vertically.
+                        overflowX: 'auto',
+                        overflowY: 'hidden',
                         backgroundColor: isFocused
                           ? theme.tableRowHeaderBackground
                           : 'transparent',
                       }}
                     >
-                      <Text style={{ width: 90 }}>
+                      {/* The widths below are a budget, not a guess.
+
+                          The modal is 900px. Its container takes 10px of
+                          padding each side, the content View takes 16px,
+                          and the row takes 10px: 828px of row. Six gaps
+                          at 12px leave 756px for the columns. The fixed
+                          ones take 610, so the raw payee — the only
+                          flexible one — gets 146px.
+
+                          It is the flexed one on purpose: the raw
+                          vendor string is long and low-value once it is
+                          resolved, while the category is the budget
+                          decision the user is looking for.
+
+                          That is before any scrollbar, and the modal
+                          clamps at `maxWidth: '100%'`. On a narrow
+                          viewport the raw payee is the one that gives up
+                          its width: the fixed columns carry
+                          `flexShrink: 0`, so they keep their widths and
+                          the payee takes the difference. The row scrolls
+                          sideways when even that is not enough. */}
+                      <Text
+                        data-testid="import-review-row-date"
+                        style={{ width: 90, flexShrink: 0 }}
+                      >
                         {row.edits.date ?? row.date}
                       </Text>
-                      <Text style={{ flex: 1 }}>{row.payeeRaw}</Text>
-                      <Text style={{ width: 120 }}>{payee.label}</Text>
-                      <Text
+                      {/* The raw vendor string is long and low-value once
+                          it is resolved, so it truncates. The category is
+                          the budget decision the user is looking for, so
+                          it gets the room. */}
+                      <TextOneLine
+                        style={{ flex: 1, minWidth: 0 }}
+                        title={row.payeeRaw}
+                      >
+                        {row.payeeRaw}
+                      </TextOneLine>
+                      <TextOneLine
+                        style={{ width: 100, flexShrink: 0 }}
+                        title={payee.label}
+                      >
+                        {payee.label}
+                      </TextOneLine>
+                      {/* One line, always: a category name that wraps
+                          makes the row grow, and the rows are the thing
+                          the user is scanning. */}
+                      <TextOneLine
+                        data-testid="import-review-row-category"
                         style={{
-                          width: 130,
+                          width: 150,
+                          flexShrink: 0,
                           fontStyle: category.muted ? 'italic' : undefined,
                           color: category.muted
                             ? theme.pageTextSubdued
                             : undefined,
                         }}
+                        title={category.label}
                       >
                         {category.label}
-                      </Text>
-                      <FinancialText style={{ width: 100, textAlign: 'right' }}>
+                      </TextOneLine>
+                      {/* The group, so two categories with the same name
+                          are distinguishable. It is subdued: the name
+                          is what the user is looking for. */}
+                      <TextOneLine
+                        size="small"
+                        data-testid="import-review-row-category-group"
+                        style={{
+                          width: 80,
+                          flexShrink: 0,
+                          color: theme.pageTextSubdued,
+                        }}
+                        title={category.group}
+                      >
+                        {category.group}
+                      </TextOneLine>
+                      <FinancialText
+                        style={{
+                          width: 100,
+                          flexShrink: 0,
+                          textAlign: 'right',
+                          // A wide amount would otherwise paint over the
+                          // gap and under the badge. The box is
+                          // right-aligned, so the overflow is at the
+                          // LEADING edge — the significant digits are
+                          // what get cut — hence the title.
+                          overflow: 'hidden',
+                        }}
+                        title={String(amount)}
+                      >
                         {amount}
                       </FinancialText>
-                      <Text
+                      {/* The badge is a translated word, and a long
+                          translation would wrap and regrow the row — the
+                          same problem the category had. */}
+                      <TextOneLine
                         style={{
                           width: 90,
+                          flexShrink: 0,
                           textAlign: 'right',
                           color:
                             evaluation?.gate === 'block'
                               ? theme.errorText
                               : theme.warningText,
                         }}
+                        title={badge ?? undefined}
                       >
                         {badge}
-                      </Text>
+                      </TextOneLine>
                     </View>
                   </Fragment>
                 );

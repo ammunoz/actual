@@ -369,7 +369,10 @@ export function EditorPicker({
           style={{
             border: `1px solid ${theme.tableBorder}`,
             borderRadius: 4,
-            maxHeight: 160,
+            // Tall enough to show twice the categories. At 160 the list
+            // held about seven rows, and the one the user wanted was
+            // usually below the fold.
+            maxHeight: 280,
             overflowY: 'auto',
           }}
         >
@@ -392,7 +395,10 @@ export function EditorPicker({
                     role="group"
                     aria-label={groupName}
                     style={{
-                      padding: '4px 8px 0',
+                      // The header sits above its categories, so it needs
+                      // room below: without it the header is tight
+                      // against the first category beneath it.
+                      padding: '4px 8px 2px',
                     }}
                   >
                     <Text style={{ color: theme.pageTextSubdued }}>

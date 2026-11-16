@@ -639,6 +639,95 @@ test.describe('Keyboard import review', () => {
     await expect(rows.nth(0)).toHaveText(/-30/);
   });
 
+  test('the row carries the category group, and the cells do not wrap', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Category Group',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // A category name far too long for the column, so the cell has to
+    // truncate rather than wrap. Without a name that long, the test
+    // would pass even against the old, wrapping cell.
+    const longName =
+      'A Deliberately Very Long Category Name That Cannot Possibly Fit';
+    await page.evaluate(async name => {
+      const groupId = await window.$send('category-group-create', {
+        name: 'Long Names',
+      });
+      await window.$send('category-create', { name, groupId });
+    }, longName);
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The row has no category yet, so the group cell is empty.
+    const group = rows.nth(0).getByTestId('import-review-row-category-group');
+    await expect(group).toBeEmpty();
+
+    // Give the row the long category.
+    await page.keyboard.press('c');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'category');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.click();
+    await input.pressSequentially('Deliberately Very Long');
+
+    const option = editor.getByTestId('import-review-editor-option').first();
+    await expect(option).toBeVisible();
+
+    // The group the CHOSEN option belongs to. The header is a sibling of
+    // the option inside their shared wrapper, so it is read from the
+    // option's parent rather than from the list's first header.
+    const pickerGroup = await option
+      .locator('..')
+      .getByTestId('import-review-editor-group')
+      .innerText();
+    expect(pickerGroup).toBe('Long Names');
+
+    await option.click();
+    await expect(editor).not.toBeVisible();
+
+    // The row now carries the category AND the group it belongs to, so
+    // two categories with the same name are distinguishable in the table.
+    await expect(rows.nth(0)).toHaveText(/Deliberately Very Long/);
+    await expect(
+      rows.nth(0).getByTestId('import-review-row-category-group'),
+    ).toHaveText('Long Names');
+
+    // And the cell does not WRAP: it truncates on one line, so the row
+    // stays the height of a single line. The computed style is the
+    // assertion — a height comparison cannot tell the difference,
+    // because a wrapped cell grows the row too.
+    const cell = rows.nth(0).getByTestId('import-review-row-category');
+    await expect(cell).toContainText('Deliberately Very Long');
+    const whiteSpace = await cell.evaluate(
+      element => getComputedStyle(element).whiteSpace,
+    );
+    expect(whiteSpace).toBe('nowrap');
+
+    // The text is wider than the cell, so it really is truncating.
+    const overflows = await cell.evaluate(
+      element => element.scrollWidth > element.clientWidth,
+    );
+    expect(overflows).toBe(true);
+
+    // And it truncates with an ellipsis, not a hard cut.
+    const textOverflow = await cell.evaluate(
+      element => getComputedStyle(element).textOverflow,
+    );
+    expect(textOverflow).toBe('ellipsis');
+  });
+
   test('d edits the date', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Edit Date',
