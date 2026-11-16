@@ -55,11 +55,17 @@ import type {
 } from '#server/transactions/import/review/types';
 
 import { flagFor } from './flags';
-import { fuzzyMatchPayees } from './fuzzy';
+import {
+  DEFAULT_MAX_RESULTS,
+  DEFAULT_MIN_SCORE,
+  fuzzyMatchPayees,
+} from './fuzzy';
+import { fingerprintPayees, fuzzyCacheKey } from './payee-cache';
+import type { FuzzyCache } from './payee-cache';
 import { canonicalize } from './strip';
 
 export type FuzzyResolveOpts = {
-  /** Minimum score to keep a fuzzy match. Default 0.6. */
+  /** Minimum score to keep a fuzzy match. Default 0.7. */
   minScore?: number;
   /** Cap fuzzy matches per row. Default 5. */
   maxResults?: number;
@@ -79,6 +85,15 @@ export type ResolveOpts = {
   vendorMap?: VendorMap;
   /** Fuzzy options. Optional; when absent, Layer 3 is disabled. */
   fuzzy?: FuzzyResolveOpts;
+  /**
+   * A cache of fuzzy payee matches. Optional; when absent, Layer 3
+   * computes every match from scratch.
+   *
+   * The cache holds the MATCHES, not the resolved rows: the flags on a
+   * resolved row depend on the user's edits, and a cached flag would be
+   * stale.
+   */
+  fuzzyCache?: FuzzyCache;
 };
 
 type IndexEntry = {
@@ -88,14 +103,6 @@ type IndexEntry = {
 };
 
 const MIN_PREFIX_LEN_BOUNDARY_FREE = 4;
-// The minimum score for a fuzzy match to be kept.
-//
-// This matches the fuzzy module's own default. A lower threshold admits
-// clearly wrong matches: "Demo Grocery Store" against "Online store" scores
-// 0.667, and "Demo Payroll Deposit" against "Home Depot" scores 0.600, while
-// a real typo like "Demo Cofee Shop" against "Demo Coffee Shop" scores 0.968.
-const DEFAULT_FUZZY_MIN_SCORE = 0.7;
-const DEFAULT_FUZZY_MAX_RESULTS = 5;
 
 /**
  * Pure: resolve the payee for every row. Returns a new array; the input is
@@ -110,9 +117,16 @@ export function resolvePayees(
   // Includes closed accounts (still valid transfer targets).
   const accountsIndex = buildAccountsIndex(opts.accounts);
 
+  // The payee list's fingerprint, computed ONCE per resolve: it is the
+  // cache's outer level, and computing it per row would be an
+  // O(rows x payees) pass over the same list.
+  const fingerprint = opts.fuzzyCache
+    ? fingerprintPayees(opts.existingPayees)
+    : '';
+
   const out: ResolvedRow[] = [];
   for (const row of rows) {
-    out.push(resolveOne(row, existingIndex, accountsIndex, opts));
+    out.push(resolveOne(row, existingIndex, accountsIndex, opts, fingerprint));
   }
   return out;
 }
@@ -122,6 +136,7 @@ function resolveOne(
   existingIndex: readonly IndexEntry[],
   accountsIndex: readonly IndexEntry[],
   opts: ResolveOpts,
+  fingerprint: string,
 ): ResolvedRow {
   const raw = row.payeeRaw;
 
@@ -178,14 +193,28 @@ function resolveOne(
 
   // Layer 3: fuzzy LCS-ratio match against canonicalized raw.
   if (opts.fuzzy && existingIndex.length > 0) {
-    const candidates = existingIndex.map(p => ({
-      id: p.id,
-      name: p.original,
-    }));
-    const matches = fuzzyMatchPayees(raw, candidates, {
-      minScore: opts.fuzzy.minScore ?? DEFAULT_FUZZY_MIN_SCORE,
-      maxResults: opts.fuzzy.maxResults ?? DEFAULT_FUZZY_MAX_RESULTS,
-    });
+    // The cache holds the MATCHES, so a hit skips the scoring — the
+    // expensive part — and the flags are still raised from the matches
+    // below, fresh, every time.
+    const key = opts.fuzzyCache ? fuzzyCacheKey(opts.fuzzy, raw) : null;
+    const cached =
+      key !== null ? opts.fuzzyCache?.get(fingerprint, key) : undefined;
+    let matches = cached;
+    if (matches === undefined) {
+      // The candidates are built only on a MISS. They are a copy of the
+      // index, one object per payee, and a cache hit does not need them.
+      const candidates = existingIndex.map(p => ({
+        id: p.id,
+        name: p.original,
+      }));
+      matches = fuzzyMatchPayees(raw, candidates, {
+        minScore: opts.fuzzy.minScore ?? DEFAULT_MIN_SCORE,
+        maxResults: opts.fuzzy.maxResults ?? DEFAULT_MAX_RESULTS,
+      });
+      if (key !== null) {
+        opts.fuzzyCache?.set(fingerprint, key, matches);
+      }
+    }
     const top = matches[0];
     if (top) {
       const base = resolved(row, top.candidate.name, 'fuzzy', top.candidate.id);

@@ -49,8 +49,21 @@ export type FuzzyMatchOpts = {
   maxResults?: number;
 };
 
-const DEFAULT_MIN_SCORE = 0.7;
-const DEFAULT_MAX_RESULTS = 5;
+/**
+ * The fuzzy layer's defaults.
+ *
+ * They are exported because the resolver's cache key has to use the
+ * SAME thresholds the scoring will use — and a second copy of them
+ * would silently drift.
+ *
+ * The minimum score for a fuzzy match to be kept. A lower threshold
+ * admits clearly wrong matches: "Demo Grocery Store" against "Online
+ * store" scores 0.667, and "Demo Payroll Deposit" against "Home Depot"
+ * scores 0.600, while a real typo like "Demo Cofee Shop" against "Demo
+ * Coffee Shop" scores 0.968.
+ */
+export const DEFAULT_MIN_SCORE = 0.7;
+export const DEFAULT_MAX_RESULTS = 5;
 // partialRatio is down-weighted (returns 0) when the two strings differ in
 // length by more than this factor. Rationale: a short string can always find a
 // high-scoring tail-match in a long string (e.g. a generic common word

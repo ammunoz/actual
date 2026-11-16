@@ -5,6 +5,11 @@ import type {
   VendorMap,
 } from '#server/transactions/import/review/types';
 
+import {
+  buildFuzzyCache,
+  fingerprintPayees,
+  fuzzyCacheKey,
+} from './payee-cache';
 import { resolvePayees } from './payee-resolver';
 
 const FIXED_NOW = '2026-09-07T12:00:00.000Z';
@@ -461,5 +466,171 @@ describe('resolvePayees — result shape', () => {
     expect(out?.importedId).toBe('t-1');
     expect(out?.amountCents).toBe(-1234);
     expect(out?.date).toBe('2026-09-07');
+  });
+});
+
+describe('resolvePayees — the fuzzy cache', () => {
+  /** A row whose vendor string only the FUZZY layer can match. */
+  function fuzzyRow(): ReviewRowInput {
+    return mkRow({ payeeRaw: 'Demo Cofee Shop' });
+  }
+
+  it('returns the same answers with a cache as without', () => {
+    // The important one: the cache must not change any answer. A
+    // cached flag would be stale, so the cache holds the MATCHES and
+    // the flags are still raised fresh every time.
+    const rows = [
+      fuzzyRow(),
+      mkRow({ payeeRaw: 'Demo Coffee Shop' }),
+      mkRow({ payeeRaw: 'Demo Grocer' }),
+      mkRow({ payeeRaw: 'Nothing Like It At All' }),
+    ];
+
+    const without = resolvePayees(rows, {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+    });
+    const withCache = resolvePayees(rows, {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: buildFuzzyCache(),
+    });
+
+    expect(withCache).toEqual(without);
+  });
+
+  it('populates the cache on a resolve', () => {
+    const cache = buildFuzzyCache();
+    resolvePayees([fuzzyRow()], {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    });
+    expect(cache.size).toBe(1);
+  });
+
+  it('hits the cache on a second resolve with the same payee list', () => {
+    const cache = buildFuzzyCache();
+    const opts = {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    };
+
+    resolvePayees([fuzzyRow()], opts);
+    expect(cache.size).toBe(1);
+
+    // The same row again: the same key, so no new entry.
+    resolvePayees([fuzzyRow()], opts);
+    expect(cache.size).toBe(1);
+  });
+
+  it('serves the CACHED answer, not a freshly computed one', () => {
+    // The count alone cannot tell a hit from a recompute-and-overwrite,
+    // so the cache is seeded with a sentinel the resolver could not
+    // have computed. If the resolver scores the row itself, the answer
+    // is the real payee; if it reads the cache, the answer is the
+    // sentinel.
+    const cache = buildFuzzyCache();
+    const fuzzy = { minScore: 0.6, maxResults: 5 };
+    const fingerprint = fingerprintPayees(EXISTING);
+    cache.set(fingerprint, fuzzyCacheKey(fuzzy, 'Demo Cofee Shop'), [
+      { candidate: { id: 'p-sentinel', name: 'Sentinel' }, score: 0.9 },
+    ]);
+
+    const [out] = resolvePayees([fuzzyRow()], {
+      existingPayees: EXISTING,
+      fuzzy,
+      fuzzyCache: cache,
+    });
+
+    expect(out?.payeeCanonical).toBe('Sentinel');
+    expect(out?.payeeMatchSource).toBe('fuzzy');
+  });
+
+  it('does not hit a stale entry when the payee list changed', () => {
+    // The fingerprint is part of the key, so a changed list cannot hit
+    // the old entries — the answer changes with the list.
+    const cache = buildFuzzyCache();
+    const row = fuzzyRow();
+
+    const before = resolvePayees([row], {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    });
+
+    // A DIFFERENT payee list: the old answer would have matched
+    // "Demo Coffee Shop", and this one must not.
+    const changed: readonly ReviewPayee[] = [
+      { id: 'p-other', name: 'Some Other Payee Entirely' },
+    ];
+    const after = resolvePayees([row], {
+      existingPayees: changed,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    });
+
+    expect(before[0]?.payeeCanonical).toBe('Demo Coffee Shop');
+    expect(after[0]?.payeeCanonical).not.toBe('Demo Coffee Shop');
+    // And the new list has its own entry.
+    expect(cache.size).toBe(2);
+  });
+
+  it('does not hit a stale entry when a payee became a transfer', () => {
+    // The resolver's index EXCLUDES transfer payees from the candidate
+    // list, so a payee that became a transfer leaves the candidates.
+    // The fingerprint covers the transfer status, so the answer changes.
+    const cache = buildFuzzyCache();
+    const row = fuzzyRow();
+
+    const before = resolvePayees([row], {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    });
+    expect(before[0]?.payeeCanonical).toBe('Demo Coffee Shop');
+
+    const withTransfer: readonly ReviewPayee[] = EXISTING.map(payee =>
+      payee.id === 'p-coffee'
+        ? { ...payee, transferAcct: 'a-checking' }
+        : payee,
+    );
+    const after = resolvePayees([row], {
+      existingPayees: withTransfer,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    });
+
+    expect(after[0]?.payeeCanonical).not.toBe('Demo Coffee Shop');
+  });
+
+  it('keeps the cache across resolves, so a rule write does not redo the work', () => {
+    // The rules are not in the key: a rule write does not change the
+    // fuzzy layer's answer, so the cache stays warm across it.
+    const cache = buildFuzzyCache();
+    const opts = {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+      fuzzyCache: cache,
+    };
+
+    resolvePayees([fuzzyRow()], opts);
+    resolvePayees([fuzzyRow()], opts);
+    resolvePayees([fuzzyRow()], opts);
+
+    // One row, one entry — no matter how many resolves.
+    expect(cache.size).toBe(1);
+  });
+
+  it('works without a cache at all', () => {
+    // Most of the resolver's tests call it with no cache, so the change
+    // has to be behaviour-preserving when the cache is absent.
+    const [out] = resolvePayees([fuzzyRow()], {
+      existingPayees: EXISTING,
+      fuzzy: { minScore: 0.6, maxResults: 5 },
+    });
+    expect(out?.payeeCanonical).toBe('Demo Coffee Shop');
+    expect(out?.payeeMatchSource).toBe('fuzzy');
   });
 });

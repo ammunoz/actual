@@ -54,6 +54,12 @@ export type {
   FuzzyPayeeCandidate,
 } from './resolver/fuzzy';
 
+export {
+  buildFuzzyCache,
+  fingerprintPayees,
+  fuzzyCacheKey,
+} from './resolver/payee-cache';
+export type { FuzzyCache } from './resolver/payee-cache';
 export { resolvePayees } from './resolver/payee-resolver';
 export type { FuzzyResolveOpts, ResolveOpts } from './resolver/payee-resolver';
 

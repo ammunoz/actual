@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
+  buildFuzzyCache,
   emptyVendorMap,
   evaluateRow,
   evaluateRows,
@@ -413,6 +414,26 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // user is looking at — and a change that moves the cursor on records
   // the cursor it started from.
   const [focusedIndex, setFocusedIndex] = useState(0);
+  /**
+   * The fuzzy match cache.
+   *
+   * It lives as long as the review does, and it is thrown away with it.
+   *
+   * The fuzzy layer is the expensive one — it scores every budget payee
+   * against every row's vendor string — and the review re-runs the whole
+   * resolution whenever something changes. The cache holds the matches,
+   * keyed on the payee list's fingerprint, so a re-resolve after a rule
+   * write (or a routing change, or a trust-level change) reuses them.
+   *
+   * It is a `Map`, not a module-level singleton, so two budgets open at
+   * once do not share one.
+   */
+  // `useState`'s initialiser runs ONCE, on the first render, so this
+  // builds the cache once and keeps it. `useRef(buildFuzzyCache())`
+  // would evaluate the factory on EVERY render and throw all but the
+  // first result away.
+  const [fuzzyCache] = useState(buildFuzzyCache);
+
   const focusedIndexRef = useRef(0);
 
   /** Move the cursor to a row. */
@@ -530,10 +551,22 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         existingPayees: payeeList,
         accounts: accountList,
         vendorMap: liveMap,
-        fuzzy: { minScore: 0.7, maxResults: 5 },
+        // No thresholds: the resolver applies the fuzzy module's own
+        // defaults. Spelling them out here would be a second copy of
+        // them, and the two could drift.
+        fuzzy: {},
+        // The cache is shared by every resolve this review does. Its
+        // key holds the payee list's fingerprint, so a changed list
+        // cannot hit a stale entry — but the entries for a list that is
+        // gone are still held, so the cache is cleared when the list
+        // changes.
+        fuzzyCache,
       };
     },
-    [],
+    // The cache never changes: `useState`'s initialiser runs once. It
+    // is listed because the rule asks for every value the callback
+    // closes over.
+    [fuzzyCache],
   );
 
   /**
@@ -721,6 +754,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         ];
 
         setPayees(payeeList);
+        // The payee list changed, so the cache's entries are for a list
+        // that is gone. The fingerprint in the key makes a stale HIT
+        // impossible — but the entries would still be held, so they are
+        // dropped.
+        fuzzyCache.clear();
         setAccounts(accountList);
         setCategories(categoryList);
 
@@ -882,6 +920,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         ];
 
         setPayees(payeeList);
+        // The payee list changed: the cache's entries are for a list
+        // that is gone.
+        fuzzyCache.clear();
         setAccounts(accountList);
         setCategories(categoryList);
 
@@ -946,6 +987,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     lookupMatches,
     resolveOptsFor,
     setCursor,
+    // The cache never changes, but the effect clears it, so it is a
+    // dependency the rule asks for.
+    fuzzyCache,
   ]);
 
   /**
