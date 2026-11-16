@@ -677,6 +677,7 @@ describe('useImportReview', () => {
         previewKey: 'row-0',
         payeeCanonical: 'Demo Vendor',
         payeeMatchSource: 'existing-prefix' as const,
+        matchedPayeeId: 'p-2',
         flags: [],
         decision: 'pending' as const,
         edits: {},
@@ -743,6 +744,105 @@ describe('useImportReview', () => {
     await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
 
     expect(view.result.current.focusedIndex).toBe(1);
+  });
+
+  it('resolves the rows again when the vendor map arrives late', async () => {
+    // The vendor map is a synced preference, so it can arrive after the
+    // review has opened. The rows were resolved without it, and nothing
+    // resolved them again — so an entry that arrived late was never
+    // used.
+    const setPref = vi.fn();
+    let mapRaw: string | undefined;
+    prefMock.mockImplementation(() => [mapRaw, setPref]);
+
+    const view = await renderReview();
+
+    // Without the map, the row's vendor string is a prefix of a payee
+    // the budget has.
+    expect(view.result.current.state?.rows[0].matchedPayeeId).toBe('p-2');
+
+    // The map arrives, and it says the vendor string is a different
+    // payee.
+    mapRaw = JSON.stringify({
+      v: 1,
+      updatedAt: '2026-09-07T12:00:00.000Z',
+      entries: { 'Demo Vendor': 'p-1' },
+    });
+
+    await act(async () => {
+      view.rerender();
+    });
+
+    expect(view.result.current.state?.rows[0].matchedPayeeId).toBe('p-1');
+    expect(view.result.current.state?.rows[0].payeeMatchSource).toBe(
+      'vendor-map',
+    );
+  });
+
+  it('keeps the decisions when the vendor map arrives late', async () => {
+    // The rows are resolved again, and the user's decisions and edits
+    // have to survive it: resolving them again is not a reason to throw
+    // the work away.
+    const setPref = vi.fn();
+    let mapRaw: string | undefined;
+    prefMock.mockImplementation(() => [mapRaw, setPref]);
+
+    const view = await renderReview();
+
+    act(() => {
+      view.result.current.decide(0, 'accept');
+      view.result.current.edit(0, { memo: 'a note from the review' });
+    });
+
+    mapRaw = JSON.stringify({
+      v: 1,
+      updatedAt: '2026-09-07T12:00:00.000Z',
+      entries: { 'Demo Vendor': 'p-1' },
+    });
+
+    await act(async () => {
+      view.rerender();
+    });
+
+    expect(view.result.current.state?.rows[0].decision).toBe('accept');
+    expect(view.result.current.state?.rows[0].edits.memo).toBe(
+      'a note from the review',
+    );
+    // And the row was resolved again, with the map that arrived.
+    expect(view.result.current.state?.rows[0].matchedPayeeId).toBe('p-1');
+  });
+
+  it('does not resolve a picked-up review again', async () => {
+    // A review that was put aside and picked up again comes back with
+    // the rows the user approved, resolved as they were then. Resolving
+    // them against the budget as it is now would change what the user
+    // agreed to.
+    const setPref = vi.fn();
+    prefMock.mockImplementation(() => [
+      JSON.stringify({
+        v: 1,
+        updatedAt: '2026-09-07T12:00:00.000Z',
+        entries: { 'Demo Vendor': 'p-1' },
+      }),
+      setPref,
+    ]);
+
+    const view = renderHook(() =>
+      useImportReview({
+        accountId: 'a-1',
+        filename: '/tmp/demo.ofx',
+        session: SAVED_SESSION,
+        onImported: vi.fn(),
+      }),
+    );
+    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
+
+    // The row still has the payee it was approved with, and the map did
+    // not resolve it to a different one.
+    expect(view.result.current.state?.rows[0].matchedPayeeId).toBe('p-2');
+    expect(view.result.current.state?.rows[0].payeeMatchSource).toBe(
+      'existing-prefix',
+    );
   });
 
   it('undoes a bulk accept in ONE step', async () => {

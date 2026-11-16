@@ -161,6 +161,15 @@ type UndoSnapshot = {
    * would be off screen.
    */
   focusedIndex: number;
+  /**
+   * The vendor map the rows were resolved with.
+   *
+   * The map is part of the resolution, so it travels with it: an undo
+   * that restored the rows without the map would restore a resolution
+   * the map no longer agrees with, and the map would be lost for the
+   * rest of the review.
+   */
+  resolvedMapRaw: string | undefined;
 };
 
 /**
@@ -481,6 +490,23 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     vendorMapRawRef.current = vendorMapRaw;
   }, [vendorMapRaw]);
 
+  // The vendor map the review has already accounted for.
+  //
+  // For a review that resolved its rows, that is the map they were
+  // resolved with. For a review that was picked up again, it is the map
+  // as it was — a picked-up review does not resolve its rows again, so
+  // there is nothing for the map to be "resolved with".
+  //
+  // The map is a synced preference, so it can change while the review is
+  // open: the budget reloads its preferences when it syncs, and another
+  // device may have added an entry. The rows were resolved without it,
+  // and nothing resolved them again — so an entry that arrived late was
+  // simply not used.
+  //
+  // This says what the rows were resolved with, so the effect below can
+  // tell a map that has arrived from one that was already there.
+  const resolvedMapRawRef = useRef<string | undefined>(undefined);
+
   // The vendor-map entries the user earned by picking a payee, keyed by the
   // raw vendor string they picked it for. They are written when the import
   // succeeds, not while the review is open.
@@ -771,6 +797,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // recomputes the flags, so the resolution they carry does not
         // leak into the new one.
         baseRows.current = saved.rows;
+        // A review reads the map once, whichever way it was opened. The
+        // session's rows are the rows the user approved, resolved as they
+        // were then; resolving them again against the budget as it is now
+        // would change what the user agreed to.
+        resolvedMapRawRef.current = vendorMapRawRef.current;
 
         const state = sessionToPreviewState(saved);
         setState(state);
@@ -937,6 +968,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           trustLevel: trustLevelRef.current,
           resolveOpts: resolveOptsFor(payeeList, accountList),
         });
+        resolvedMapRawRef.current = vendorMapRawRef.current;
 
         setState(next);
         setRouting(nextGroups);
@@ -1066,7 +1098,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const writeVendorMap = useCallback(
     (review: ImportPreviewState) => {
       const choices = vendorChoices.current;
-      if (choices.size === 0) return;
+      if (choices.size === 0) {
+        // Nothing was written, so the map did not change — and the rows
+        // were resolved with the map as it was.
+        resolvedMapRawRef.current = vendorMapRawRef.current;
+        return;
+      }
 
       // A row the user THREW AWAY says nothing about how the vendor
       // string should be resolved: they did not want that transaction. The
@@ -1084,7 +1121,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (choice.raw.length === 0 || choice.payeeId.length === 0) continue;
         map = upsertVendorMapEntry(map, choice.raw, choice.payeeId, now);
       }
-      setVendorMapRaw(JSON.stringify(map));
+      const raw = JSON.stringify(map);
+      setVendorMapRaw(raw);
+      // The rows already say what the map now says: the map was written
+      // from the user's own choices, and those choices are in the rows.
+      // Resolving them again would be work for a review that is closing.
+      resolvedMapRawRef.current = raw;
     },
     [setVendorMapRaw],
   );
@@ -1114,6 +1156,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         editedRowKeys: new Set(editedRowKeys.current),
         vendorChoices: new Map(vendorChoices.current),
         focusedIndex: cursor,
+        resolvedMapRaw: resolvedMapRawRef.current,
       };
       undoStack.current = [...stack.slice(-(MAX_UNDO_STEPS - 1)), snapshot];
       return snapshot;
@@ -1233,6 +1276,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         trustLevel,
         resolveOpts: resolveOptsFor(payees, accounts),
       });
+      const raw = vendorMapRawRef.current;
 
       const matched = await lookupMatches(
         next.rows,
@@ -1246,6 +1290,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         dropUndo(snapshot);
         return;
       }
+
+      // The map the rows were resolved with is recorded only now: a
+      // routing change that was overtaken did not happen, so it does not
+      // get to say which map the review has seen.
+      resolvedMapRawRef.current = raw;
 
       setMatchedTransactionIds(matched);
       setRouting(nextGroups);
@@ -1401,6 +1450,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // so without this the undo leaves the user looking at the next row
     // while the row they undid is off screen.
     setCursor(last.focusedIndex);
+    // The map travels with the rows it resolved. An undo that restored
+    // the rows without it would leave the map applied to a resolution it
+    // never saw — and the map would be lost for the rest of the review.
+    resolvedMapRawRef.current = last.resolvedMapRaw;
   }, [setCursor, setRouting]);
 
   const cycleTrustLevel = useCallback(() => {
@@ -1414,6 +1467,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       return next;
     });
   }, []);
+
+  // The vendor map changed: resolve the rows again.
+  //
+  // The map is read through a ref, so a map that arrived after the
+  // review opened was never used — the rows were resolved without it and
+  // nothing resolved them again. The rows are resolved again now,
+  // carrying the user's decisions and edits across, so nothing they did
+  // is lost.
+  useEffect(() => {
+    // The review is not open, or it is on its way out: the apply writes
+    // the map itself, and resolving again then would be work for a
+    // review that is closing.
+    if (!state || applyingRef.current) return;
+    // The rows were resolved with this map already.
+    if (resolvedMapRawRef.current === vendorMapRaw) return;
+
+    resolvedMapRawRef.current = vendorMapRaw;
+
+    const next = rebuildPreviewState({
+      base: baseRows.current,
+      groups: groupsRef.current,
+      previous: state,
+      trustLevel: trustLevelRef.current,
+      resolveOpts: resolveOptsFor(payees, accounts),
+    });
+    setState(next);
+  }, [accounts, payees, resolveOptsFor, state, vendorMapRaw]);
 
   const apply = useCallback(async (): Promise<boolean> => {
     // Reentrancy guard. The Import button is disabled while applying, but
