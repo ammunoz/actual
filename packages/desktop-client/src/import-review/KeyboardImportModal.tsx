@@ -709,7 +709,7 @@ export function KeyboardImportModal({
                 <Trans>Dropped</Trans>: {summary.dropped}
               </Text>
               <Text style={styles.tnum}>
-                <Trans>Pending</Trans>: {summary.pending}
+                <Trans>Unreviewed</Trans>: {summary.pending}
               </Text>
             </View>
 
@@ -735,6 +735,9 @@ export function KeyboardImportModal({
                   <Trans>Overridden</Trans>: {summary.overridden}
                 </Text>
               ) : null}
+              <Text style={styles.tnum}>
+                <Trans>Will import</Trans>: {summary.willImport}
+              </Text>
               <Text style={styles.tnum}>
                 <Trans>Incoming</Trans>: {summary.inflowCount}
               </Text>

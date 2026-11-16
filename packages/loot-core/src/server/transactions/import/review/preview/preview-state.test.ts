@@ -315,6 +315,39 @@ describe('summarize', () => {
     expect(summary.pending).toBe(1);
   });
 
+  it('counts the rows that will land, undecided ones included', () => {
+    // An undecided row is imported unless the trust level holds it
+    // back. So the rows that will land are NOT the accepted ones: they
+    // are the ones the gate lets through and the user has not dropped.
+    const state = buildPreviewState(
+      [
+        mkRow({ importedId: 't-1' }),
+        mkRow({ importedId: 't-2' }),
+        mkRow({ importedId: 't-3' }),
+      ],
+      'cautious',
+    );
+    const accepted = applyDecision(state, 't-1', 'accept');
+    const dropped = applyDecision(accepted, 't-2', 'drop');
+    const summary = summarize(dropped);
+    expect(summary.accepted).toBe(1);
+    expect(summary.pending).toBe(1);
+    expect(summary.willImport).toBe(2);
+  });
+
+  it('counts a row of no amount, which lands like any other', () => {
+    const state = buildPreviewState(
+      [mkRow({ importedId: 't-1', amountCents: 0 })],
+      'cautious',
+    );
+    const summary = summarize(state);
+    expect(summary.willImport).toBe(1);
+    // It is neither money in nor money out, so the pair does not count
+    // it — but it still lands.
+    expect(summary.inflowCount).toBe(0);
+    expect(summary.outflowCount).toBe(0);
+  });
+
   it('excludes dropped rows from the inflow/outflow split', () => {
     const state = buildPreviewState(
       [
@@ -363,6 +396,9 @@ describe('summarize', () => {
     const summary = summarize(blocked);
     expect(summary.blocked).toBe(1);
     expect(summary.warned).toBe(0);
+    // A row the gate holds back does not land, however many decisions
+    // the user made about it.
+    expect(summary.willImport).toBe(0);
   });
 
   it('an accepted row still counts toward its flag bucket', () => {
@@ -414,6 +450,8 @@ describe('summarize', () => {
     expect(summary.blocked).toBe(0);
     expect(summary.overridden).toBe(1);
     expect(summary.accepted).toBe(1);
+    // And it lands, which is the whole point of the override.
+    expect(summary.willImport).toBe(1);
   });
 
   it('counts an overridden row as accepted as well as overridden', () => {

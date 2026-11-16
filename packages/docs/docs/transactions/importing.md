@@ -51,6 +51,8 @@ When it is on, importing an OFX or QFX file opens the review instead of the usua
 
 The review holds back the rows it is not sure about, and says why: a payee it does not know, a transaction that repeats an earlier one, or a row whose amount or date the file did not supply properly. You can accept a row anyway, or fix it and import it that way.
 
+A row you have not looked at is imported anyway. The review counts them as **Unreviewed**, and the count of the rows that will actually land is **Will import**.
+
 If you put a review aside with <Key k="w" />, the command bar offers **Resume the import review** the next time you open it. The review is kept on the device you made it on, not synced to your other devices.
 
 ### Files With Several Accounts

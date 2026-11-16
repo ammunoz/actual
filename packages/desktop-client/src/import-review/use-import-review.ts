@@ -203,6 +203,7 @@ export const EMPTY_SUMMARY: PreviewSummary = Object.freeze({
   overridden: 0,
   dropped: 0,
   pending: 0,
+  willImport: 0,
   inflowCount: 0,
   outflowCount: 0,
 });

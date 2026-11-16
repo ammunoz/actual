@@ -308,7 +308,29 @@ export type PreviewSummary = {
   /** Rows the user accepted DESPITE their flags. */
   overridden: number;
   dropped: number;
+  /**
+   * Rows the user has not decided about.
+   *
+   * These rows are NOT held back: an undecided row is imported unless
+   * the trust level holds it. So this is not a count of rows that will
+   * be left out — it is a count of rows the user has not looked at.
+   *
+   * The review's UI labels this count "Unreviewed".
+   */
   pending: number;
+  /**
+   * Rows that will land in the budget.
+   *
+   * This is the number that matters: the rows the gate lets through and
+   * the user has not dropped. It counts rows the user has not decided
+   * about, because those are imported too, and it counts a row of zero
+   * amount, because that lands as well.
+   *
+   * A row that matched a transaction the budget already has counts too:
+   * the import updates that transaction in place rather than adding a
+   * new one, and it lands all the same.
+   */
+  willImport: number;
   /**
    * Rows that will land as money IN (inflow), and as money OUT.
    *
@@ -664,6 +686,7 @@ export function summarize(
   let warned = 0;
   let inflowCount = 0;
   let outflowCount = 0;
+  let willImport = 0;
 
   for (const row of state.rows) {
     if (row.decision === 'accept' || row.decision === 'accept-override') {
@@ -704,6 +727,7 @@ export function summarize(
     // Only rows that will land are counted: these numbers describe what
     // reaches the budget, not what the file contained.
     if (evaluation.willImport) {
+      willImport += 1;
       const cents = effectiveAmountCents(row);
       if (cents > 0) inflowCount += 1;
       else if (cents < 0) outflowCount += 1;
@@ -719,6 +743,7 @@ export function summarize(
     overridden,
     dropped,
     pending,
+    willImport,
     inflowCount,
     outflowCount,
   });
