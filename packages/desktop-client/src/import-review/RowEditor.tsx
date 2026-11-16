@@ -17,9 +17,33 @@ import {
   parseAmountText,
   parseDateText,
 } from './editor-mode';
-import type { EditorMode } from './editor-mode';
+import type { EditorMode, EditorSuggestion } from './editor-mode';
 import { EditorPicker } from './EditorPicker';
 import { TextField } from './TextField';
+
+/**
+ * Pure: the payee the row has now, by id.
+ *
+ * The user's pick is a NAME — the edits carry no payee id — so it is
+ * matched back to the budget's payees by name. The resolver's payee is
+ * an id already, but it may be a transfer payee, which is not in the
+ * list, so it is only offered if it is.
+ */
+function resolvePayeeId(
+  row: PreviewRow,
+  payeeText: string,
+  suggestions: readonly EditorSuggestion[],
+): string | undefined {
+  if (row.edits.payeeCanonical !== undefined) {
+    const wanted = payeeText.trim().toLowerCase();
+    return suggestions.find(
+      suggestion => suggestion.name.trim().toLowerCase() === wanted,
+    )?.id;
+  }
+  return suggestions.some(suggestion => suggestion.id === row.matchedPayeeId)
+    ? row.matchedPayeeId
+    : undefined;
+}
 
 export type RowEditorProps = {
   /** The row being edited. */
@@ -68,11 +92,24 @@ export function RowEditor({
     [payees],
   );
 
+  // The group name comes along, so the picker can show which group a
+  // category is in. Two categories with the same name in different
+  // groups are otherwise indistinguishable, which is the one thing the
+  // group name was carried for.
   const categorySuggestions = useMemo(
     () =>
-      categories.map(category => ({ id: category.id, name: category.name })),
+      categories.map(category => ({
+        id: category.id,
+        name: category.name,
+        groupName: category.groupName,
+      })),
     [categories],
   );
+
+  // The payee the row has now: the one the user picked, or the one the
+  // resolver found.
+  const payeeText = initialTextForMode('payee', row);
+  const payeeId = resolvePayeeId(row, payeeText, payeeSuggestions);
 
   const categoryId = row.edits.categoryId ?? row.matchedCategoryId;
   const initialCategoryName =
@@ -104,9 +141,12 @@ export function RowEditor({
         <EditorPicker
           label={t('Payee')}
           suggestions={payeeSuggestions}
-          initialText={initialTextForMode('payee', row)}
+          initialText={payeeText}
           allowNew
           errorText={t('No payee matches that name')}
+          // The row's own payee, by id: two payees can have the same
+          // name.
+          initialSuggestionId={payeeId}
           onPick={(suggestion, text) => {
             onCommit(
               withPayee(row.edits, suggestion ? suggestion.name : text.trim()),
@@ -127,6 +167,9 @@ export function RowEditor({
           // does not have is not a choice.
           allowNew={false}
           errorText={t('No category matches that name')}
+          // The row's own category, by id: two categories can have the
+          // same name in different groups.
+          initialSuggestionId={categoryId}
           onPick={(suggestion, _text) => {
             onCommit({
               ...row.edits,

@@ -21,6 +21,15 @@ export type EditorPickerProps = {
   /** The text the field starts out showing. */
   initialText: string;
   /**
+   * The suggestion the field starts out pointing at.
+   *
+   * The name is not enough: two categories can have the same name in
+   * different groups, and two payees can have the same name. The field
+   * points at the one the row actually has, so that confirming straight
+   * away keeps it.
+   */
+  initialSuggestionId?: string;
+  /**
    * Whether a name that matches no suggestion can be picked.
    *
    * A payee can be created by the import, so a name the budget does not
@@ -54,6 +63,27 @@ export type EditorPickerProps = {
 };
 
 /**
+ * Pure: the suggestion the field points at when it opens.
+ *
+ * The id comes first because a name is not unique: two categories can
+ * have the same name in different groups, and two payees can have the
+ * same name. The row has one of them, and pointing at the first name
+ * that matches would point at the wrong one.
+ */
+function seedHighlight(
+  suggestions: readonly EditorSuggestion[],
+  text: string,
+  suggestionId: string | undefined,
+): number {
+  const matches = filterSuggestions(suggestions, text);
+  const byId = suggestionId
+    ? matches.findIndex(suggestion => suggestion.id === suggestionId)
+    : -1;
+  if (byId >= 0) return byId;
+  return exactMatchIndex(matches, text);
+}
+
+/**
  * A text field with a filtered list of suggestions under it.
  *
  * Keyboard-first, because the review is keyboard-driven: the user types to
@@ -78,14 +108,16 @@ export function EditorPicker({
   allowNew,
   errorText,
   onPick,
+  initialSuggestionId,
   autoFocus = true,
   testId = 'import-review-editor-input',
 }: EditorPickerProps) {
   const [text, setText] = useState(initialText);
-  // The field starts out showing a name, so the highlight starts on that
-  // name — if the budget has it.
+  // The field starts out showing a name, so the highlight starts on the
+  // suggestion the caller named — and on the name, if the caller named
+  // none.
   const [highlight, setHighlight] = useState(() =>
-    exactMatchIndex(filterSuggestions(suggestions, initialText), initialText),
+    seedHighlight(suggestions, initialText, initialSuggestionId),
   );
   const [refused, setRefused] = useState(false);
   // The value the field last committed.
@@ -100,11 +132,22 @@ export function EditorPicker({
   // from outside the picker today, but a picker that could be
   // pre-filled programmatically would otherwise show a stale name.
   const [shownInitialText, setShownInitialText] = useState(initialText);
-  if (initialText !== shownInitialText) {
+  const [shownInitialSuggestionId, setShownInitialSuggestionId] =
+    useState(initialSuggestionId);
+  if (
+    initialText !== shownInitialText ||
+    initialSuggestionId !== shownInitialSuggestionId
+  ) {
     setShownInitialText(initialText);
+    setShownInitialSuggestionId(initialSuggestionId);
     setCommittedText(initialText);
     setText(initialText);
     setRefused(false);
+    // The highlight points at an entry of the list the old text
+    // filtered to. When the text changes, the list changes with it, and
+    // a highlight left pointing at the old list would point at nothing —
+    // or at the wrong entry.
+    setHighlight(seedHighlight(suggestions, initialText, initialSuggestionId));
   }
   // Whether the list of suggestions is OPEN.
   //
@@ -292,6 +335,13 @@ export function EditorPicker({
           if (text !== committedText) {
             setText(committedText);
             setRefused(false);
+            // The highlight pointed at an entry of the list the typed
+            // text filtered to. The text goes back, so the list does
+            // too — and a highlight left pointing at the old list would
+            // point at the wrong entry, or at nothing.
+            setHighlight(
+              seedHighlight(suggestions, committedText, initialSuggestionId),
+            );
           }
         }}
         onChangeValue={value => {
@@ -333,10 +383,14 @@ export function EditorPicker({
               groupName !== matches[index - 1]?.groupName;
 
             return (
-              <View key={suggestion.id}>
+              <View key={suggestion.id} role="presentation">
                 {showGroup ? (
                   <View
                     data-testid="import-review-editor-group"
+                    // The header is a group, not an option: a screen
+                    // reader announces the options, not the header.
+                    role="group"
+                    aria-label={groupName}
                     style={{
                       padding: '4px 8px 0',
                     }}
@@ -355,7 +409,9 @@ export function EditorPicker({
                   // reader says which of two same-named categories is
                   // meant. The visible name is still the start of it.
                   aria-label={
-                    groupName
+                    // A group that repeats the name adds nothing: the
+                    // name is already the name.
+                    groupName && groupName !== suggestion.name
                       ? `${suggestion.name}, ${groupName}`
                       : suggestion.name
                   }

@@ -326,6 +326,11 @@ export function SplitPane({ row, categories, onCommit }: SplitPaneProps) {
                   label={t('Category')}
                   suggestions={categorySuggestions}
                   initialText={categoryName}
+                  // The leg's own category, by id: two categories can
+                  // have the same name in different groups, and pointing
+                  // at the first name that matches would commit the
+                  // wrong one.
+                  initialSuggestionId={leg.categoryId}
                   allowNew={false}
                   // The pane has a picker per leg, and they all mount at
                   // once: only the focused one may claim the focus, or

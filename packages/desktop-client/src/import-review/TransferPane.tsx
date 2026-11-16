@@ -150,6 +150,9 @@ export function TransferPane({
         label={t('Transfer target')}
         suggestions={targets}
         initialText={targetName}
+        // The target the row already has, by id: two accounts can have
+        // the same name.
+        initialSuggestionId={targetId}
         // A transfer target is an account the budget already has. The
         // import cannot create an account, so a name that matches
         // nothing is refused.

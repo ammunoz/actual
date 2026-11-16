@@ -95,6 +95,9 @@ export function RoutePane({
         label={t('Account')}
         suggestions={suggestions}
         initialText={currentName}
+        // The account the rows are in now, by id: two accounts can have
+        // the same name.
+        initialSuggestionId={currentAccountId}
         // The account has to be one the budget already has: the import
         // cannot create an account, so a name that matches nothing is
         // refused.
