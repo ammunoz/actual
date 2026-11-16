@@ -1,10 +1,11 @@
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
 import { HELP_LABELS } from './help-labels';
+import { HELP_LIMITATIONS } from './help-limitations';
 import { KEYMAP } from './keymap';
 
 /**
@@ -55,6 +56,24 @@ export function HelpOverlay() {
           <Text>{HELP_LABELS[binding.action]}</Text>
         </View>
       ))}
+      <View
+        style={{
+          gap: 4,
+          marginTop: 8,
+          paddingTop: 8,
+          borderTop: `1px solid ${theme.tableBorder}`,
+        }}
+      >
+        <Text style={{ fontWeight: 500 }}>
+          <Trans>Limitations</Trans>
+        </Text>
+        {HELP_LIMITATIONS.map((limitation, index) => (
+          <Text key={index} style={{ color: theme.pageTextSubdued }}>
+            {limitation}
+          </Text>
+        ))}
+      </View>
+
       <Text style={{ color: theme.pageTextSubdued }}>
         {t('Press ? again or Escape to close')}
       </Text>
