@@ -38,6 +38,8 @@ When it is on, importing an OFX or QFX file opens the review instead of the usua
 | <Key k="d" />                | Edit the date                                    |
 | <Key k="s" />                | Split the row across categories                  |
 | <Key k="t" />                | Make the row a transfer                          |
+| <Key k="o" />                | Import the rows from here into another account  |
+| <Key k="O" />                | Import every row into one account                |
 | <Key k="Tab" />              | Change how careful Actual is about the rows      |
 | <Key k="A" />, <Key k="R" /> | Accept or drop every row                         |
 | <Key k="w" />                | Put the review aside, and pick it up again later |
@@ -48,8 +50,14 @@ The review holds back the rows it is not sure about, and says why: a payee it do
 
 If you put a review aside with <Key k="w" />, the command bar offers **Resume the import review** the next time you open it. The review is kept on the device you made it on, not synced to your other devices.
 
+### Files With Several Accounts
+
+A file can hold the transactions of more than one account. The review starts with all of them in the account you opened it for, and each group of rows has a heading that says which account it goes into.
+
+Actual's OFX parser does not keep the bank's account id, so the review cannot tell where one statement ends and the next begins. The boundaries are yours to place: put the cursor on the first row of the next statement, press <Key k="o" />, and choose the account it belongs to. The rows from there to the next heading move with it.
+
 :::note
-A file that contains several bank accounts is imported into one account. Actual's OFX parser does not keep the account id, so the review cannot tell the accounts apart. Import such a file one account at a time.
+The payee names you remember are remembered for the whole budget, not per account. If the same vendor name appears in two accounts and you pick a different payee for each, only the last choice is remembered.
 :::
 
 ## Import CSV Files
