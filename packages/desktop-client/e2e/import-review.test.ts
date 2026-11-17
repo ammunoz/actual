@@ -1,3 +1,4 @@
+import { writeFileSync } from 'fs';
 import { join } from 'path';
 
 import type { Page } from '@playwright/test';
@@ -39,11 +40,21 @@ test.describe('Keyboard import review', () => {
     await expect(commandBar).not.toBeVisible();
   }
 
-  async function importOfx() {
+  /**
+   * Hand a file to the import button.
+   *
+   * The chooser dance is the same for every file, so it lives here: a
+   * change to the button's name is edited in one place.
+   */
+  async function chooseFile(file: string) {
     const fileChooserPromise = page.waitForEvent('filechooser');
     await accountPage.page.getByRole('button', { name: 'Import' }).click();
     const fileChooser = await fileChooserPromise;
-    await fileChooser.setFiles(join(__dirname, 'data/demo-import.ofx'));
+    await fileChooser.setFiles(file);
+  }
+
+  async function importOfx() {
+    await chooseFile(join(__dirname, 'data/demo-import.ofx'));
   }
 
   /**
@@ -96,6 +107,81 @@ test.describe('Keyboard import review', () => {
     await fileChooser.setFiles(
       join(__dirname, 'data/demo-import-same-vendor.ofx'),
     );
+  }
+
+  /**
+   * Import a file with `count` rows.
+   *
+   * The review squashed its rows into an unreadable smear once there were
+   * more than a screenful of them, so the tests need a file big enough to
+   * trigger it. The rows are generated rather than committed: sixty copies
+   * of the same transaction would be sixty lines of noise in the
+   * repository, and the point of the test is the COUNT, not the content.
+   */
+  async function importOfxWithRows(count: number) {
+    const transactions = Array.from({ length: count }, (_, index) => {
+      const n = String(index + 1).padStart(4, '0');
+      const day = String((index % 28) + 1).padStart(2, '0');
+      return `<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>202609${day}000000
+<TRNAMT>-${index + 1}.00
+<FITID>BULKFITID${n}
+<NAME>Vendor ${n}
+</STMTTRN>`;
+    }).join('\n');
+
+    const ofx = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+
+<OFX>
+<SIGNONMSGSRSV1>
+<SONRS>
+<STATUS><CODE>0<SEVERITY>INFO</STATUS>
+<DTSERVER>20260907120000
+<LANGUAGE>ENG
+</SONRS>
+</SIGNONMSGSRSV1>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<TRNUID>1
+<STATUS><CODE>0<SEVERITY>INFO</STATUS>
+<STMTRS>
+<CURDEF>USD
+<BANKACCTFROM>
+<BANKID>DEMOBANK
+<ACCTID>DEMO-CHECKING-001
+<ACCTTYPE>CHECKING
+</BANKACCTFROM>
+<BANKTRANLIST>
+<DTSTART>20260901000000
+<DTEND>20260930000000
+${transactions}
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>0.00
+<DTSERVER>20260930000000
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>
+`;
+
+    // The file goes in the test's own output directory, which Playwright
+    // creates and cleans up. A temp directory of our own would be left
+    // behind on every run.
+    const file = test.info().outputPath('bulk.ofx');
+    writeFileSync(file, ofx);
+
+    await chooseFile(file);
   }
 
   test('opens the keyboard review for an OFX file when it is enabled', async () => {
@@ -1319,6 +1405,115 @@ test.describe('Keyboard import review', () => {
       element => getComputedStyle(element).textOverflow,
     );
     expect(textOverflow).toBe('ellipsis');
+  });
+
+  test('the rows keep their height when there are many of them', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Many Rows',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    // Sixty rows, so the list is far taller than its `maxHeight` of 420px
+    // — which is the point: the rows have to keep their height and the
+    // LIST has to scroll. A file small enough to fit would prove nothing.
+    await importOfxWithRows(60);
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(60);
+
+    // THE ASSERTION: no row is shorter than the text it holds.
+    //
+    // The text's own height is measured with a Range, because the cell is
+    // a flex item and flex items STRETCH: the cell's box is the row's
+    // height, so comparing the row with the cell would compare a thing
+    // with itself. A Range over the text node gives the line box the text
+    // actually takes, whatever the box around it does.
+    //
+    // Nothing here is a pixel count. The row is only required to be as
+    // tall as its own text, which is what "the row is not squashed" means.
+    const heights = await rows.evaluateAll(elements =>
+      elements.map(element => {
+        const cell = element.querySelector(
+          '[data-testid="import-review-row-date"]',
+        );
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        return {
+          row: element.getBoundingClientRect().height,
+          text: range.getBoundingClientRect().height,
+        };
+      }),
+    );
+
+    expect(heights.length).toBeGreaterThan(0);
+    for (const { row, text } of heights) {
+      expect(row).toBeGreaterThanOrEqual(text);
+    }
+
+    // And the LIST scrolls, rather than the rows being squashed to fit:
+    // the content is taller than the box it sits in.
+    const scrolls = await rows.first().evaluate(element => {
+      const list = element.parentElement;
+      return list.scrollHeight > list.clientHeight;
+    });
+    expect(scrolls).toBe(true);
+  });
+
+  test("the help overlay's rows are readable", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Help Rows',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    // The hint strip only appears once the review has parsed and rendered
+    // its rows, so waiting for it is how the test knows the modal's own
+    // hotkey scope is live.
+    await expect(dialog.getByTestId('import-review-hints')).toBeVisible();
+
+    await page.keyboard.press('Shift+Slash');
+
+    const help = dialog.getByTestId('import-review-help');
+    await expect(help).toBeVisible();
+
+    // Every key/description row is at least as tall as the text in it.
+    // The overlay is the only place the review's keys are written down,
+    // so a row that is squashed to nothing is a key that does not exist.
+    //
+    // The text's own height is measured with a Range: the text is a flex
+    // item, and flex items stretch, so the element's box would be the
+    // row's height and comparing the two would compare a thing with
+    // itself. A Range over the text node gives the line box the text
+    // actually takes.
+    const heights = await help
+      .getByTestId('import-review-help-row')
+      .evaluateAll(elements =>
+        elements.map(element => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          return {
+            row: element.getBoundingClientRect().height,
+            text: range.getBoundingClientRect().height,
+          };
+        }),
+      );
+
+    expect(heights.length).toBeGreaterThan(0);
+    for (const { row, text } of heights) {
+      expect(row).toBeGreaterThanOrEqual(text);
+    }
   });
 
   test('d edits the date', async () => {

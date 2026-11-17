@@ -1123,6 +1123,22 @@ export function KeyboardImportModal({
                         flexDirection: 'row',
                         gap: 12,
                         padding: '6px 10px',
+                        // A row does not get shorter because there are more
+                        // rows.
+                        //
+                        // The list is a column flex box with a `maxHeight`,
+                        // so the flex algorithm shrinks its rows to fit
+                        // instead of letting the list scroll. A flex item's
+                        // automatic minimum size is its content's height —
+                        // but `View` sets `min-height: 0` on every
+                        // instance, which REPLACES that automatic size with
+                        // zero, so the row can be shrunk to nothing and
+                        // its text is clipped away.
+                        //
+                        // `flexShrink: 0` says the row keeps its height and
+                        // the list scrolls. One property, and it cannot be
+                        // overridden by the `min-height: 0` above.
+                        flexShrink: 0,
                         // The fixed columns do not shrink, so on a narrow
                         // viewport the row is wider than the modal. The
                         // scroll is scoped to the row, so the table does

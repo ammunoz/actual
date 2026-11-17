@@ -48,7 +48,18 @@ export function HelpOverlay() {
       {bindings.map(binding => (
         <View
           key={binding.keys}
-          style={{ flexDirection: 'row', gap: 12, alignItems: 'baseline' }}
+          data-testid="import-review-help-row"
+          style={{
+            flexDirection: 'row',
+            gap: 12,
+            alignItems: 'baseline',
+            // The same reason as the review's rows: `View` sets
+            // `min-height: 0` on every instance, so a row in this column
+            // flex box can be shrunk to nothing and its text is clipped
+            // away. A key that cannot be read is a key that does not
+            // exist.
+            flexShrink: 0,
+          }}
         >
           <Text style={{ width: 150, flexShrink: 0 }}>
             {formatKeys(binding.keys)}
