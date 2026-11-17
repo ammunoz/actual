@@ -48,6 +48,7 @@ import {
   visibleEffectsFor,
 } from './rule-effects';
 import type { RuledField, RuleEffect } from './rule-effects';
+import { RuledCell } from './RuledCell';
 import { rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
@@ -231,7 +232,9 @@ export function KeyboardImportModal({
    * own transactions table does: the payee of a transfer is the other
    * account, not the vendor the bank file named.
    */
-  const payeeCell = (row: PreviewRow): { label: string; ruled: boolean } => {
+  const payeeCell = (
+    row: PreviewRow,
+  ): { label: string; ruled: boolean; cleared: boolean } => {
     // A rule that sets the payee OWNS the cell: the engine's value is
     // what lands, so that is what the cell says.
     const effect = visibleEffectFor(review.ruleEffects, row, 'payee');
@@ -244,7 +247,15 @@ export function KeyboardImportModal({
         effect.value === null
           ? undefined
           : payeeNames.get(String(effect.value));
-      return { label: name ?? '', ruled: true };
+      return {
+        // A rule that set a payee the budget does not have — it was
+        // deleted, or the list is stale — falls back to the raw id.
+        // The field must never be EMPTY: an empty blue field says the
+        // rule cleared the payee, which is a different thing.
+        label: name ?? (effect.value === null ? '' : String(effect.value)),
+        ruled: true,
+        cleared: effect.value === null,
+      };
     }
     // A split keeps the vendor: the categories live on the legs, and
     // the parent still carries the payee.
@@ -252,6 +263,7 @@ export function KeyboardImportModal({
       return {
         label: row.edits.payeeCanonical ?? row.payeeCanonical,
         ruled: false,
+        cleared: false,
       };
     }
     const transferAccountId = effectiveTransferAccountId(row);
@@ -259,11 +271,13 @@ export function KeyboardImportModal({
       return {
         label: accountNames.get(transferAccountId) ?? t('Transfer'),
         ruled: false,
+        cleared: false,
       };
     }
     return {
       label: row.edits.payeeCanonical ?? row.payeeCanonical,
       ruled: false,
+      cleared: false,
     };
   };
 
@@ -283,7 +297,13 @@ export function KeyboardImportModal({
    */
   const categoryCell = (
     row: PreviewRow,
-  ): { label: string; group?: string; muted: boolean; ruled: boolean } => {
+  ): {
+    label: string;
+    group?: string;
+    muted: boolean;
+    ruled: boolean;
+    cleared: boolean;
+  } => {
     // A rule that sets the category OWNS the cell: the engine's value is
     // what lands, so that is what the cell says.
     const effect = visibleEffectFor(review.ruleEffects, row, 'category');
@@ -294,10 +314,18 @@ export function KeyboardImportModal({
       const id = effect.value === null ? undefined : String(effect.value);
       const name = id ? categoryNames.get(id) : undefined;
       return {
-        label: name ?? t('Categorize'),
+        // A rule that set a category the budget does not have falls back
+        // to the raw id, for the same reason the payee does: the field
+        // must never be empty, and it must never say "Categorize" as
+        // though that were the rule's value.
+        label: name ?? id ?? '',
         group: id && name ? categoryGroupNames.get(id) : undefined,
         muted: !name,
         ruled: true,
+        // A cleared field has no value at all, so the cell says THAT
+        // rather than "Categorize" — which would ask the user for a
+        // category the rule has already decided there is none of.
+        cleared: effect.value === null,
       };
     }
     if (isSplitRow(row.edits)) {
@@ -308,29 +336,46 @@ export function KeyboardImportModal({
         label: t('Split ({{legs}})', { legs: row.edits.splits?.length ?? 0 }),
         muted: true,
         ruled: false,
+        cleared: false,
       };
     }
     // A transfer's category is the transfer pseudo-category, not a
     // budget category, so it says "Transfer" the way Actual's own
     // transactions table does.
     if (effectiveTransferAccountId(row) !== undefined) {
-      return { label: t('Transfer'), muted: true, ruled: false };
+      return {
+        label: t('Transfer'),
+        muted: true,
+        ruled: false,
+        cleared: false,
+      };
     }
     const categoryId = row.edits.categoryId;
     if (!categoryId) {
-      return { label: t('Categorize'), muted: true, ruled: false };
+      return {
+        label: t('Categorize'),
+        muted: true,
+        ruled: false,
+        cleared: false,
+      };
     }
     const name = categoryNames.get(categoryId);
     // A category that no longer exists is dropped at the apply step, so
     // the row is imported without one: "Categorize" says so.
     if (!name) {
-      return { label: t('Categorize'), muted: true, ruled: false };
+      return {
+        label: t('Categorize'),
+        muted: true,
+        ruled: false,
+        cleared: false,
+      };
     }
     return {
       label: name,
       group: categoryGroupNames.get(categoryId),
       muted: false,
       ruled: false,
+      cleared: false,
     };
   };
 
@@ -342,17 +387,36 @@ export function KeyboardImportModal({
    */
   const amountCell = (
     row: PreviewRow,
-  ): { amount: ReturnType<typeof integerToAmount>; ruled: boolean } => {
+  ): {
+    amount: ReturnType<typeof integerToAmount>;
+    ruled: boolean;
+    cleared: boolean;
+  } => {
     const effect = visibleEffectFor(review.ruleEffects, row, 'amount');
     // A rule that sets the amount changes the PARENT, split row or not:
     // the engine writes the rule's amount, and the legs then no longer
     // add up to it. The cell shows what will land.
-    if (effect && typeof effect.value === 'number') {
-      return { amount: integerToAmount(effect.value), ruled: true };
+    if (effect) {
+      if (typeof effect.value === 'number') {
+        return {
+          amount: integerToAmount(effect.value),
+          ruled: true,
+          cleared: false,
+        };
+      }
+      // The rule CONTROLLED the amount and left it empty. The cell says
+      // so rather than falling through to the row's own amount, which
+      // would be a lie: the rule owns the field.
+      return {
+        amount: integerToAmount(0),
+        ruled: true,
+        cleared: true,
+      };
     }
     return {
       amount: integerToAmount(row.edits.amountCents ?? row.amountCents),
       ruled: false,
+      cleared: false,
     };
   };
 
@@ -362,24 +426,24 @@ export function KeyboardImportModal({
    * A rule that sets the date owns the cell, the same way the payee and
    * the category do.
    */
-  const dateCell = (row: PreviewRow): { date: string; ruled: boolean } => {
+  const dateCell = (
+    row: PreviewRow,
+  ): { date: string; ruled: boolean; cleared: boolean } => {
     const effect = visibleEffectFor(review.ruleEffects, row, 'date');
-    if (effect && typeof effect.value === 'string') {
-      return { date: effect.value, ruled: true };
+    if (effect) {
+      if (typeof effect.value === 'string') {
+        return { date: effect.value, ruled: true, cleared: false };
+      }
+      // The rule CONTROLLED the date and left it empty. The cell says so
+      // rather than falling through to the row's own date, which would be
+      // a lie: the rule owns the field.
+      return { date: '', ruled: true, cleared: true };
     }
-    return { date: row.edits.date ?? row.date, ruled: false };
-  };
-
-  /**
-   * The style a cell the review cannot change carries.
-   *
-   * DIMMED, because the value is not the user's to choose. UNDERLINED in
-   * purple, because the underline is what says WHY — and the purple is
-   * the one Actual already uses for a row something else has claimed.
-   */
-  const ruledStyle = {
-    color: theme.pageTextSubdued,
-    borderBottom: `2px solid ${theme.tableBorderSelected}`,
+    return {
+      date: row.edits.date ?? row.date,
+      ruled: false,
+      cleared: false,
+    };
   };
 
   // Why a row is flagged, in the user's terms. The code beside it is the
@@ -556,28 +620,29 @@ export function KeyboardImportModal({
    *
    * The VALUE matters as much as the field: the user has to see what
    * the rule will do, not merely that something will.
+   *
+   * It agrees with the CELL, because a panel that says one thing and a
+   * cell that says another is worse than either.
    */
   const ruledValueLabel = (effect: RuleEffect): string => {
     if (effect.field === 'payee') {
-      return (
-        (effect.value === null
-          ? undefined
-          : payeeNames.get(String(effect.value))) ?? t('a payee')
-      );
+      if (effect.value === null) return t('no payee');
+      // A payee the budget does not have — deleted, or a stale list — is
+      // shown as its id, so the panel and the cell say the same thing.
+      return payeeNames.get(String(effect.value)) ?? String(effect.value);
     }
     if (effect.field === 'category') {
-      return (
-        (effect.value === null
-          ? undefined
-          : categoryNames.get(String(effect.value))) ?? t('no category')
-      );
+      if (effect.value === null) return t('no category');
+      return categoryNames.get(String(effect.value)) ?? String(effect.value);
     }
     if (effect.field === 'amount') {
+      if (effect.value === null) return t('no amount');
       return typeof effect.value === 'number'
         ? String(integerToAmount(effect.value))
         : t('an amount');
     }
     if (effect.field === 'date') {
+      if (effect.value === null) return t('no date');
       return typeof effect.value === 'string' ? effect.value : t('a date');
     }
     return typeof effect.value === 'string' ? effect.value : t('some notes');
@@ -1179,16 +1244,25 @@ export function KeyboardImportModal({
                           `flexShrink: 0`, so they keep their widths and
                           the payee takes the difference. The row scrolls
                           sideways when even that is not enough. */}
-                      <Text
-                        data-testid="import-review-row-date"
-                        style={{
-                          width: 90,
-                          flexShrink: 0,
-                          ...(dateCellValue.ruled ? ruledStyle : undefined),
-                        }}
-                      >
-                        {dateCellValue.date}
-                      </Text>
+                      {dateCellValue.ruled ? (
+                        <RuledCell
+                          width={90}
+                          label={dateCellValue.date}
+                          cleared={dateCellValue.cleared}
+                          testId="import-review-row-date"
+                          title={dateCellValue.date}
+                        />
+                      ) : (
+                        <Text
+                          data-testid="import-review-row-date"
+                          style={{
+                            width: 90,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {dateCellValue.date}
+                        </Text>
+                      )}
                       {/* The raw vendor string is long and low-value once
                           it is resolved, so it truncates. The category is
                           the budget decision the user is looking for, so
@@ -1199,35 +1273,53 @@ export function KeyboardImportModal({
                       >
                         {row.payeeRaw}
                       </TextOneLine>
-                      <TextOneLine
-                        data-testid="import-review-row-payee"
-                        style={{
-                          width: 100,
-                          flexShrink: 0,
-                          ...(payee.ruled ? ruledStyle : undefined),
-                        }}
-                        title={payee.label}
-                      >
-                        {payee.label}
-                      </TextOneLine>
+                      {payee.ruled ? (
+                        <RuledCell
+                          width={100}
+                          label={payee.label}
+                          cleared={payee.cleared}
+                          testId="import-review-row-payee"
+                          title={payee.label}
+                        />
+                      ) : (
+                        <TextOneLine
+                          data-testid="import-review-row-payee"
+                          style={{
+                            width: 100,
+                            flexShrink: 0,
+                          }}
+                          title={payee.label}
+                        >
+                          {payee.label}
+                        </TextOneLine>
+                      )}
                       {/* One line, always: a category name that wraps
                           makes the row grow, and the rows are the thing
                           the user is scanning. */}
-                      <TextOneLine
-                        data-testid="import-review-row-category"
-                        style={{
-                          width: 150,
-                          flexShrink: 0,
-                          fontStyle: category.muted ? 'italic' : undefined,
-                          color: category.muted
-                            ? theme.pageTextSubdued
-                            : undefined,
-                          ...(category.ruled ? ruledStyle : undefined),
-                        }}
-                        title={category.label}
-                      >
-                        {category.label}
-                      </TextOneLine>
+                      {category.ruled ? (
+                        <RuledCell
+                          width={150}
+                          label={category.label}
+                          cleared={category.cleared}
+                          testId="import-review-row-category"
+                          title={category.label}
+                        />
+                      ) : (
+                        <TextOneLine
+                          data-testid="import-review-row-category"
+                          style={{
+                            width: 150,
+                            flexShrink: 0,
+                            fontStyle: category.muted ? 'italic' : undefined,
+                            color: category.muted
+                              ? theme.pageTextSubdued
+                              : undefined,
+                          }}
+                          title={category.label}
+                        >
+                          {category.label}
+                        </TextOneLine>
+                      )}
                       {/* The group, so two categories with the same name
                           are distinguishable. It is subdued: the name
                           is what the user is looking for. */}
@@ -1243,24 +1335,39 @@ export function KeyboardImportModal({
                       >
                         {category.group}
                       </TextOneLine>
-                      <FinancialText
-                        data-testid="import-review-row-amount"
-                        style={{
-                          width: 100,
-                          flexShrink: 0,
-                          textAlign: 'right',
-                          // A wide amount would otherwise paint over the
-                          // gap and under the badge. The box is
-                          // right-aligned, so the overflow is at the
-                          // LEADING edge — the significant digits are
-                          // what get cut — hence the title.
-                          overflow: 'hidden',
-                          ...(amountCellValue.ruled ? ruledStyle : undefined),
-                        }}
-                        title={String(amountCellValue.amount)}
-                      >
-                        {amountCellValue.amount}
-                      </FinancialText>
+                      {amountCellValue.ruled ? (
+                        <RuledCell
+                          width={100}
+                          label={String(amountCellValue.amount)}
+                          cleared={amountCellValue.cleared}
+                          testId="import-review-row-amount"
+                          title={String(amountCellValue.amount)}
+                          align="right"
+                        />
+                      ) : (
+                        <FinancialText
+                          data-testid="import-review-row-amount"
+                          style={{
+                            width: 100,
+                            flexShrink: 0,
+                            textAlign: 'right',
+                            // A wide amount would otherwise paint over
+                            // the gap and under the badge. The box is
+                            // right-aligned, so the overflow is at the
+                            // LEADING edge — the significant digits are
+                            // what get cut — hence the title.
+                            //
+                            // The RULED amount truncates from the other
+                            // end: its field is right-aligned too, so the
+                            // ellipsis falls on the cents. Either way the
+                            // title carries the whole value.
+                            overflow: 'hidden',
+                          }}
+                          title={String(amountCellValue.amount)}
+                        >
+                          {amountCellValue.amount}
+                        </FinancialText>
+                      )}
                       {/* The badge column holds the gate badge and the
                           rule badge, one above the other. The gate badge
                           is plain coloured text — it is a SAFETY fact

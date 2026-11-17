@@ -8,6 +8,39 @@ import type { AccountPage } from './page-models/account-page';
 import { ConfigurationPage } from './page-models/configuration-page';
 import { Navigation } from './page-models/navigation';
 
+/**
+ * The WCAG contrast ratio between two colours.
+ *
+ * The colours are the ones the browser computed at runtime, so the
+ * assertion holds in every theme and whatever the theme's tokens happen
+ * to be. AA for normal text is 4.5:1.
+ */
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = color.match(/[\d.]+/g);
+    if (!channels || channels.length < 3) {
+      throw new Error(
+        `Cannot read the colour "${color}" — the computed style was not a colour.`,
+      );
+    }
+    const [r, g, b] = channels
+      .slice(0, 3)
+      .map(Number)
+      .map(value => {
+        const channel = value / 255;
+        return channel <= 0.03928
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  const high = Math.max(foregroundLuminance, backgroundLuminance);
+  const low = Math.min(foregroundLuminance, backgroundLuminance);
+  return (high + 0.05) / (low + 0.05);
+}
+
 test.describe('Keyboard import review', () => {
   let page: Page;
   let navigation: Navigation;
@@ -952,6 +985,104 @@ ${transactions}
     );
     // The editor is still open: the edit was refused, not applied.
     await expect(editor).toBeVisible();
+  });
+
+  test('a ruled field is a read-only field, in a colour you can read', async () => {
+    // The ruled cell used to be a DIMMED value with a purple underline.
+    //
+    // Dimming it failed WCAG AA on the real background in every theme
+    // (2.05:1 in the light theme, and 2.02:1 on the focused row in the
+    // dark one), and a value the user has to read keeps its contrast: the
+    // AFFORDANCE is removed, not the information.
+    //
+    // The cell is now the app's own read-only field, with the value in
+    // the rule lock's colour.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Ruled Cell',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user picks a payee for the first row, and a category for it.
+    await page.keyboard.press('e');
+    let editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    await page.keyboard.press('c');
+    editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Food');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // And a rule, so the category is the rule's.
+    await dialog.getByTestId('import-review-rule-payee-to-category').click();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    // ONE: the cell is a field, not a dimmed string. The rule's value is
+    // in it, and the tag glyph says a rule owns it.
+    const cell = rows.first().getByTestId('import-review-row-category');
+    await expect(cell).toHaveAttribute('data-ruled', 'true');
+    await expect(cell).toContainText('Food');
+
+    // TWO: the value's colour clears AA against the field it sits in.
+    //
+    // The ratio is computed from the RUNTIME colours, so it holds in
+    // every theme and whatever the theme's tokens are. The old treatment
+    // was 2.05:1 in the light theme, so this is the assertion that would
+    // have caught it.
+    const colours = await cell.evaluate(element => {
+      const field = element.querySelector('[data-ruled-field="true"]');
+      const text = field.querySelector('span');
+      return {
+        color: getComputedStyle(text).color,
+        background: getComputedStyle(field).backgroundColor,
+      };
+    });
+    expect(
+      contrastRatio(colours.color, colours.background),
+    ).toBeGreaterThanOrEqual(4.5);
+
+    // THREE: the field hugs its text. It does not stretch the row, and it
+    // does not spill into the next column.
+    const geometry = await rows.first().evaluate(row => {
+      const ruled = row.querySelector(
+        '[data-testid="import-review-row-category"]',
+      );
+      const field = ruled.querySelector('[data-ruled-field="true"]');
+      const sibling = row.querySelector(
+        '[data-testid="import-review-row-payee"]',
+      );
+      const range = document.createRange();
+      range.selectNodeContents(field.querySelector('span'));
+      return {
+        cell: ruled.getBoundingClientRect().height,
+        sibling: sibling.getBoundingClientRect().height,
+        field: field.getBoundingClientRect().height,
+        text: range.getBoundingClientRect().height,
+        fieldWidth: field.getBoundingClientRect().width,
+        cellWidth: ruled.getBoundingClientRect().width,
+      };
+    });
+    // The ruled cell is the same height as its sibling: the field does
+    // not make the row grow, and it does not collapse it either.
+    expect(geometry.cell).toBe(geometry.sibling);
+    // The field holds its text…
+    expect(geometry.field).toBeGreaterThanOrEqual(geometry.text);
+    // …and stays inside the cell.
+    expect(geometry.field).toBeLessThanOrEqual(geometry.cell);
+    expect(geometry.fieldWidth).toBeLessThanOrEqual(geometry.cellWidth);
   });
 
   test('a rule created in the review applies to a later import', async () => {

@@ -114,6 +114,35 @@ export const colors = {
     midnight: 'gray150',
   },
 
+  /**
+   * The text of a field a budget rule controls, in the import review.
+   *
+   * Blue is Carbon's "passive information": a rule-set value is not an
+   * error, a warning, a success or a call to action. Purple is already
+   * the primary action colour and upstream's empty-category placeholder,
+   * so a third purple job would have overloaded it.
+   *
+   * The values clear WCAG AA against `formInputBackground`, which is what
+   * the field is filled with: blue700 on navy50 is 4.84:1, blue300 on
+   * navy800 is 5.23:1, blue300 on gray800 is 8.25:1.
+   */
+  ruleLockText: { light: 'blue700', dark: 'blue300', midnight: 'blue300' },
+
+  /**
+   * The edge of a field a budget rule controls, in the import review.
+   *
+   * It is a step up from `formInputBorder` in the light theme only, and
+   * for one reason: the focused row's band (`tableRowHeaderBackground`) is
+   * navy50, and so is `formInputBackground`, so on the focused row the
+   * field's FILL vanishes and the edge is the only thing that says
+   * "field". navy200 against navy50 is 1.56:1, where navy150 is 1.25:1.
+   *
+   * The dark and midnight themes need no bump: there the focused band
+   * (navy700, gray700) is a different colour from the field's fill
+   * (navy800, gray800), so the fill still reads.
+   */
+  ruleLockBorder: { light: 'navy200', dark: 'navy600', midnight: 'gray600' },
+
   numberPositive: { light: 'green700', dark: 'green300', midnight: 'green300' },
   numberNegative: { light: 'red500', dark: 'red200', midnight: 'red200' },
   numberNeutral: { light: 'navy100', dark: 'navy500', midnight: 'gray500' },
