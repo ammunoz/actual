@@ -13,7 +13,10 @@ import { post } from '#server/post';
 import { getServer } from '#server/server-config';
 import { batchMessages } from '#server/sync';
 import { batchUpdateTransactions } from '#server/transactions';
-import { runRules } from '#server/transactions/transaction-rules';
+import {
+  runRules,
+  runRulesWithAppliedRules,
+} from '#server/transactions/transaction-rules';
 import {
   defaultMappings,
   mappingsFromString,
@@ -32,6 +35,7 @@ import {
 import type {
   AccountEntity,
   BankSyncResponse,
+  PreviewTransaction,
   TransactionEntity,
 } from '#types/models';
 
@@ -636,6 +640,29 @@ export type ReconcileTransactionsResult = {
     ignored?: boolean;
     tombstone?: boolean;
   }>;
+  /**
+   * The transactions as the RULES left them, one per row the import took
+   * in, in order.
+   *
+   * The import runs the rules before it matches or adds anything, so this
+   * is what a rule DID to each row. A caller that wants to show the user
+   * what will happen — "a rule sets this category" — needs exactly this,
+   * and there was no way to get it: `added` carried only ids, and
+   * `updatedPreview` carried only the rows that matched something.
+   *
+   * The transactions are the ones the engine worked on: no id is minted
+   * (that happens later, on the insert path), and the fields the rule
+   * engine only uses for matching — `payee_name`, `balance`,
+   * `category_group` — are gone.
+   *
+   * A row marked `skipTransaction` IS in here: the skip happens later, on
+   * the write path, and a row the caller lined up needs an entry of its
+   * own even when nothing else will report it.
+   *
+   * Only the PREVIEW reports it. The real import does not need it, and
+   * its response is what an API caller pays for.
+   */
+  ruledTransactions?: PreviewTransaction[];
 };
 
 export async function reconcileTransactions(
@@ -804,6 +831,15 @@ export async function reconcileTransactions(
     added: added.map(trans => trans.id),
     updated: updated.map(trans => trans.id),
     updatedPreview,
+    // The rows as the rules left them. The commit loop above does not
+    // mutate them — the insert path copies the transaction before it
+    // mints an id — so these are still the post-rule transactions.
+    //
+    // Only the PREVIEW reports them: the real import does not need them,
+    // and its response is what an API caller pays for.
+    ruledTransactions: isPreview
+      ? transactionsStep3.map(({ trans }) => trans)
+      : undefined,
   };
 }
 
@@ -875,7 +911,19 @@ export async function matchTransactions(
     subtransactions,
   } of normalized) {
     // Run the rules
-    const trans = await runRules(originalTrans, accountsMap);
+    const { transaction: trans, appliedRules } = await runRulesWithAppliedRules(
+      originalTrans,
+      accountsMap,
+    );
+    // Which rules fired, and which fields they took. It rides along with
+    // the transaction so a caller can show the user what a rule will do to
+    // the row. The field starts with an underscore, so the insert path
+    // ignores it — `conform` skips every field that starts with one.
+    //
+    // It rides on the real import too, not only on the preview: the
+    // transactions travel in `updatedPreview` either way, and the
+    // attribution is a few bytes beside them.
+    trans._appliedRules = appliedRules;
 
     let match = null;
     let fuzzyDataset = null;

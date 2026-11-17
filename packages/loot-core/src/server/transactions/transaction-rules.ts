@@ -43,6 +43,7 @@ import { extractTagsForFilter, makeTagAqlRegex } from '#shared/tags';
 import { ungroupTransaction } from '#shared/transactions';
 import { fastSetMerge, partitionByField } from '#shared/util';
 import type {
+  AppliedRule,
   RuleActionEntity,
   RuleEntity,
   TransactionEntity,
@@ -330,10 +331,96 @@ export async function getCompletedScheduleRuleIds(): Promise<Set<string>> {
 // Runner
 const NULLABLE_RULE_FIELDS = ['payee', 'category'] as const;
 
+/**
+ * The transaction fields a rule's actions set.
+ *
+ * These are the fields the rule's ACTIONS target, NOT the ones whose value
+ * happened to change. A rule that sets the category to the value the
+ * transaction already had still CONTROLS the category: an edit to it would
+ * be discarded when the rule runs again, so a caller that shows the user
+ * what a rule controls has to know about it.
+ *
+ * **A field is named as the TRANSACTION names it.** A rule that sets the
+ * payee by NAME sets the PAYEE: the action writes `payee = 'new'` and the
+ * engine resolves the name to an id, and the transaction that comes back
+ * has no `payee_name` at all.
+ *
+ * **A split action is not here**: it sets the field on a LEG of the split,
+ * not on the transaction itself. The test for that is the engine's own:
+ * `execActions` puts an action in `childActions` when its `splitIndex` is
+ * TRUTHY. `splitIndex: 0` is the pre-split group — it sets the field on
+ * the transaction, and it is what the rules editor writes for every action
+ * it adds, so it must not be mistaken for a leg.
+ */
+export function ruleSetFields(rule: { actions: Action[] }): string[] {
+  const fields = new Set<string>();
+  for (const action of rule.actions) {
+    // The engine's own partition, mirrored: a truthy `splitIndex` means
+    // the action sets a LEG, whatever the action is.
+    if (action.options?.splitIndex) continue;
+
+    switch (action.op) {
+      case 'set':
+        fields.add(action.field === 'payee_name' ? 'payee' : action.field);
+        break;
+      case 'set-split-amount':
+        // Only these two methods write the amount; the percentage and the
+        // remainder are worked out by the split itself.
+        if (
+          action.options?.method === 'fixed-amount' ||
+          action.options?.method === 'formula'
+        ) {
+          fields.add('amount');
+        }
+        break;
+      case 'prepend-notes':
+      case 'append-notes':
+        fields.add('notes');
+        break;
+      case 'link-schedule':
+        fields.add('schedule');
+        break;
+      case 'delete-transaction':
+        fields.add('tombstone');
+        break;
+      default:
+        break;
+    }
+  }
+  return [...fields];
+}
+
+/**
+ * Runs the rules on a transaction.
+ *
+ * The transaction comes back with what the rules changed. The rules that
+ * fired are NOT on it — use `runRulesWithAppliedRules` for those.
+ */
 export async function runRules(
   trans,
   accounts: Map<string, db.DbAccount> | null = null,
 ) {
+  const { transaction } = await runRulesWithAppliedRules(trans, accounts);
+  return transaction;
+}
+
+/**
+ * The same as `runRules`, and it also reports WHICH rules fired.
+ *
+ * A caller that shows the user what a rule does to a transaction needs to
+ * know that a rule fired at all, and which fields it took. The fields are
+ * the rule's ACTIONS' fields — not the ones whose value happened to change
+ * — because a rule that sets the category to the value the transaction
+ * already had still controls the category: an edit to it would be
+ * discarded when the rule runs again.
+ *
+ * `runRules` is deliberately unchanged: its return shape is what the other
+ * six callers and the tests rely on.
+ */
+export async function runRulesWithAppliedRules(
+  trans,
+  accounts: Map<string, db.DbAccount> | null = null,
+): Promise<{ transaction: TransactionEntity; appliedRules: AppliedRule[] }> {
   await ensureFormulaPreferencesLoaded();
 
   let accountsMap: Map<string, db.DbAccount> = null;
@@ -412,14 +499,32 @@ export async function runRules(
     formulaStrings,
   );
 
+  const appliedRules: AppliedRule[] = [];
+
+  /**
+   * Run a rule's actions, and record what it set.
+   *
+   * The recording is what tells a caller that a rule CONTROLS a field, not
+   * merely that the field's value changed. A rule that sets the category to
+   * the value the transaction already had still controls the category: an
+   * edit to it would be discarded when the rule runs again.
+   */
+  async function applyRule(rule: Rule) {
+    await ensureBalanceFor(rule);
+    const changes = rule.execActions(finalTrans);
+    // Every rule that runs comes from the budget's rule table, so it has
+    // an id. The empty string is for a rule built without one, which the
+    // import never sees.
+    appliedRules.push({ id: rule.getId() ?? '', fields: ruleSetFields(rule) });
+    finalTrans = Object.assign({}, finalTrans, changes);
+  }
+
   for (let i = 0; i < rules.length; i++) {
     // If there is a scheduleRuleID (meaning this transaction came from a schedule) then exclude rules linked to other schedules.
     if (scheduleRuleID !== '') {
       if (rules[i].id === scheduleRuleID) {
         // bypass condition checking to run the rule even if the transaction date falls outside of the schedule's date range.
-        await ensureBalanceFor(rules[i]);
-        const changes = rules[i].execActions(finalTrans);
-        finalTrans = Object.assign({}, finalTrans, changes);
+        await applyRule(rules[i]);
         await resolvePayeeNameForRules(finalTrans);
         lastCategoryIdForGroup = await refreshCategoryGroupIfChanged(
           finalTrans,
@@ -431,12 +536,7 @@ export async function runRules(
       } else {
         // if a rule is not linked to a schedule, run it.
         if (rules[i].evalConditions(finalTrans)) {
-          await ensureBalanceFor(rules[i]);
-          finalTrans = Object.assign(
-            {},
-            finalTrans,
-            rules[i].execActions(finalTrans),
-          );
+          await applyRule(rules[i]);
         }
         await resolvePayeeNameForRules(finalTrans);
         lastCategoryIdForGroup = await refreshCategoryGroupIfChanged(
@@ -450,12 +550,7 @@ export async function runRules(
     } else {
       // if there is no scheduleRuleID then just run all rules.
       if (rules[i].evalConditions(finalTrans)) {
-        await ensureBalanceFor(rules[i]);
-        finalTrans = Object.assign(
-          {},
-          finalTrans,
-          rules[i].execActions(finalTrans),
-        );
+        await applyRule(rules[i]);
       }
       await resolvePayeeNameForRules(finalTrans);
       lastCategoryIdForGroup = await refreshCategoryGroupIfChanged(
@@ -465,13 +560,17 @@ export async function runRules(
     }
   }
 
+  // The transaction the rules left, and the rules that fired on it. The
+  // caller decides what to do with the rules: they are NOT on the
+  // transaction, so `runRules`'s return shape is unchanged.
+
   const result = await finalizeTransactionForRules(finalTrans);
   for (const field of missingNullableFields) {
     if (result[field] === null) {
       delete result[field];
     }
   }
-  return result;
+  return { transaction: result, appliedRules };
 }
 
 function conditionSpecialCases(cond: Condition | null): Condition | null {

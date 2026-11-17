@@ -5,6 +5,35 @@ import type { CategoryEntity } from './category';
 import type { PayeeEntity } from './payee';
 import type { ScheduleEntity } from './schedule';
 
+/**
+ * A rule that fired while a transaction was being prepared, and the
+ * transaction fields it set.
+ *
+ * `fields` is the set of fields the rule's ACTIONS target — not the ones
+ * whose value happened to change. A rule that sets the category to the
+ * value the transaction already had still CONTROLS the category: an edit
+ * to it would be discarded when the rule runs again, so a caller that
+ * shows the user what a rule controls has to know about it.
+ */
+export type AppliedRule = {
+  /**
+   * The rule's id.
+   *
+   * Every rule that runs comes from the budget's rule table, so it has
+   * one. It is empty only for a rule built without one, which the import
+   * never sees.
+   */
+  id: string;
+  /**
+   * The transaction fields the rule set.
+   *
+   * A split action is NOT here: it sets the field on a leg of the split,
+   * not on the transaction itself. The fields are named as the TRANSACTION
+   * names them — a rule that sets the payee by name sets `payee`.
+   */
+  fields: string[];
+};
+
 export type TransactionEntity = {
   id: string;
   is_parent?: boolean;
@@ -36,4 +65,24 @@ export type TransactionEntity = {
   } | null;
   raw_synced_data?: string | undefined;
   _ruleErrors?: string[];
+  /**
+   * The rules that fired while this transaction was prepared, and the
+   * fields they set.
+   *
+   * The field starts with an underscore, like `_ruleErrors`, so the
+   * insert path ignores it: `conform` skips every field that starts with
+   * one, so this never reaches the `transactions` table.
+   */
+  _appliedRules?: AppliedRule[];
+};
+
+/**
+ * A transaction as the import engine worked on it — before anything was
+ * written, so it has no id yet.
+ *
+ * The import mints the id later, on the insert path. A caller that reads
+ * a transaction out of the import's preview must not expect one.
+ */
+export type PreviewTransaction = Omit<TransactionEntity, 'id'> & {
+  id?: undefined;
 };

@@ -1695,6 +1695,7 @@ async function importTransactions({
       added: reconciled.added,
       updated: reconciled.updated,
       updatedPreview: reconciled.updatedPreview,
+      ruledTransactions: reconciled.ruledTransactions,
     };
   } catch (err) {
     if (err instanceof TransactionError) {
