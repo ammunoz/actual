@@ -117,5 +117,8 @@ storybook-static
 .actualrc.yml
 actual.config.js
 
+# e2e config when testing locally (see AGENTS.md)
+/.e2e-local.json
+
 # Mac App Store provisioning profiles, downloaded per machine
 packages/desktop-electron/mas/*.provisionprofile

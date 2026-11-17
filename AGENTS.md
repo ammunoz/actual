@@ -220,8 +220,11 @@ yarn workspace @actual-app/core run test
 **E2E Tests (Playwright)**
 
 ```bash
-# Run E2E tests for web
+# Run E2E tests for web  (see "Running E2E tests fast" below)
 yarn e2e
+
+# Fast path: prebuilt bundle, ~4x faster
+E2E_USE_BUILD=1 E2E_PORT=3002 yarn e2e --workers=40%
 
 # Desktop Electron E2E (includes full build)
 yarn e2e:desktop
@@ -235,6 +238,87 @@ yarn vrt:docker
 # Run E2E tests for a specific package
 yarn workspace @actual-app/web e2e
 ```
+
+#### Running E2E tests fast
+
+Prefer running e2e tests against the **prebuilt bundle** when you don't need
+HMR or source maps. The Vite dev server transforms ~1,200 modules on demand
+for every page load, which makes the suite ~4x slower, pushes the machine
+into swapping, and produces flaky failures. Measured on
+`e2e/transactions.test.ts` on a 12-core Linux box:
+
+|            | dev server         | prebuilt bundle    |
+| ---------- | ------------------ | ------------------ |
+| Wall clock | 137-179 s (2 runs) | 38 s (2 runs)      |
+| Peak RAM   | 13.7 GB            | 10.5 GB            |
+| Result     | 12 passed, 2 flaky | 14 passed, 0 flaky |
+
+```bash
+# Fast path - serves packages/desktop-client/build
+E2E_USE_BUILD=1 E2E_PORT=3002 yarn e2e --workers=40% <file>
+
+# Rebuild the bundle after changing app source (~60 s).
+# REACT_APP_NETLIFY=true matches how CI builds the bundle.
+REACT_APP_NETLIFY=true yarn build:browser --skip-translations
+```
+
+- `E2E_USE_BUILD=1` serves the prebuilt bundle with
+  `packages/desktop-client/bin/serve-build.mjs` instead of starting Vite.
+- `E2E_PORT=3002` keeps the two modes apart - the dev server owns 3001, and
+  `reuseExistingServer` would otherwise silently hand you the dev server
+  instead of the bundle. Any free port works, as long as nothing else is
+  already serving it.
+- `--workers=40%` costs about 7% of wall clock (126 s vs 118 s on a 56-test
+  batch) but leaves the rest of the cores idle. Drop the flag if you want the
+  run as fast as possible.
+
+**Per-machine overrides.** Nothing reads `.e2e-local.json` automatically - you
+read it and apply it. When the file exists in the repo root, use its `env`
+entries (if any) as environment variables and append its `playwrightArgs` (if
+any) to the `yarn e2e` command. Example `.e2e-local.json`:
+
+```json
+{
+  "env": { "E2E_USE_BUILD": "1", "E2E_PORT": "3003" },
+  "playwrightArgs": ["--workers=25%"]
+}
+```
+
+That means running:
+
+```bash
+E2E_USE_BUILD=1 E2E_PORT=3003 yarn e2e --workers=25% <file>
+```
+
+**Stale bundles.** `E2E_USE_BUILD=1` serves whatever is in
+`packages/desktop-client/build`, so a bundle older than your changes silently
+tests old code. Check with:
+
+```bash
+git status --porcelain -- packages/desktop-client/src packages/loot-core/src \
+  packages/component-library/src packages/crdt/src packages/desktop-client/public
+```
+
+If it lists changed files, rebuild first. This covers app source only - it
+does not track changes to the Vite config or to the staged translations.
+`serve-build.mjs` reads from disk on every request, so you can rebuild while
+the server is up.
+
+**Electron e2e** launches a full Electron app per worker - far heavier than a
+browser page - so use fewer workers:
+
+```bash
+yarn e2e:desktop --workers=2
+```
+
+**Caveats.**
+
+- The bundle is a production build, so it registers the PWA service worker in
+  every test context; dev mode does not. It has not caused failures in
+  practice, but it is a real difference from dev mode.
+- `yarn vrt` is a separate path: it re-runs the whole suite with screenshots
+  and must run in the Playwright docker image (see the `running-vrts` skill).
+  The fast path above does not apply to it.
 
 **Testing Best Practices:**
 
@@ -413,6 +497,9 @@ yarn test
 
 # E2E test for a specific file
 yarn workspace @actual-app/web run playwright test accounts.test.ts --browser=chromium
+
+# Same, against the prebuilt bundle (much faster - see "Running E2E tests fast")
+E2E_USE_BUILD=1 E2E_PORT=3002 yarn e2e e2e/accounts.test.ts --workers=40%
 ```
 
 ### Building for Production
