@@ -82,6 +82,22 @@ test.describe('Keyboard import review', () => {
     );
   }
 
+  /**
+   * Import the fixture with two rows that share a vendor string.
+   *
+   * The two rows have different FITIDs, so neither is a duplicate — but
+   * they carry the SAME vendor string, so a rule made for one of them
+   * applies to the other.
+   */
+  async function importSameVendorOfx() {
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles(
+      join(__dirname, 'data/demo-import-same-vendor.ofx'),
+    );
+  }
+
   test('opens the keyboard review for an OFX file when it is enabled', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review',
@@ -532,6 +548,358 @@ test.describe('Keyboard import review', () => {
     await expect(hints).not.toContainText('accept anyway');
     await expect(hints).toContainText('j/k move');
     await expect(hints).toContainText('a accept');
+  });
+
+  test('picking a payee does NOT create a rule', async () => {
+    // THE FLAGSHIP TEST of the rules-as-vendor-map architecture.
+    //
+    // The rules architecture INVERTS the vendor map's behaviour. The map
+    // learned wholesale: pick a payee once and every future import of
+    // that vendor was resolved with it. The rules architecture does not:
+    // a rule is created ONLY when the user asks for one.
+    //
+    // So this asserts the inversion, and it asserts it against the whole
+    // budget rather than against one account: no rule is created, and
+    // the review does not remember the choice.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Learns Nothing',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user picks a payee for the first row.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('Demo Edited Vendor');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveText(/Demo Edited Vendor/);
+
+    // The import goes through.
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // THE ASSERTION: no rule mentions this vendor. Choosing a payee
+    // changed this transaction and nothing else.
+    //
+    // The demo budget has rules of its own — four of them, linked to
+    // schedules — so a count is not the assertion. The vendor string is:
+    // no rule says anything about it.
+    const rulesPage = await navigation.goToRulesPage();
+    // The rules page HAS rendered: the demo budget has rules of its
+    // own. Without this anchor the assertion below would pass
+    // vacuously on a page that had not loaded yet.
+    await expect(
+      rulesPage.page.getByTestId('conditions').first(),
+    ).toBeVisible();
+    await expect(rulesPage.page.getByText('POS PURCHASE 4251')).toHaveCount(0);
+  });
+
+  test('creating a rule writes it to the budget', async () => {
+    // The rules architecture's ONE creating path. Nothing learns on its
+    // own — the test above proves that — so this is the only way a rule
+    // comes into being, and the user has to ask for it.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Creates A Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user picks a payee for the first row. "Kroger" is a payee the
+    // demo budget already has, so the rule can name it by id.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toBeVisible();
+    const input = editor.getByTestId('import-review-editor-input');
+    await input.fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // The details pane offers to make it a rule, and says what a rule
+    // does BEFORE the user asks for one.
+    await expect(dialog.getByTestId('import-review-rules-note')).toContainText(
+      'applies to every transaction',
+    );
+    const ruleButton = dialog.getByTestId('import-review-rule-vendor-to-payee');
+    await expect(ruleButton).toBeVisible();
+    await ruleButton.click();
+
+    // The notice says what was created.
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    // The review is closed without importing: the rule is about the
+    // future, and the import is a separate question.
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('import-review-confirm-discard').click();
+    await expect(dialog).not.toBeVisible();
+
+    // THE ASSERTION: the rule is in the budget.
+    const rulesPage = await navigation.goToRulesPage();
+    // The rule is in the budget: it says what the vendor is, and what
+    // the vendor becomes.
+    //
+    // The demo budget already has rules of its own — four of them,
+    // linked to schedules — so a count is not the assertion. The
+    // CONDITION is: exactly one rule says this.
+    await expect(
+      rulesPage.page.getByText('imported payee is POS PURCHASE 4251'),
+    ).toHaveCount(1);
+    await expect(rulesPage.page.getByText('set payee to Kroger')).toBeVisible();
+  });
+
+  test('a rule for a payee the budget does not have names it', async () => {
+    // The user types a payee the budget does not have yet. There is no
+    // id for it, so the rule NAMES it: upstream creates the payee the
+    // first time the rule fires.
+    //
+    // The name is NOT trimmed: the payload builder sends the name the
+    // user typed as it is, so the rule must name exactly that, or the
+    // rule would name a payee the import does not make.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Creates A Named Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await editor
+      .getByTestId('import-review-editor-input')
+      .fill('Demo New Payee');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    await dialog.getByTestId('import-review-rule-vendor-to-payee').click();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('import-review-confirm-discard').click();
+    await expect(dialog).not.toBeVisible();
+
+    const rulesPage = await navigation.goToRulesPage();
+    await expect(
+      rulesPage.page.getByText('imported payee is POS PURCHASE 4251'),
+    ).toHaveCount(1);
+    await expect(
+      rulesPage.page.getByText('set payee (name) to Demo New Payee'),
+    ).toBeVisible();
+  });
+
+  test('creating a category rule writes it to the budget', async () => {
+    // The other rule the review can write: this payee is always this
+    // category. Its condition is on the PAYEE, not on the vendor
+    // string, so it applies however the file spelled the vendor.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Creates A Category Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The user picks a payee for the first row.
+    await page.keyboard.press('e');
+    let editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // And a category for it.
+    await page.keyboard.press('c');
+    editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toHaveAttribute('data-field', 'category');
+    await editor.getByTestId('import-review-editor-input').fill('Food');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // The details pane offers the category rule.
+    const ruleButton = dialog.getByTestId(
+      'import-review-rule-payee-to-category',
+    );
+    await expect(ruleButton).toBeVisible();
+    await ruleButton.click();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('import-review-confirm-discard').click();
+    await expect(dialog).not.toBeVisible();
+
+    const rulesPage = await navigation.goToRulesPage();
+    // The condition is on the PAYEE.
+    await expect(rulesPage.page.getByText('payee is Kroger')).toHaveCount(1);
+    await expect(
+      rulesPage.page.getByText('set category to Food'),
+    ).toBeVisible();
+  });
+
+  test('a rule created in the review applies to a later import', async () => {
+    // THE POINT OF THE WHOLE FEATURE.
+    //
+    // The review does NOT evaluate rules — upstream's engine already
+    // runs during the import — so the review's own resolution of the
+    // vendor is a guess, and the rule is what settles it. This proves
+    // the rule the review wrote actually fires.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Rule Applies',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The trust level is raised so the rows with a vendor the budget
+    // does not know are warned about rather than held back.
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+
+    // The user picks a payee for the first row, whose vendor string is
+    // "POS PURCHASE 4251" — something the budget has no payee for.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // And a rule, so the next import of this vendor is settled the
+    // same way.
+    await dialog.getByTestId('import-review-rule-vendor-to-payee').click();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    // The review is put aside: the rule is about the future.
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('import-review-confirm-discard').click();
+    await expect(dialog).not.toBeVisible();
+
+    // The SAME file, imported again. The review knows no more than it
+    // did before — it does not evaluate rules — so the row is resolved
+    // by its guess.
+    await importOfx();
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+
+    // The import goes through.
+    await dialog.getByRole('button', { name: 'Import' }).click();
+    await expect(dialog).not.toBeVisible();
+
+    // THE ASSERTION: the row landed under the payee the RULE says, not
+    // under the name the review guessed.
+    await expect(accountPage.transactionTableRow).toHaveCount(3);
+    await expect(
+      accountPage.transactionTableRow.filter({ hasText: 'Kroger' }),
+    ).toHaveCount(1);
+  });
+
+  test('creating a rule twice amends it rather than adding a second', async () => {
+    // Two rules with the same conditions are a tie, and upstream breaks
+    // the tie on the rule id — a random UUID. So the winner would be
+    // decided at random, and the review could not say which rule
+    // applied. The second rule therefore AMENDS the first.
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Amends A Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importSameVendorOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(2);
+
+    // The first row gets a payee, and a rule for it.
+    await page.keyboard.press('e');
+    let editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+    await dialog.getByTestId('import-review-rule-vendor-to-payee').click();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+
+    // The SECOND row has the same vendor string, so it gets the same
+    // rule — amended, not duplicated.
+    await page.keyboard.press('j');
+    await page.keyboard.press('e');
+    editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Publix');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+    await dialog.getByTestId('import-review-rule-vendor-to-payee').click();
+
+    // The notice is NOT checked here: it still holds what the FIRST
+    // click said, so the assertion would pass whether or not the second
+    // click did anything. The rules page below is what shows it.
+    await page.keyboard.press('Escape');
+    await dialog.getByTestId('import-review-confirm-discard').click();
+    await expect(dialog).not.toBeVisible();
+
+    const rulesPage = await navigation.goToRulesPage();
+    // ONE rule, not two.
+    await expect(
+      rulesPage.page.getByText('imported payee is Demo Grocery Store'),
+    ).toHaveCount(1);
+    // And it says the NEW payee. The old one was replaced, not kept
+    // beside it: two actions on one field would contradict each other.
+    await expect(rulesPage.page.getByText('set payee to Publix')).toBeVisible();
+    await expect(rulesPage.page.getByText('set payee to Kroger')).toHaveCount(
+      0,
+    );
   });
 
   test('a row the trust level holds back is not imported', async () => {

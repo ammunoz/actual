@@ -55,6 +55,7 @@ import type {
   ImportTransactionEntity,
   TransactionEntity,
 } from '@actual-app/core/types/models';
+import type { RuleEntity } from '@actual-app/core/types/models/rule';
 
 import { aqlQuery } from '#queries/aqlQuery';
 
@@ -69,6 +70,8 @@ import {
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
+import { ruleToWrite } from './rules';
+import type { ReviewRule } from './rules';
 import {
   buildSession,
   MAX_SESSION_BYTES,
@@ -211,6 +214,42 @@ const EMPTY_UNSAVED_WORK: UnsavedWork = Object.freeze({
   edited: 0,
 });
 
+/**
+ * What came of a rule the review tried to write.
+ *
+ * - `created` — the rule is in the budget, and the review knows.
+ * - `created-stale` — the rule is in the budget, but the review could
+ *   not be refreshed afterwards, so it does not know. The rule IS
+ *   there; the review's copy of the budget is behind.
+ * - `unchanged` — the budget already said exactly this, so nothing was
+ *   written.
+ * - `failed` — nothing was written, and the reason is in the error.
+ * - `busy` — another rule is being written, so this one was not
+ *   started. Two writes at once could both decide to ADD a rule, and
+ *   two rules with the same conditions are a tie that upstream breaks
+ *   on the rule id — a random UUID.
+ */
+export type CreateRuleOutcome =
+  | 'created'
+  | 'created-stale'
+  | 'unchanged'
+  | 'failed'
+  | 'busy';
+
+/**
+ * What upstream's rule handlers return.
+ *
+ * A successful write returns the rule. A rejected one returns the
+ * errors: the CONDITION errors and the ACTION errors, each a code.
+ * There is no message.
+ */
+type RuleWriteResult = {
+  error?: {
+    conditionErrors?: string[];
+    actionErrors?: string[];
+  };
+};
+
 export type ImportReviewState = {
   status: ReviewStatus;
   error: string | null;
@@ -281,6 +320,13 @@ export type ImportReviewState = {
   undo: () => void;
   /** Cycle the trust level. */
   cycleTrustLevel: () => void;
+  /**
+   * Create a rule, or amend the one that already says it.
+   *
+   * This is the ONLY path that creates a rule: nothing in the review
+   * learns on its own. Resolves to what came of it.
+   */
+  createRule: (rule: ReviewRule) => Promise<CreateRuleOutcome>;
   /**
    * Put the review aside, so it can be picked up later.
    *
@@ -406,6 +452,23 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<ImportPreviewState | null>(null);
 
+  /**
+   * The rows as they stand, right now.
+   *
+   * The re-resolve after a rule is written carries the user's work
+   * across, and it must carry the work the user did WHILE the rule was
+   * being written — a row accepted in that time is work, and the
+   * re-resolve would throw it away.
+   *
+   * The ref is kept in step by an effect, which runs after every
+   * change. The re-resolve happens at the end of a network round trip,
+   * so the ref is up to date by then.
+   */
+  const stateRef = useRef<ImportPreviewState | null>(null);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   // The cursor is in a ref as well as in state.
   //
   // The undo snapshot has to record where the user WAS, and a change is
@@ -445,6 +508,36 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [payees, setPayees] = useState<readonly ReviewPayee[]>([]);
   const [accounts, setAccounts] = useState<readonly ReviewAccount[]>([]);
   const [categories, setCategories] = useState<readonly ReviewCategory[]>([]);
+
+  /**
+   * The rules, as the last write left them.
+   *
+   * The ref is what makes the amend decision right for a write that
+   * starts after the previous one landed: the ref is updated the
+   * moment a write lands, so the second write sees the rule the first
+   * one made, and amends it instead of adding a second one.
+   *
+   * It does NOT cover two writes that start at the same time — for
+   * that there is `ruleWriteRef` below.
+   *
+   * KNOWN LIMIT: a rule written on ANOTHER device while this review is
+   * open is not seen. The next rule this review writes would then be
+   * added rather than amended. The budget would have two rules with
+   * the same conditions, and upstream would break the tie on the rule
+   * id — a random UUID.
+   */
+  const rulesRef = useRef<readonly RuleEntity[]>([]);
+
+  /**
+   * The rule write that is in flight, if there is one.
+   *
+   * Two writes that start at the same time would both read the same
+   * list of rules, and both would decide that no rule with these
+   * conditions exists — so both would add one, and two rules with the
+   * same conditions are a tie that upstream breaks on the rule id,
+   * which is a random UUID. The second write is refused instead.
+   */
+  const ruleWriteRef = useRef(false);
 
   const [vendorMapRaw, setVendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
 
@@ -703,11 +796,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
      */
     async function loadSession(saved: ImportReviewSession) {
       try {
-        const [payeeEntities, accountEntities, categoryEntities] =
+        const [payeeEntities, accountEntities, categoryEntities, ruleEntities] =
           await Promise.all([
             send('payees-get'),
             send('accounts-get'),
             send('get-categories'),
+            // The rules are read so a rule the user creates can be
+            // AMENDED rather than added: two rules with the same
+            // conditions are a tie, and upstream breaks the tie on the
+            // rule id — a random UUID.
+            send('rules-get'),
           ]);
 
         if (cancelled) return;
@@ -761,6 +859,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         fuzzyCache.clear();
         setAccounts(accountList);
         setCategories(categoryList);
+        rulesRef.current = ruleEntities;
 
         const stale = staleRowNames(saved, {
           accounts: accountList,
@@ -849,20 +948,30 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       }
 
       try {
-        const [payeeEntities, accountEntities, categoryEntities, parsed] =
-          await Promise.all([
-            send('payees-get'),
-            send('accounts-get'),
-            send('get-categories'),
-            // A session holds the rows that were already parsed, so there
-            // is no file to read: the review continues where it was left.
-            session
-              ? Promise.resolve(null)
-              : send('transactions-parse-file', {
-                  filepath: filename,
-                  options: {},
-                }),
-          ]);
+        const [
+          payeeEntities,
+          accountEntities,
+          categoryEntities,
+          ruleEntities,
+          parsed,
+        ] = await Promise.all([
+          send('payees-get'),
+          send('accounts-get'),
+          send('get-categories'),
+          // The rules are read so a rule the user creates can be
+          // AMENDED rather than added: two rules with the same
+          // conditions are a tie, and upstream breaks the tie on the
+          // rule id — a random UUID.
+          send('rules-get'),
+          // A session holds the rows that were already parsed, so there
+          // is no file to read: the review continues where it was left.
+          session
+            ? Promise.resolve(null)
+            : send('transactions-parse-file', {
+                filepath: filename,
+                options: {},
+              }),
+        ]);
 
         if (cancelled) return;
 
@@ -925,6 +1034,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         fuzzyCache.clear();
         setAccounts(accountList);
         setCategories(categoryList);
+        rulesRef.current = ruleEntities;
 
         // Safe: the parse handler's loose type is a union of a structured
         // transaction and a CSV record, and `toReviewRows` reads each
@@ -1319,6 +1429,145 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     setState(next);
   }, [accounts, payees, resolveOptsFor, state, vendorMapRaw]);
 
+  /**
+   * Create a rule, or amend the one that already says it.
+   *
+   * **This is the only way the review creates a rule.** Nothing in the
+   * review learns on its own: picking a payee changes that transaction
+   * and nothing else. A rule exists because the user asked for one.
+   *
+   * The rule is written with upstream's own handlers — `rule-add` for a
+   * new one, `rule-update` when one with the same conditions already
+   * exists. The second case matters: two rules with the same conditions
+   * are a tie, and upstream breaks the tie on the rule id, which is a
+   * random UUID. So the winner would be decided at random, and the
+   * review could not say which rule applied.
+   *
+   * Three things happen after the write:
+   *
+   *   - the rules are read again, so the review's own copy is the
+   *     server's. `rules-get` reads the in-memory cache, and the cache
+   *     is updated by the sync listener the write went through — but
+   *     reading it again does not depend on that.
+   *   - the payees are read again. A rule can create a payee (upstream's
+   *     `payee_name` action), and the client's list would otherwise be
+   *     stale — and a stale list means the fuzzy memo's fingerprint does
+   *     not change, so it would serve an answer about a payee that is
+   *     gone.
+   *   - the rows are resolved again, carrying the user's decisions and
+   *     edits across.
+   */
+  const createRule = useCallback(
+    (rule: ReviewRule): Promise<CreateRuleOutcome> => {
+      // There is nothing to re-resolve before the file has been parsed.
+      if (!stateRef.current) return Promise.resolve('failed');
+
+      // One rule write at a time. Two at once would both read the same
+      // list of rules, and both would decide to ADD — and two rules
+      // with the same conditions are a tie that upstream breaks on the
+      // rule id, which is a random UUID.
+      if (ruleWriteRef.current) return Promise.resolve('busy');
+      ruleWriteRef.current = true;
+
+      // The write is done in an inner promise so the flag can be
+      // released when it settles, however it settles. A `try`/`finally`
+      // would say the same thing, but the compiler cannot see which
+      // values a callback depends on across one.
+      const write = (async () => {
+        const { method, rule: toWrite } = ruleToWrite(rulesRef.current, rule);
+
+        // The rule already says this: there is nothing to write, and a
+        // write that changes nothing still takes a step in the undo
+        // history and still syncs.
+        if (method === 'none') return 'unchanged';
+
+        let result: RuleWriteResult | undefined;
+        try {
+          result = (await send(method, toWrite)) as RuleWriteResult;
+        } catch (err) {
+          console.error('The rule could not be written:', err);
+          return 'failed';
+        }
+
+        if (result?.error) {
+          // Upstream reports what was wrong with the rule — the
+          // condition and the action, each with a code — and there is
+          // no message. The codes go to the console, where a developer
+          // will find them; the user gets a plain sentence from the
+          // notice.
+          const codes = [
+            ...(result.error.conditionErrors ?? []),
+            ...(result.error.actionErrors ?? []),
+          ].filter((code): code is string => typeof code === 'string');
+          if (codes.length > 0) {
+            console.error('The rule was rejected:', codes.join(', '));
+          }
+          return 'failed';
+        }
+
+        // The rule IS in the budget at this point. Everything below
+        // refreshes the REVIEW's copy of the budget, and a failure
+        // there does not undo the rule — so it has its own outcome,
+        // because "nothing was changed" would be a lie.
+        let freshRules: readonly RuleEntity[];
+        let freshPayees: readonly {
+          id: string;
+          name: string;
+          transfer_acct?: string | null;
+        }[];
+        try {
+          [freshRules, freshPayees] = await Promise.all([
+            send('rules-get'),
+            send('payees-get'),
+          ]);
+        } catch (err) {
+          console.error('The budget could not be read after the rule:', err);
+          return 'created-stale';
+        }
+
+        rulesRef.current = freshRules;
+
+        const payeeList: readonly ReviewPayee[] = freshPayees.map(p => ({
+          id: p.id,
+          name: p.name,
+          transferAcct: p.transfer_acct,
+        }));
+
+        // The payee list may have changed — a rule can create a payee —
+        // so the memo's entries are for a list that is gone. The
+        // fingerprint in the key makes a stale HIT impossible, but the
+        // entries would still be held, so they are dropped.
+        fuzzyCache.clear();
+        setPayees(payeeList);
+
+        const next = rebuildPreviewState({
+          base: baseRows.current,
+          // The work as it stands NOW, not as it stood when the write
+          // started.
+          previous: stateRef.current ?? undefined,
+          trustLevel: trustLevelRef.current,
+          resolveOpts: resolveOptsFor(payeeList, accounts),
+        });
+        setState(next);
+
+        return 'created';
+      })();
+
+      // A throw after the write — the re-fetch, the re-resolve — must
+      // not leave the caller with a rejected promise and no notice. It
+      // is caught here, so the review says what happened.
+      return write
+        .catch(err => {
+          console.error('The rule could not be written:', err);
+          return 'failed' as const;
+        })
+        .finally(() => {
+          ruleWriteRef.current = false;
+        });
+    },
+    [accounts, fuzzyCache, resolveOptsFor],
+  );
+
   const apply = useCallback(async (): Promise<boolean> => {
     // Reentrancy guard. The Import button is disabled while applying, but
     // the `ctrl+s` hotkey is not, so a second press would start a second
@@ -1692,6 +1941,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     moveFocus,
     undo,
     cycleTrustLevel,
+    createRule,
     saveSession,
     apply,
     close,

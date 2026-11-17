@@ -40,6 +40,8 @@ import { HintStrip } from './HintStrip';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
+import { rulesForRow } from './rules';
+import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
 import { TransferPane } from './TransferPane';
@@ -307,6 +309,55 @@ export function KeyboardImportModal({
   // user cleared them, so there is nothing to show.
   const focusedMemo = focused ? (focused.edits.memo ?? focused.memo ?? '') : '';
 
+  // The rules the focused row could have.
+  //
+  // A rule is offered only when it can be written truthfully: the
+  // vendor rule needs a vendor string and a payee, and the category
+  // rule needs a payee BY ID — that is what its condition matches on.
+  const focusedRules = useMemo(
+    () =>
+      focused
+        ? rulesForRow(focused, review.payees, review.categories)
+        : undefined,
+    [focused, review.categories, review.payees],
+  );
+
+  // A rule is being written. The buttons are disabled while it is, so a
+  // second click cannot write the same rule twice.
+  const [creatingRule, setCreatingRule] = useState(false);
+
+  /**
+   * Write a rule, and say what it does.
+   *
+   * There is no confirmation. The fork never confirms a durable action
+   * — not accept-all, not drop-all, not routing a row into another
+   * account — and a rule is no more destructive than any of those: it
+   * says exactly what it does, the details pane says so before the
+   * click, and the notice says it again after.
+   */
+  const createRule = async (rule: ReviewRule | undefined, message: string) => {
+    if (!rule || creatingRule) return;
+    setCreatingRule(true);
+    try {
+      const outcome = await review.createRule(rule);
+      setNotice(
+        outcome === 'created'
+          ? message
+          : outcome === 'created-stale'
+            ? t(
+                'The rule was created, but the review could not be refreshed. It will show the change the next time it opens.',
+              )
+            : outcome === 'unchanged'
+              ? t('That rule already says this. Nothing was changed.')
+              : outcome === 'busy'
+                ? t('Another rule is being written. Nothing was changed.')
+                : t('The rule could not be created. Nothing was changed.'),
+      );
+    } finally {
+      setCreatingRule(false);
+    }
+  };
+
   // The live payee names, so the trust-level chips below agree with the
   // badges: both have to answer the same question about the same row.
   const livePayeeNames = useMemo(
@@ -441,6 +492,10 @@ export function KeyboardImportModal({
         closeReview();
         break;
       case 'apply':
+        // A rule is being written: the import would race the write, and
+        // the rule the user just made might or might not be in the
+        // import. The Import button is off for the same reason.
+        if (creatingRule) break;
         void review.apply().then(didChange => {
           if (didChange) closeReview();
         });
@@ -658,6 +713,10 @@ export function KeyboardImportModal({
                 isDisabled={
                   isLoading ||
                   rows.length === 0 ||
+                  // A rule is being written: the import would race the
+                  // write, and the rule the user just made might or
+                  // might not be in the import.
+                  creatingRule ||
                   pane?.kind === 'confirm' ||
                   pane?.kind === 'split' ||
                   pane?.kind === 'transfer'
@@ -977,6 +1036,56 @@ export function KeyboardImportModal({
                   <Text data-testid="import-review-notes">
                     <Trans>Notes</Trans>: {focusedMemo}
                   </Text>
+                ) : null}
+
+                {focusedRules &&
+                (focusedRules.vendorToPayee || focusedRules.payeeToCategory) ? (
+                  <>
+                    <View
+                      style={{ flexDirection: 'row', gap: 8 }}
+                      data-testid="import-review-rules"
+                    >
+                      {focusedRules.vendorToPayee ? (
+                        <Button
+                          data-testid="import-review-rule-vendor-to-payee"
+                          isDisabled={creatingRule}
+                          onPress={() => {
+                            void createRule(
+                              focusedRules.vendorToPayee,
+                              t(
+                                'Rule created. This vendor will always use this payee, from now on.',
+                              ),
+                            );
+                          }}
+                        >
+                          <Trans>Always this payee for this vendor</Trans>
+                        </Button>
+                      ) : null}
+                      {focusedRules.payeeToCategory ? (
+                        <Button
+                          data-testid="import-review-rule-payee-to-category"
+                          isDisabled={creatingRule}
+                          onPress={() => {
+                            void createRule(
+                              focusedRules.payeeToCategory,
+                              t(
+                                'Rule created. This payee will always use this category, from now on.',
+                              ),
+                            );
+                          }}
+                        >
+                          <Trans>Always this category for this payee</Trans>
+                        </Button>
+                      ) : null}
+                    </View>
+                    <Text data-testid="import-review-rules-note">
+                      <Trans>
+                        A rule applies to every transaction with that vendor,
+                        from now on. It does not change the transactions you
+                        already have.
+                      </Trans>
+                    </Text>
+                  </>
                 ) : null}
               </View>
             ) : null}

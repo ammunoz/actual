@@ -25,6 +25,10 @@ export const HELP_LIMITATIONS = [
     one account. The same vendor name in two accounts keeps only the last
     choice.
   </Trans>,
+  <Trans key="rules">
+    A rule you create here applies to every transaction with that vendor, from
+    now on. It does not change the transactions you already have.
+  </Trans>,
   <Trans key="splits">
     A split that was imported before is matched to the old one by the
     bank&apos;s id. Its legs are matched by position, so a leg you added by hand

@@ -1,4 +1,5 @@
 import { send } from '@actual-app/core/platform/client/connection';
+import type { RuleEntity } from '@actual-app/core/types/models/rule';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useCustomSyncedPref } from './use-custom-synced-pref';
@@ -207,6 +208,8 @@ describe('useImportReview', () => {
   const CATEGORIES = {
     list: [{ id: 'c-1', name: 'Groceries', hidden: 0, is_income: 0 }],
   };
+  /** The budget's rules. Empty: the review starts with none. */
+  const RULES: RuleEntity[] = [];
   const PARSED = {
     transactions: [
       {
@@ -235,6 +238,10 @@ describe('useImportReview', () => {
           return PAYEES;
         case 'accounts-get':
           return ACCOUNTS;
+        case 'rules-get':
+          // The budget's rules. The review reads them so a rule it
+          // creates can be AMENDED rather than added.
+          return RULES;
         case 'get-categories':
           return CATEGORIES;
         case 'transactions-parse-file':
@@ -327,6 +334,284 @@ describe('useImportReview', () => {
     expect(result.current.unsavedWork.hasWork).toBe(false);
   });
 
+  it('writes a rule with the shape upstream understands', async () => {
+    const { result } = await renderReview();
+
+    let written: unknown;
+    sendMock.mockImplementation((async (name: string, args: unknown) => {
+      if (name === 'rule-add') {
+        written = args;
+        return { id: 'rule-1', ...(args as object) };
+      }
+      if (name === 'rules-get') return RULES;
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    let outcome = 'failed';
+    await act(async () => {
+      outcome = await result.current.createRule({
+        stage: 'pre',
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'imported_payee', value: 'Demo Vendor' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+      });
+    });
+
+    expect(outcome).toBe('created');
+    expect(written).toEqual({
+      stage: 'pre',
+      conditionsOp: 'and',
+      conditions: [{ op: 'is', field: 'imported_payee', value: 'Demo Vendor' }],
+      actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+    });
+  });
+
+  it('amends a rule that already says the same thing', async () => {
+    // Two rules with the same conditions are a tie, and upstream breaks
+    // the tie on the rule id — a random UUID. So a second rule would
+    // have an unpredictable winner.
+    const existing: RuleEntity = {
+      id: 'rule-1',
+      stage: 'pre',
+      conditionsOp: 'and',
+      conditions: [{ op: 'is', field: 'imported_payee', value: 'Demo Vendor' }],
+      actions: [{ op: 'set', field: 'payee', value: 'p-old' }],
+    };
+
+    // The mock is set BEFORE the review opens: the review reads the
+    // rules when it opens, and the amendment is decided against that
+    // copy.
+    const methods: string[] = [];
+    let written: unknown;
+    sendMock.mockImplementation((async (name: string, args: unknown) => {
+      methods.push(name);
+      if (name === 'rule-update') {
+        written = args;
+        return args;
+      }
+      if (name === 'rules-get') return [existing];
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    const { result } = await renderReview();
+
+    await act(async () => {
+      await result.current.createRule({
+        stage: 'pre',
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'imported_payee', value: 'Demo Vendor' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'p-new' }],
+      });
+    });
+
+    expect(methods).toContain('rule-update');
+    expect(methods).not.toContain('rule-add');
+    expect(written).toEqual({
+      id: 'rule-1',
+      stage: 'pre',
+      conditionsOp: 'and',
+      conditions: [{ op: 'is', field: 'imported_payee', value: 'Demo Vendor' }],
+      actions: [{ op: 'set', field: 'payee', value: 'p-new' }],
+    });
+  });
+
+  it('does not write a rule that already says the same thing', async () => {
+    // A write that changes nothing still takes a step in the undo
+    // history and still syncs. So there is no write at all, and the
+    // review says the rule was already there.
+    const existing: RuleEntity = {
+      id: 'rule-1',
+      stage: 'pre',
+      conditionsOp: 'and',
+      conditions: [{ op: 'is', field: 'imported_payee', value: 'Demo Vendor' }],
+      actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+    };
+
+    const methods: string[] = [];
+    sendMock.mockImplementation((async (name: string) => {
+      methods.push(name);
+      if (name === 'rules-get') return [existing];
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    const { result } = await renderReview();
+
+    let outcome = 'created';
+    await act(async () => {
+      outcome = await result.current.createRule({
+        stage: 'pre',
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'imported_payee', value: 'Demo Vendor' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+      });
+    });
+
+    expect(outcome).toBe('unchanged');
+    expect(methods).not.toContain('rule-add');
+    expect(methods).not.toContain('rule-update');
+  });
+
+  it('says so when the rule could not be written', async () => {
+    const { result } = await renderReview();
+
+    sendMock.mockImplementation((async (name: string) => {
+      if (name === 'rule-add') {
+        return { error: { conditionErrors: ['no-null'] } };
+      }
+      if (name === 'rules-get') return RULES;
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    let outcome = 'created';
+    await act(async () => {
+      outcome = await result.current.createRule({
+        stage: 'pre',
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'imported_payee', value: 'Demo Vendor' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+      });
+    });
+
+    expect(outcome).toBe('failed');
+    // The hook does not raise the banner for a rule that would not
+    // write: the notice carries it, and a banner would sit there for
+    // the rest of the review over something the user can fix by
+    // pressing the button again.
+    expect(result.current.error).toBeNull();
+  });
+
+  it('says the rule was made even when the refresh failed', async () => {
+    // The rule IS in the budget once the write lands. Everything after
+    // that only refreshes the review's copy of the budget, and a
+    // failure there does not undo the rule. So the outcome must not be
+    // "failed" — that would tell the user nothing was changed, and it
+    // would be a lie.
+    const { result } = await renderReview();
+
+    sendMock.mockImplementation((async (name: string) => {
+      if (name === 'rule-add') return { id: 'rule-1' };
+      if (name === 'rules-get') throw new Error('the budget is gone');
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    let outcome = 'failed';
+    await act(async () => {
+      outcome = await result.current.createRule({
+        stage: 'pre',
+        conditionsOp: 'and',
+        conditions: [
+          { op: 'is', field: 'imported_payee', value: 'Demo Vendor' },
+        ],
+        actions: [{ op: 'set', field: 'payee', value: 'p-1' }],
+      });
+    });
+
+    expect(outcome).toBe('created-stale');
+  });
+
+  it('refuses a second rule write while one is in flight', async () => {
+    // Two writes at once would both read the same list of rules, and
+    // both would decide to ADD — and two rules with the same
+    // conditions are a tie that upstream breaks on the rule id, which
+    // is a random UUID.
+    const { result } = await renderReview();
+
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+
+    sendMock.mockImplementation((async (name: string) => {
+      if (name === 'rule-add') {
+        await gate;
+        return { id: 'rule-1' };
+      }
+      if (name === 'rules-get') return RULES;
+      if (name === 'payees-get') return PAYEES;
+      if (name === 'accounts-get') return ACCOUNTS;
+      if (name === 'get-categories') return CATEGORIES;
+      if (name === 'transactions-parse-file') return PARSED;
+      if (name === 'transactions-import') {
+        return { updatedPreview: [], added: [], updated: [], errors: [] };
+      }
+      if (name === 'query') return { data: [], dependencies: [] };
+      throw new Error(`unexpected send: ${name}`);
+    }) as never);
+
+    const rule = {
+      stage: 'pre' as const,
+      conditionsOp: 'and' as const,
+      conditions: [
+        {
+          op: 'is' as const,
+          field: 'imported_payee' as const,
+          value: 'Demo Vendor',
+        },
+      ],
+      actions: [{ op: 'set' as const, field: 'payee', value: 'p-1' }],
+    };
+
+    let first = 'created';
+    let second = 'created';
+    await act(async () => {
+      const firstWrite = result.current.createRule(rule);
+      second = await result.current.createRule(rule);
+      release?.();
+      first = await firstWrite;
+    });
+
+    expect(second).toBe('busy');
+    expect(first).toBe('created');
+  });
+
   it('imports every row into the account the review was opened for', async () => {
     const { result } = await renderReview();
 
@@ -369,6 +654,10 @@ describe('useImportReview', () => {
           return PAYEES;
         case 'accounts-get':
           return ACCOUNTS;
+        case 'rules-get':
+          // The budget's rules. The review reads them so a rule it
+          // creates can be AMENDED rather than added.
+          return RULES;
         case 'get-categories':
           return CATEGORIES;
         case 'transactions-parse-file':
@@ -631,6 +920,10 @@ describe('useImportReview', () => {
           return PAYEES;
         case 'accounts-get':
           return ACCOUNTS;
+        case 'rules-get':
+          // The budget's rules. The review reads them so a rule it
+          // creates can be AMENDED rather than added.
+          return RULES;
         case 'get-categories':
           return CATEGORIES;
         case 'transactions-parse-file':
@@ -683,6 +976,10 @@ describe('useImportReview', () => {
           return PAYEES;
         case 'accounts-get':
           return ACCOUNTS;
+        case 'rules-get':
+          // The budget's rules. The review reads them so a rule it
+          // creates can be AMENDED rather than added.
+          return RULES;
         case 'get-categories':
           return CATEGORIES;
         case 'transactions-parse-file':
@@ -742,6 +1039,10 @@ describe('useImportReview', () => {
           return PAYEES;
         case 'accounts-get':
           return ACCOUNTS;
+        case 'rules-get':
+          // The budget's rules. The review reads them so a rule it
+          // creates can be AMENDED rather than added.
+          return RULES;
         case 'get-categories':
           return CATEGORIES;
         case 'transactions-parse-file':
@@ -993,6 +1294,7 @@ describe('useImportReview', () => {
       if (name === 'payees-get') return PAYEES;
       if (name === 'accounts-get') return ACCOUNTS;
       if (name === 'get-categories') return CATEGORIES;
+      if (name === 'rules-get') return RULES;
       if (name === 'transactions-parse-file') return PARSED;
       if (name === 'query') return { data: [], dependencies: [] };
       throw new Error(`unexpected send: ${name}`);
