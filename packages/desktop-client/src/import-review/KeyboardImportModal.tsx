@@ -3,6 +3,7 @@ import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
+import { SvgTag } from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { TextOneLine } from '@actual-app/components/text-one-line';
@@ -28,8 +29,8 @@ import { integerToAmount } from '@actual-app/core/shared/util';
 
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
-import { removeModal } from '#modals/modalsSlice';
-import { useDispatch } from '#redux';
+import { pushModal, removeModal } from '#modals/modalsSlice';
+import { useDispatch, useSelector } from '#redux';
 
 import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
@@ -40,6 +41,13 @@ import { HintStrip } from './HintStrip';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { RowEditor } from './RowEditor';
+import {
+  editChangesRuledField,
+  RULED_FIELD_FOR_MODE,
+  visibleEffectFor,
+  visibleEffectsFor,
+} from './rule-effects';
+import type { RuledField, RuleEffect } from './rule-effects';
 import { rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
@@ -115,6 +123,18 @@ export function KeyboardImportModal({
   });
   const { enableScope, disableScope } = useHotkeysContext();
 
+  /**
+   * Is upstream's rule editor open on top of the review?
+   *
+   * It is read from the MODAL STACK, not from local state: the editor can
+   * be closed with its own X button, which fires no callback of the
+   * review's, and a local flag would stay true and leave the review's
+   * hotkeys switched off for good.
+   */
+  const isEditingRule = useSelector(state =>
+    state.modals.modalStack.some(modal => modal.name === 'edit-rule'),
+  );
+
   // The pane below the table: the editor for a field, the split editor,
   // the help, or the confirmation.
   const [pane, setPane] = useState<PaneMode>(null);
@@ -164,6 +184,13 @@ export function KeyboardImportModal({
     return null;
   };
 
+  // The payee names, for the same reason as the category names: a rule
+  // that sets the payee sets an ID, and the cell shows the NAME.
+  const payeeNames = useMemo(
+    () => new Map(review.payees.map(payee => [payee.id, payee.name])),
+    [review.payees],
+  );
+
   // The category names, looked up once: the table renders a cell for
   // every row, and finding the name in a list each time is a search per
   // row per render.
@@ -204,19 +231,40 @@ export function KeyboardImportModal({
    * own transactions table does: the payee of a transfer is the other
    * account, not the vendor the bank file named.
    */
-  const payeeCell = (row: PreviewRow): { label: string } => {
+  const payeeCell = (row: PreviewRow): { label: string; ruled: boolean } => {
+    // A rule that sets the payee OWNS the cell: the engine's value is
+    // what lands, so that is what the cell says.
+    const effect = visibleEffectFor(review.ruleEffects, row, 'payee');
+    //
+    // A rule that CLEARED the payee leaves the row with none, so the
+    // cell says nothing — the user's old payee would be a lie, because
+    // it is not what lands.
+    if (effect) {
+      const name =
+        effect.value === null
+          ? undefined
+          : payeeNames.get(String(effect.value));
+      return { label: name ?? '', ruled: true };
+    }
     // A split keeps the vendor: the categories live on the legs, and
     // the parent still carries the payee.
     if (isSplitRow(row.edits)) {
-      return { label: row.edits.payeeCanonical ?? row.payeeCanonical };
+      return {
+        label: row.edits.payeeCanonical ?? row.payeeCanonical,
+        ruled: false,
+      };
     }
     const transferAccountId = effectiveTransferAccountId(row);
     if (transferAccountId !== undefined) {
       return {
         label: accountNames.get(transferAccountId) ?? t('Transfer'),
+        ruled: false,
       };
     }
-    return { label: row.edits.payeeCanonical ?? row.payeeCanonical };
+    return {
+      label: row.edits.payeeCanonical ?? row.payeeCanonical,
+      ruled: false,
+    };
   };
 
   /**
@@ -235,7 +283,23 @@ export function KeyboardImportModal({
    */
   const categoryCell = (
     row: PreviewRow,
-  ): { label: string; group?: string; muted: boolean } => {
+  ): { label: string; group?: string; muted: boolean; ruled: boolean } => {
+    // A rule that sets the category OWNS the cell: the engine's value is
+    // what lands, so that is what the cell says.
+    const effect = visibleEffectFor(review.ruleEffects, row, 'category');
+    // A rule that CLEARED the category leaves the row with none, so the
+    // cell says so — the user's old category would be a lie, because it
+    // is not what lands.
+    if (effect && !isSplitRow(row.edits)) {
+      const id = effect.value === null ? undefined : String(effect.value);
+      const name = id ? categoryNames.get(id) : undefined;
+      return {
+        label: name ?? t('Categorize'),
+        group: id && name ? categoryGroupNames.get(id) : undefined,
+        muted: !name,
+        ruled: true,
+      };
+    }
     if (isSplitRow(row.edits)) {
       return {
         // The count is NOT named `count`: i18next reads that as a
@@ -243,25 +307,79 @@ export function KeyboardImportModal({
         // something countable.
         label: t('Split ({{legs}})', { legs: row.edits.splits?.length ?? 0 }),
         muted: true,
+        ruled: false,
       };
     }
     // A transfer's category is the transfer pseudo-category, not a
     // budget category, so it says "Transfer" the way Actual's own
     // transactions table does.
     if (effectiveTransferAccountId(row) !== undefined) {
-      return { label: t('Transfer'), muted: true };
+      return { label: t('Transfer'), muted: true, ruled: false };
     }
     const categoryId = row.edits.categoryId;
-    if (!categoryId) return { label: t('Categorize'), muted: true };
+    if (!categoryId) {
+      return { label: t('Categorize'), muted: true, ruled: false };
+    }
     const name = categoryNames.get(categoryId);
     // A category that no longer exists is dropped at the apply step, so
     // the row is imported without one: "Categorize" says so.
-    if (!name) return { label: t('Categorize'), muted: true };
+    if (!name) {
+      return { label: t('Categorize'), muted: true, ruled: false };
+    }
     return {
       label: name,
       group: categoryGroupNames.get(categoryId),
       muted: false,
+      ruled: false,
     };
+  };
+
+  /**
+   * What the row's amount cell says.
+   *
+   * A rule that sets the amount owns the cell: the engine's value is
+   * what lands, so that is what the cell says.
+   */
+  const amountCell = (
+    row: PreviewRow,
+  ): { amount: ReturnType<typeof integerToAmount>; ruled: boolean } => {
+    const effect = visibleEffectFor(review.ruleEffects, row, 'amount');
+    // A rule that sets the amount changes the PARENT, split row or not:
+    // the engine writes the rule's amount, and the legs then no longer
+    // add up to it. The cell shows what will land.
+    if (effect && typeof effect.value === 'number') {
+      return { amount: integerToAmount(effect.value), ruled: true };
+    }
+    return {
+      amount: integerToAmount(row.edits.amountCents ?? row.amountCents),
+      ruled: false,
+    };
+  };
+
+  /**
+   * What the row's date cell says.
+   *
+   * A rule that sets the date owns the cell, the same way the payee and
+   * the category do.
+   */
+  const dateCell = (row: PreviewRow): { date: string; ruled: boolean } => {
+    const effect = visibleEffectFor(review.ruleEffects, row, 'date');
+    if (effect && typeof effect.value === 'string') {
+      return { date: effect.value, ruled: true };
+    }
+    return { date: row.edits.date ?? row.date, ruled: false };
+  };
+
+  /**
+   * The style a cell the review cannot change carries.
+   *
+   * DIMMED, because the value is not the user's to choose. UNDERLINED in
+   * purple, because the underline is what says WHY — and the purple is
+   * the one Actual already uses for a row something else has claimed.
+   */
+  const ruledStyle = {
+    color: theme.pageTextSubdued,
+    borderBottom: `2px solid ${theme.tableBorderSelected}`,
   };
 
   // Why a row is flagged, in the user's terms. The code beside it is the
@@ -308,6 +426,162 @@ export function KeyboardImportModal({
   // The notes the row would be imported with. An empty string means the
   // user cleared them, so there is nothing to show.
   const focusedMemo = focused ? (focused.edits.memo ?? focused.memo ?? '') : '';
+
+  /**
+   * The rule effects that apply to a row.
+   *
+   * The review asks the engine what the rules did, so this is the
+   * engine's answer, not the fork's guess. A field in here is one the
+   * user cannot change: the rule's value lands whatever they type.
+   *
+   * A SPLIT row's CATEGORY is the exception, and that rule lives in ONE
+   * place — `visibleEffectsFor` — so the cells and the pane cannot drift
+   * apart.
+   */
+  const effectsForRow = useCallback(
+    (row: PreviewRow): RuleEffect[] =>
+      visibleEffectsFor(review.ruleEffects, row),
+    [review.ruleEffects],
+  );
+
+  /**
+   * The rules that control a field of the FOCUSED row.
+   */
+  const focusedEffects = useMemo<readonly RuleEffect[]>(
+    () => (focused ? effectsForRow(focused) : []),
+    [effectsForRow, focused],
+  );
+
+  /**
+   * The rule that controls the field the editor is open on.
+   *
+   * `undefined` when no rule controls it, and when there is no editor
+   * open at all.
+   */
+  const focusedLockedEffect = useMemo<RuleEffect | undefined>(() => {
+    if (!focused || pane?.kind !== 'editor') return undefined;
+    return visibleEffectFor(
+      review.ruleEffects,
+      focused,
+      RULED_FIELD_FOR_MODE[pane.field],
+    );
+  }, [focused, pane, review.ruleEffects]);
+
+  /**
+   * The id of the payee the user's edit names.
+   *
+   * The picker gives the id of the payee it matched. When it matched
+   * none — the user typed the name — the budget's payee list is asked
+   * instead: the user may have typed the name of a payee that IS in the
+   * budget, and that is not a change.
+   */
+  const editedPayeeId = (
+    edits: PreviewEdits,
+    chosenPayeeId: string | undefined,
+  ): string | undefined => {
+    if (chosenPayeeId) return chosenPayeeId;
+    const name = edits.payeeCanonical;
+    if (!name) return undefined;
+    const wanted = name.trim().toLowerCase();
+    return review.payees.find(
+      payee =>
+        !payee.transferAcct && payee.name.trim().toLowerCase() === wanted,
+    )?.id;
+  };
+
+  /**
+   * The rule effects on the focused row, by field.
+   *
+   * The details pane uses this to decide which of its rule-creation
+   * buttons to offer: a field a rule already controls is not offered a
+   * new rule, because the rule is already there — "Edit this rule" is
+   * the way out.
+   */
+  const focusedRuledFields = useMemo(() => {
+    const fields = new Set<RuledField>();
+    for (const effect of focusedEffects) {
+      fields.add(effect.field);
+    }
+    return fields;
+  }, [focusedEffects]);
+
+  /**
+   * The rules that control a field of the focused row, by id.
+   *
+   * Two rules can control two fields of the same row, and each of them
+   * has to be openable in its own right.
+   */
+  const focusedRuleIds = useMemo(
+    () => [...new Set(focusedEffects.map(effect => effect.ruleId))],
+    [focusedEffects],
+  );
+
+  /**
+   * The amount a rule controls on the focused row, if one does.
+   *
+   * The split pane's legs have to add up to the amount the row will
+   * hold, and a rule's amount is that amount.
+   */
+  const focusedRuledAmount = useMemo(() => {
+    if (!focused) return undefined;
+    const effect = visibleEffectFor(review.ruleEffects, focused, 'amount');
+    return typeof effect?.value === 'number' ? effect.value : undefined;
+  }, [focused, review.ruleEffects]);
+
+  /**
+   * The name of a field, in the user's words.
+   *
+   * The review edits the MEMO; the transaction calls it `notes`. The
+   * details panel speaks the review's language.
+   */
+  const ruledFieldName = (field: RuledField): string => {
+    switch (field) {
+      case 'payee':
+        return t('payee');
+      case 'category':
+        return t('category');
+      case 'amount':
+        return t('amount');
+      case 'date':
+        return t('date');
+      case 'notes':
+        return t('notes');
+      default:
+        return field;
+    }
+  };
+
+  /**
+   * What a rule set on a field, as the details panel says it.
+   *
+   * The VALUE matters as much as the field: the user has to see what
+   * the rule will do, not merely that something will.
+   */
+  const ruledValueLabel = (effect: RuleEffect): string => {
+    if (effect.field === 'payee') {
+      return (
+        (effect.value === null
+          ? undefined
+          : payeeNames.get(String(effect.value))) ?? t('a payee')
+      );
+    }
+    if (effect.field === 'category') {
+      return (
+        (effect.value === null
+          ? undefined
+          : categoryNames.get(String(effect.value))) ?? t('no category')
+      );
+    }
+    if (effect.field === 'amount') {
+      return typeof effect.value === 'number'
+        ? String(integerToAmount(effect.value))
+        : t('an amount');
+    }
+    if (effect.field === 'date') {
+      return typeof effect.value === 'string' ? effect.value : t('a date');
+    }
+    return typeof effect.value === 'string' ? effect.value : t('some notes');
+  };
 
   // The rules the focused row could have.
   //
@@ -621,7 +895,11 @@ export function KeyboardImportModal({
       // focus, and `escape` would still discard the whole review — and
       // `react-hotkeys-hook` listens on the document, so a child
       // component calling `preventDefault()` does not stop any of them.
-      enabled: pane === null,
+      //
+      // The rule editor counts as a pane: it is a modal on top of the
+      // review, and the review's own keys must not fire while the user
+      // is typing a condition into it.
+      enabled: pane === null && !isEditingRule,
     },
   );
 
@@ -797,13 +1075,19 @@ export function KeyboardImportModal({
             >
               {rows.map((row, index) => {
                 const isFocused = index === review.focusedIndex;
-                const amount = integerToAmount(
-                  row.edits.amountCents ?? row.amountCents,
-                );
                 const evaluation = review.evaluations.get(rowKey(row));
                 const badge = evaluation ? gateBadge(row, evaluation) : null;
                 const category = categoryCell(row);
                 const payee = payeeCell(row);
+                const amountCellValue = amountCell(row);
+                const dateCellValue = dateCell(row);
+                // A rule controls a field of this row. The badge says the
+                // ROW is ruled; the cells say WHICH field.
+                //
+                // It comes from the EFFECTS, not from the cells: a rule
+                // that sets the memo locks a field the table does not
+                // show, and the row is still ruled.
+                const isRuled = effectsForRow(row).length > 0;
                 return (
                   <Fragment
                     key={row.previewKey ?? row.importedId ?? String(index)}
@@ -881,9 +1165,13 @@ export function KeyboardImportModal({
                           sideways when even that is not enough. */}
                       <Text
                         data-testid="import-review-row-date"
-                        style={{ width: 90, flexShrink: 0 }}
+                        style={{
+                          width: 90,
+                          flexShrink: 0,
+                          ...(dateCellValue.ruled ? ruledStyle : undefined),
+                        }}
                       >
-                        {row.edits.date ?? row.date}
+                        {dateCellValue.date}
                       </Text>
                       {/* The raw vendor string is long and low-value once
                           it is resolved, so it truncates. The category is
@@ -896,7 +1184,12 @@ export function KeyboardImportModal({
                         {row.payeeRaw}
                       </TextOneLine>
                       <TextOneLine
-                        style={{ width: 100, flexShrink: 0 }}
+                        data-testid="import-review-row-payee"
+                        style={{
+                          width: 100,
+                          flexShrink: 0,
+                          ...(payee.ruled ? ruledStyle : undefined),
+                        }}
                         title={payee.label}
                       >
                         {payee.label}
@@ -913,6 +1206,7 @@ export function KeyboardImportModal({
                           color: category.muted
                             ? theme.pageTextSubdued
                             : undefined,
+                          ...(category.ruled ? ruledStyle : undefined),
                         }}
                         title={category.label}
                       >
@@ -934,6 +1228,7 @@ export function KeyboardImportModal({
                         {category.group}
                       </TextOneLine>
                       <FinancialText
+                        data-testid="import-review-row-amount"
                         style={{
                           width: 100,
                           flexShrink: 0,
@@ -944,28 +1239,67 @@ export function KeyboardImportModal({
                           // LEADING edge — the significant digits are
                           // what get cut — hence the title.
                           overflow: 'hidden',
+                          ...(amountCellValue.ruled ? ruledStyle : undefined),
                         }}
-                        title={String(amount)}
+                        title={String(amountCellValue.amount)}
                       >
-                        {amount}
+                        {amountCellValue.amount}
                       </FinancialText>
-                      {/* The badge is a translated word, and a long
-                          translation would wrap and regrow the row — the
-                          same problem the category had. */}
-                      <TextOneLine
+                      {/* The badge column holds the gate badge and the
+                          rule badge, one above the other. The gate badge
+                          is plain coloured text — it is a SAFETY fact
+                          and the user can override it. The rule badge is
+                          a filled pill — it is an OWNERSHIP fact, and
+                          the user cannot override it, only change the
+                          rule. */}
+                      <View
                         style={{
                           width: 90,
                           flexShrink: 0,
-                          textAlign: 'right',
-                          color:
-                            evaluation?.gate === 'block'
-                              ? theme.errorText
-                              : theme.warningText,
+                          flexDirection: 'column',
+                          gap: 4,
+                          alignItems: 'flex-end',
                         }}
-                        title={badge ?? undefined}
                       >
-                        {badge}
-                      </TextOneLine>
+                        {/* The badge is a translated word, and a long
+                            translation would wrap and regrow the row —
+                            the same problem the category had. */}
+                        <TextOneLine
+                          style={{
+                            width: 90,
+                            flexShrink: 0,
+                            textAlign: 'right',
+                            color:
+                              evaluation?.gate === 'block'
+                                ? theme.errorText
+                                : theme.warningText,
+                          }}
+                          title={badge ?? undefined}
+                        >
+                          {badge}
+                        </TextOneLine>
+                        {isRuled ? (
+                          <View
+                            data-testid="import-review-row-ruled"
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              backgroundColor: theme.noteTagBackground,
+                              padding: '2px 6px',
+                              borderRadius: 3,
+                            }}
+                          >
+                            <SvgTag
+                              width={11}
+                              height={11}
+                              style={{ marginRight: 4 }}
+                            />
+                            <Text style={{ color: theme.noteTagText }}>
+                              <Trans>Ruled</Trans>
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </View>
                   </Fragment>
                 );
@@ -1038,14 +1372,80 @@ export function KeyboardImportModal({
                   </Text>
                 ) : null}
 
+                {focusedEffects.length > 0 ? (
+                  <View style={{ gap: 4 }} data-testid="import-review-ruled">
+                    {focusedEffects.map(effect => (
+                      <Text
+                        key={effect.field}
+                        data-testid="import-review-ruled-field"
+                        data-field={effect.field}
+                        style={{ color: theme.noteTagText }}
+                      >
+                        {t('A rule sets the {{field}} to {{value}}.', {
+                          field: ruledFieldName(effect.field),
+                          value: ruledValueLabel(effect),
+                        })}
+                      </Text>
+                    ))}
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {/* One button per rule. Two rules can control two
+                          fields of the same row, and the button has to
+                          open the rule the user means. */}
+                      {focusedRuleIds.map(ruleId => (
+                        <Button
+                          key={ruleId}
+                          data-testid="import-review-edit-rule"
+                          onPress={() => {
+                            const rule = review.rules.find(
+                              candidate => candidate.id === ruleId,
+                            );
+                            // The rule is not in the budget's list — it
+                            // was made on another device, or the list is
+                            // stale. There is nothing to open.
+                            if (!rule) {
+                              setNotice(
+                                t('That rule is not in this budget any more.'),
+                              );
+                              return;
+                            }
+                            dispatchModal(
+                              pushModal({
+                                modal: {
+                                  name: 'edit-rule',
+                                  options: {
+                                    rule,
+                                    // The rule is saved in upstream's own
+                                    // editor. When it lands, the review
+                                    // asks the engine again, so the row
+                                    // shows the rule's NEW effect.
+                                    onSave: async () => {
+                                      await review.refreshRuleEffects();
+                                    },
+                                  },
+                                },
+                              }),
+                            );
+                          }}
+                        >
+                          <Trans>Edit this rule</Trans>
+                        </Button>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
                 {focusedRules &&
-                (focusedRules.vendorToPayee || focusedRules.payeeToCategory) ? (
+                ((focusedRules.vendorToPayee &&
+                  !focusedRuledFields.has('payee')) ||
+                  (focusedRules.payeeToCategory &&
+                    !focusedRuledFields.has('category'))) ? (
                   <>
                     <View
                       style={{ flexDirection: 'row', gap: 8 }}
                       data-testid="import-review-rules"
                     >
-                      {focusedRules.vendorToPayee ? (
+                      {focusedRules.vendorToPayee &&
+                      !focusedRuledFields.has('payee') ? (
                         <Button
                           data-testid="import-review-rule-vendor-to-payee"
                           isDisabled={creatingRule}
@@ -1061,7 +1461,8 @@ export function KeyboardImportModal({
                           <Trans>Always this payee for this vendor</Trans>
                         </Button>
                       ) : null}
-                      {focusedRules.payeeToCategory ? (
+                      {focusedRules.payeeToCategory &&
+                      !focusedRuledFields.has('category') ? (
                         <Button
                           data-testid="import-review-rule-payee-to-category"
                           isDisabled={creatingRule}
@@ -1096,7 +1497,33 @@ export function KeyboardImportModal({
                 mode={pane.field}
                 payees={review.payees}
                 categories={review.categories}
+                lockedByRule={focusedLockedEffect}
                 onCommit={(edits: PreviewEdits, chosenPayeeId?: string) => {
+                  // A field a rule controls is not the user's to change:
+                  // the rule's value lands whatever they type, so the
+                  // edit is REFUSED rather than accepted and dropped
+                  // later without a word.
+                  //
+                  // An edit that sets the field to the value the rule
+                  // already sets is allowed: the user is not fighting
+                  // the rule, they agree with it.
+                  if (
+                    focusedLockedEffect &&
+                    editChangesRuledField(
+                      focusedLockedEffect,
+                      edits,
+                      editedPayeeId(edits, chosenPayeeId),
+                    )
+                  ) {
+                    setNotice(
+                      t(
+                        "This row's {{field}} is set by a rule. Edit the rule to change it.",
+                        { field: ruledFieldName(focusedLockedEffect.field) },
+                      ),
+                    );
+                    return;
+                  }
+
                   // A split is only valid against the row's EFFECTIVE
                   // amount, so changing the amount would silently
                   // unbalance it. The edit is refused rather than
@@ -1168,6 +1595,9 @@ export function KeyboardImportModal({
               <SplitPane
                 row={focused}
                 categories={review.categories}
+                // A rule that controls the amount changes what the row
+                // will hold, so the legs have to add up to THAT.
+                targetAmountCents={focusedRuledAmount}
                 onCommit={(edits: PreviewEdits) => {
                   // A row that is already in the budget can be split:
                   // the apply step rewrites the legs of the transaction

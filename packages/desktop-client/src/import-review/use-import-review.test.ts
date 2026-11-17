@@ -1239,6 +1239,56 @@ describe('useImportReview', () => {
     expect(setPref).not.toHaveBeenCalled();
   });
 
+  it('reads the rules again when they are asked for', async () => {
+    // The rules can change while the review is open — the user edits one
+    // in upstream's own editor. The review's copy of the rules has to
+    // follow, because the next rule the review writes is an AMENDMENT of
+    // the rule with the same conditions, and the amendment is built from
+    // the copy the review holds. A stale copy would amend the OLD rule:
+    // the user's edit to it would be undone, silently.
+    const { result } = await renderReview();
+
+    const EDITED: RuleEntity = {
+      ...RULES[0],
+      actions: [{ op: 'set', field: 'notes', value: 'edited by the user' }],
+    };
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'rules-get':
+          return [EDITED];
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'query':
+          return { data: [], dependencies: [] };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+            ruledTransactions: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    await act(async () => {
+      await result.current.refreshRuleEffects();
+    });
+
+    // The review holds the rule the user edited, not the one it read
+    // when it opened.
+    expect(result.current.rules).toHaveLength(1);
+    expect(result.current.rules[0].actions).toEqual([
+      { op: 'set', field: 'notes', value: 'edited by the user' },
+    ]);
+  });
+
   it('writes the vendor map when the import succeeds', async () => {
     const setPref = vi.fn();
     prefMock.mockReturnValue([undefined, setPref]);

@@ -19,7 +19,10 @@ const PAYEES = [
   { id: 'p-transfer', name: '', transfer_acct: 'a-checking' },
 ];
 
-const CATEGORIES = [{ id: 'c-groceries', name: 'Groceries' }];
+const CATEGORIES = [
+  { id: 'c-groceries', name: 'Groceries' },
+  { id: 'c-dining', name: 'Dining' },
+];
 
 function mkRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -43,6 +46,162 @@ function buildState(rows: readonly Record<string, unknown>[]) {
   });
   return buildPreviewState(resolved, 'cautious');
 }
+
+describe('a field a rule controls', () => {
+  /**
+   * The rule effects for the one row the fixture has.
+   *
+   * The keys are the row's key, which is its transient preview key.
+   */
+  function effects(
+    field: 'payee' | 'category' | 'amount' | 'date' | 'notes',
+    value: string | number | null,
+    ruleId = 'rule-1',
+  ) {
+    return new Map([['row-0', new Map([[field, { field, ruleId, value }]])]]);
+  }
+
+  it('sends the rule value for the category, not the user edit', () => {
+    const state = buildState([mkRow()]);
+    const withCategory = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, categoryId: 'c-dining' },
+      })),
+    };
+
+    const payload = buildApplyPayload(withCategory, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('category', 'c-groceries'),
+    });
+
+    // The RULE's category, not the user's: the user cannot change this
+    // field, so the payload must not carry what they picked.
+    expect(payload[0].category).toBe('c-groceries');
+  });
+
+  it('sends the rule value for the payee, not the user edit', () => {
+    const state = buildState([mkRow()]);
+
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('payee', 'p-two'),
+    });
+
+    expect(payload[0].payee).toBe('p-two');
+    // And no NAME: the rule named an id, and the id is what lands.
+    expect(payload[0].payee_name).toBeUndefined();
+  });
+
+  it('sends the rule value for the amount, not the user edit', () => {
+    const state = buildState([mkRow()]);
+
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('amount', -1234),
+    });
+
+    expect(payload[0].amount).toBe(-1234);
+  });
+
+  it('sends the rule value for the date, not the user edit', () => {
+    const state = buildState([mkRow()]);
+
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('date', '2026-01-01'),
+    });
+
+    expect(payload[0].date).toBe('2026-01-01');
+  });
+
+  it('sends the rule value for the notes, not the user edit', () => {
+    const state = buildState([mkRow()]);
+
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('notes', 'a note from a rule'),
+    });
+
+    expect(payload[0].notes).toBe('a note from a rule');
+  });
+
+  it('sends NO category when the rule cleared it', () => {
+    const state = buildState([mkRow()]);
+    const withCategory = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: { ...row.edits, categoryId: 'c-groceries' },
+      })),
+    };
+
+    const payload = buildApplyPayload(withCategory, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('category', null),
+    });
+
+    expect(payload[0].category).toBeUndefined();
+  });
+
+  it('sends the rule value for a category the budget does not have', () => {
+    // A category that no longer exists is dropped, rather than sent: the
+    // import would refuse it.
+    const state = buildState([mkRow()]);
+
+    const payload = buildApplyPayload(state, {
+      accountId: 'a-1',
+      payees: PAYEES,
+      categories: CATEGORIES,
+      ruleEffects: effects('category', 'c-gone'),
+    });
+
+    expect(payload[0].category).toBeUndefined();
+  });
+
+  it('checks a split against the amount that is SENT', () => {
+    // A rule that sets the amount changes what the parent holds, so the
+    // legs have to add up to THAT — and a split that does not is refused
+    // rather than stored unbalanced.
+    const state = buildState([mkRow()]);
+    const split = {
+      ...state,
+      rows: state.rows.map(row => ({
+        ...row,
+        edits: {
+          ...row.edits,
+          splits: [
+            { amountCents: -1250, categoryId: 'c-groceries' },
+            { amountCents: -1250, categoryId: 'c-groceries' },
+          ],
+        },
+      })),
+    };
+
+    // The legs add up to the ROW's amount, and the rule changes it.
+    expect(() =>
+      buildApplyPayload(split, {
+        accountId: 'a-1',
+        payees: PAYEES,
+        categories: CATEGORIES,
+        ruleEffects: effects('amount', -3000),
+      }),
+    ).toThrow(/SPLIT-004/);
+  });
+});
 
 describe('the transfer target', () => {
   it('sends the target accounts transfer payee', () => {

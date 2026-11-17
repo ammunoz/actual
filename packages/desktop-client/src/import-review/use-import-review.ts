@@ -70,6 +70,8 @@ import {
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
 import { nextTrustLevel } from './keymap';
+import { ruleEffectsFor } from './rule-effects';
+import type { ReportedRow, RuleEffects } from './rule-effects';
 import { ruleToWrite } from './rules';
 import type { ReviewRule } from './rules';
 import {
@@ -191,6 +193,9 @@ export type UseImportReviewOpts = {
  * The counts are all zero rather than undefined, so the UI can render them
  * without a special case for "the file has not been parsed".
  */
+/** No rule did anything to any row. */
+const EMPTY_EFFECTS: RuleEffects = new Map();
+
 export const EMPTY_SUMMARY: PreviewSummary = Object.freeze({
   total: 0,
   blocked: 0,
@@ -266,6 +271,13 @@ export type ImportReviewState = {
   /** The live categories, for the category picker. */
   categories: readonly ReviewCategory[];
   /**
+   * The budget's rules.
+   *
+   * The details panel opens the rule that controls the focused row in
+   * upstream's own editor, and that needs the whole rule.
+   */
+  rules: readonly RuleEntity[];
+  /**
    * What the review counts add up to: the decisions the user made, and
    * what the trust level is doing to the rows.
    */
@@ -276,6 +288,27 @@ export type ImportReviewState = {
    * The UI reads this to badge the rows and to explain the focused row.
    */
   evaluations: ReadonlyMap<string, RowEvaluation>;
+  /**
+   * What the budget's rules do to each row, keyed by the row's key.
+   *
+   * The import preview reports the rules that fired on each row and the
+   * fields they set, and this is that report, turned into the fields the
+   * review LOCKS. A locked field is one the user cannot change: a rule
+   * would discard the edit.
+   *
+   * Only the rows the import ADDS are here. A row that matched a
+   * transaction already in the budget takes the import's update path,
+   * where the EXISTING value wins, so a rule cannot change it.
+   */
+  ruleEffects: RuleEffects;
+  /**
+   * Ask the engine again what the rules do to every row.
+   *
+   * The rules can change while the review is open — the user edits one
+   * in upstream's own editor, or a rule is made on another device. The
+   * review asks the engine rather than working it out, so it asks again.
+   */
+  refreshRuleEffects: () => Promise<void>;
   /**
    * Whether the row is ALREADY in the budget.
    *
@@ -529,6 +562,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const rulesRef = useRef<readonly RuleEntity[]>([]);
 
   /**
+   * The budget's rules, as the UI needs them.
+   *
+   * The ref is what the rule WRITES read — it has to be the list as it
+   * was when the write started. The state is what the UI reads: the
+   * details panel opens a rule in upstream's own editor, and it needs the
+   * whole rule, not just its id.
+   */
+  const [rules, setRules] = useState<readonly RuleEntity[]>([]);
+
+  /**
    * The rule write that is in flight, if there is one.
    *
    * Two writes that start at the same time would both read the same
@@ -605,9 +648,41 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // are already in it, and the rows that are already in the budget
   // change with the answer. A ref would be updated without anything
   // redrawing.
+  /**
+   * What the budget's rules do to each row.
+   *
+   * The import preview reports it, and the review locks the fields a rule
+   * controls. It is refreshed when the preview is run again — after a rule
+   * is written, and after the user edits a row (a rule's outcome can
+   * depend on the payee the user picked).
+   */
+  const [ruleEffects, setRuleEffects] = useState<RuleEffects>(EMPTY_EFFECTS);
+
   const [matchedTransactionIds, setMatchedTransactionIds] = useState<
     ReadonlyMap<string, string>
   >(new Map());
+
+  /**
+   * The matched rows, as the preview reported them.
+   *
+   * A ref, because the rule effects are refreshed on their own schedule
+   * and must not be rebuilt when the map changes.
+   */
+  const matchedRef = useRef<ReadonlyMap<string, string>>(matchedTransactionIds);
+  useEffect(() => {
+    matchedRef.current = matchedTransactionIds;
+  }, [matchedTransactionIds]);
+
+  /**
+   * The newest effects request, per row.
+   *
+   * The rules' effect is asked for over the network, so two requests can
+   * be in flight at once. The older answer must not overwrite the newer
+   * one: a row that a rule has just started to control would show as
+   * unlocked, and the user's edit would be discarded.
+   */
+  const effectsRequestsRef = useRef(new Map<string, number>());
+  const effectsRequestSeqRef = useRef(0);
 
   // The trust level the review started with. It is read by the parse effect
   // but is deliberately not one of its dependencies: changing it must not
@@ -686,7 +761,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       accountId: string,
       payeeList: readonly ReviewPayee[],
       categoryList: readonly ReviewCategory[],
-    ): Promise<Map<string, string>> => {
+    ): Promise<{ matched: Map<string, string>; effects: RuleEffects }> => {
       const importedIds = rows
         .map(row => row.importedId)
         .filter((id): id is string => typeof id === 'string');
@@ -701,7 +776,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       );
 
       const accountRows = rows.filter(row => row.accountId === accountId);
-      if (accountRows.length === 0) return matched;
+      if (accountRows.length === 0) return { matched, effects: EMPTY_EFFECTS };
 
       // The PREVIEW payload marks nothing as skipped: Actual skips a
       // marked row before it reports the match, so a marked row would
@@ -711,6 +786,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           existing?: { id?: string };
           transaction?: unknown;
         }[];
+        ruledTransactions?: ReportedRow[];
       };
       try {
         preview = await send('transactions-import', {
@@ -743,7 +819,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         ) {
           throw err;
         }
-        return matched;
+        return { matched, effects: EMPTY_EFFECTS };
       }
 
       preview.updatedPreview?.forEach(entry => {
@@ -762,9 +838,137 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         }
       });
 
-      return matched;
+      // What the rules did to each row. The preview reports the rules
+      // that fired on every row it was given, and the fork lines them up
+      // with its own rows by the transient preview key.
+      //
+      // A row that MATCHED is not locked: the import's update path
+      // prefers the existing value, so a rule cannot change it.
+      const effects = ruleEffectsFor(preview.ruledTransactions ?? [], {
+        matchedRowKeys: new Set(matched.keys()),
+      });
+
+      // A rule can CREATE a payee, and the preview is where it is
+      // created — so the payee list the review holds is a moment out of
+      // date. The list is read again when the preview named a payee the
+      // review does not know, so the cell can say which payee it is.
+      const known = new Set(payeeList.map(payee => payee.id));
+      const unknown = (preview.ruledTransactions ?? []).some(
+        trans => typeof trans.payee === 'string' && !known.has(trans.payee),
+      );
+      if (unknown) {
+        const fresh = await send('payees-get');
+        // The payee list changed, so the cache's entries are for a list
+        // that is gone. The fingerprint in the key makes a stale HIT
+        // impossible, but the entries would still be held.
+        fuzzyCache.clear();
+        setPayees(
+          fresh.map(payee => ({
+            id: payee.id,
+            name: payee.name,
+            transferAcct: payee.transfer_acct,
+          })),
+        );
+      }
+
+      return { matched, effects };
     },
-    [],
+    [fuzzyCache],
+  );
+
+  /**
+   * Ask the engine what the rules do to some rows.
+   *
+   * The import preview is where the engine runs the rules, and the review
+   * asks it for the answer rather than working it out: a rule's outcome
+   * depends on the engine, and the engine changes.
+   *
+   * One row at a time is enough when the user has just edited a row. A
+   * rule's outcome depends on that row's own payload and on nothing else,
+   * so asking about the whole file would be the same answer, more slowly.
+   */
+  const refreshEffectsFor = useCallback(
+    async (rows: readonly PreviewRow[]) => {
+      if (rows.length === 0) return;
+
+      const request = ++effectsRequestSeqRef.current;
+      for (const row of rows) {
+        effectsRequestsRef.current.set(rowKey(row), request);
+      }
+
+      try {
+        const preview = await send('transactions-import', {
+          accountId,
+          transactions: buildPreviewPayload(
+            { rows, trustLevel: trustLevelRef.current },
+            {
+              accountId,
+              payees: payeeRefs(payees),
+              categories: categories.map(category => ({ id: category.id })),
+            },
+          ) as ImportTransactionEntity[],
+          isPreview: true,
+        });
+
+        // The rows whose answer is stale: a newer request for one of them
+        // has been sent since, so this answer is not the newest one.
+        const stale = new Set(
+          rows
+            .filter(
+              row => effectsRequestsRef.current.get(rowKey(row)) !== request,
+            )
+            .map(row => rowKey(row)),
+        );
+
+        const effects = ruleEffectsFor(preview.ruledTransactions ?? [], {
+          matchedRowKeys: new Set(matchedRef.current.keys()),
+        });
+
+        setRuleEffects(current => {
+          const next = new Map(current);
+          // The rows that were asked about are REPLACED, not merged: a
+          // row that used to be ruled and no longer is must lose its
+          // lock. Merging would keep the old entry, and the apply step
+          // would then write the old rule's value — a wrong write, made
+          // silently.
+          for (const row of rows) {
+            const key = rowKey(row);
+            if (stale.has(key)) continue;
+            next.delete(key);
+          }
+          for (const [key, rowEffects] of effects) {
+            if (stale.has(key)) continue;
+            next.set(key, rowEffects);
+          }
+          return next;
+        });
+
+        // A rule can CREATE a payee, and the preview is where it is
+        // created — so the payee list the review holds is a moment out of
+        // date. The list is read again when the preview named a payee
+        // the review does not know.
+        const known = new Set(payees.map(payee => payee.id));
+        const unknown = (preview.ruledTransactions ?? []).some(
+          trans => typeof trans.payee === 'string' && !known.has(trans.payee),
+        );
+        if (unknown) {
+          const fresh = await send('payees-get');
+          setPayees(
+            fresh.map(payee => ({
+              id: payee.id,
+              name: payee.name,
+              transferAcct: payee.transfer_acct,
+            })),
+          );
+        }
+      } catch (err) {
+        // The preview refuses some rows — a transfer whose target has no
+        // transfer payee. Such a row cannot be imported either way, and
+        // the apply step says so. The review carries on.
+        console.error('The rules could not be read for the row:', err);
+      }
+    },
+    [accountId, categories, payees],
   );
 
   // Load the budget's data and parse the file, in ONE pass.
@@ -860,6 +1064,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setAccounts(accountList);
         setCategories(categoryList);
         rulesRef.current = ruleEntities;
+        setRules(ruleEntities);
 
         const stale = staleRowNames(saved, {
           accounts: accountList,
@@ -904,7 +1109,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
-        const matched = await lookupMatches(
+        const { matched, effects } = await lookupMatches(
           state.rows,
           accountId,
           payeeList,
@@ -913,6 +1118,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (cancelled) return;
 
         setMatchedTransactionIds(matched);
+        setRuleEffects(effects);
 
         setStatus('reviewing');
       } catch (err) {
@@ -1035,6 +1241,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setAccounts(accountList);
         setCategories(categoryList);
         rulesRef.current = ruleEntities;
+        setRules(ruleEntities);
 
         // Safe: the parse handler's loose type is a union of a structured
         // transaction and a CSV record, and `toReviewRows` reads each
@@ -1065,7 +1272,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (cancelled) return;
 
         // Which rows are ALREADY in the budget?
-        const matched = await lookupMatches(
+        const { matched, effects } = await lookupMatches(
           next.rows,
           accountId,
           payeeList,
@@ -1074,6 +1281,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         if (cancelled) return;
 
         setMatchedTransactionIds(matched);
+        setRuleEffects(effects);
 
         setStatus('reviewing');
       } catch (err) {
@@ -1292,6 +1500,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const edit = useCallback(
     (index: number, edits: PreviewEdits, opts?: EditOptions) => {
       const cursor = focusedIndexRef.current;
+      // The row as the user sees it. The state ref is kept in step with
+      // what is on screen, and the row the user is editing IS the one on
+      // screen.
+      const edited = stateRef.current?.rows[index];
       setState(current => {
         if (!current) return current;
         const row = current.rows[index];
@@ -1323,8 +1535,16 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         return updateEdits(current, rowKey(row), edits);
       });
+
+      // A rule's outcome can depend on what the user just changed: a rule
+      // that says "this payee is this category" fires on the payee. So the
+      // engine is asked again about this row — otherwise a rule that
+      // starts to apply would go on discarding the user's edit in silence.
+      if (edited) {
+        void refreshEffectsFor([{ ...edited, edits }]);
+      }
     },
-    [pushUndo, payees],
+    [pushUndo, payees, refreshEffectsFor],
   );
 
   const isAlreadyImported = useCallback(
@@ -1389,7 +1609,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     // the rows without it would leave the map applied to a resolution it
     // never saw — and the map would be lost for the rest of the review.
     resolvedMapRawRef.current = last.resolvedMapRaw;
-  }, [setCursor]);
+    // The rows are back, so what the rules do to them is asked for again:
+    // a rule that fired on the restored rows may not fire on the ones the
+    // undo threw away, and the lock has to follow.
+    void refreshEffectsFor(last.state.rows);
+  }, [refreshEffectsFor, setCursor]);
 
   const cycleTrustLevel = useCallback(() => {
     setTrustLevel(current => {
@@ -1526,6 +1750,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         }
 
         rulesRef.current = freshRules;
+        setRules(freshRules);
 
         const payeeList: readonly ReviewPayee[] = freshPayees.map(p => ({
           id: p.id,
@@ -1550,6 +1775,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         });
         setState(next);
 
+        // The rules changed, so what they do to each row has to be asked
+        // for again. This is the whole point of writing a rule: the row
+        // the user was looking at is now under the rule's control, and
+        // the review has to say so.
+        void refreshEffectsFor(next.rows);
+
         return 'created';
       })();
 
@@ -1565,7 +1796,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           ruleWriteRef.current = false;
         });
     },
-    [accounts, fuzzyCache, resolveOptsFor],
+    [accounts, fuzzyCache, refreshEffectsFor, resolveOptsFor],
   );
 
   const apply = useCallback(async (): Promise<boolean> => {
@@ -1649,6 +1880,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         payees: payeeRefs(payees),
         categories: categories.map(c => ({ id: c.id })),
         updatedRowKeys,
+        // A field a rule controls goes out with the RULE's value, so the
+        // payload agrees with what the review showed.
+        ruleEffects,
       });
 
       // ---- Phase 2: write -------------------------------------------
@@ -1844,6 +2078,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     clearFromStore,
     matchedTransactionIds,
     reconcileSplits,
+    ruleEffects,
     state,
     payees,
     onImported,
@@ -1910,6 +2145,31 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     return { summary: summarize(state, map), evaluations: map };
   }, [state, payees]);
 
+  /**
+   * Read the rules again, and ask the engine what they do to every row.
+   *
+   * The rules can change while the review is open — the user edits one
+   * in upstream's own editor, or a rule is made on another device. The
+   * review asks the engine rather than working it out, so it asks again.
+   *
+   * **The rule LIST is read again too, and it has to be.** The next rule
+   * the review writes is an AMENDMENT of the rule with the same
+   * conditions, and the amendment is built from the list the review
+   * holds. A list that is a moment out of date would amend the OLD
+   * rule: the user's edit to it would be silently undone, and the
+   * action they added would be dropped.
+   */
+  const refreshRuleEffects = useCallback(async () => {
+    try {
+      const fresh = await send('rules-get');
+      rulesRef.current = fresh;
+      setRules(fresh);
+    } catch (err) {
+      console.error('The rules could not be read after the edit:', err);
+    }
+    await refreshEffectsFor(stateRef.current?.rows ?? []);
+  }, [refreshEffectsFor]);
+
   // What the user would lose if the review were closed.
   //
   // The domain owns the definition — it is a property of the rows — so
@@ -1930,8 +2190,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     payees,
     accounts,
     categories,
+    rules,
     summary,
     evaluations,
+    ruleEffects,
+    refreshRuleEffects,
     unsavedWork: unsaved,
     isAlreadyImported,
     decide,

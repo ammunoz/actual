@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 
+import { SvgTag } from '@actual-app/components/icons/v1';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -19,6 +20,7 @@ import {
 } from './editor-mode';
 import type { EditorMode, EditorSuggestion } from './editor-mode';
 import { EditorPicker } from './EditorPicker';
+import type { RuleEffect } from './rule-effects';
 import { TextField } from './TextField';
 
 /**
@@ -55,6 +57,14 @@ export type RowEditorProps = {
   /** The budget's categories. */
   categories: readonly ReviewCategory[];
   /**
+   * The rule that controls the field being edited, if one does.
+   *
+   * The editor says so next to the field's label, so the user knows
+   * BEFORE they type that the value is not theirs to change. The review
+   * refuses the edit afterwards; this is the warning that comes first.
+   */
+  lockedByRule?: RuleEffect | undefined;
+  /**
    * Commit the edit.
    *
    * `chosenPayeeId` is the id of the payee the user picked, when they
@@ -78,6 +88,7 @@ export function RowEditor({
   mode,
   payees,
   categories,
+  lockedByRule,
   onCommit,
 }: RowEditorProps) {
   const { t } = useTranslation();
@@ -136,6 +147,25 @@ export function RowEditor({
           payee: row.payeeRaw,
         })}
       </Text>
+
+      {lockedByRule ? (
+        <View
+          data-testid="import-review-editor-locked"
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            alignSelf: 'flex-start',
+            backgroundColor: theme.noteTagBackground,
+            padding: '4px 8px',
+            borderRadius: 4,
+          }}
+        >
+          <SvgTag width={12} height={12} style={{ marginRight: 6 }} />
+          <Text style={{ color: theme.noteTagText }}>
+            <Trans>A rule sets this</Trans>
+          </Text>
+        </View>
+      ) : null}
 
       {mode === 'payee' ? (
         <EditorPicker

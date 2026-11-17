@@ -47,11 +47,12 @@ import {
   normalizePayeeName,
   rowKey,
   SplitValidationError,
-  validateSplitRow,
+  validateSplit,
   validateTransferRow,
 } from '@actual-app/core/server/transactions/import/review/index';
 import type { ImportPreviewState } from '@actual-app/core/server/transactions/import/review/index';
 
+import type { RuleEffects } from './rule-effects';
 import type { ImportReviewTransaction, ImportReviewUpdate } from './types';
 
 /** A budget payee, as the payload builder needs it. */
@@ -78,6 +79,17 @@ export type BuildPayloadOpts = {
    * `transaction-update`.
    */
   updatedRowKeys?: ReadonlySet<string>;
+  /**
+   * What the budget's rules do to each row, keyed by the row's key.
+   *
+   * A field a rule controls is sent with the RULE's value, not the user's.
+   * The rule's value lands anyway on the insert path — the rule
+   * overwrites whatever the payload carries — so this is belt and
+   * braces. It matters when the engine does NOT apply the rule: the
+   * payload then agrees with what the review showed, instead of carrying
+   * a value the user never chose and could not have.
+   */
+  ruleEffects?: RuleEffects;
 };
 
 /**
@@ -234,16 +246,47 @@ function buildPayload(
     // There is no fallback: the resolver does not pick a category, so
     // until the user picks one the row has none, and Actual's own rules
     // decide.
+    //
+    // A rule's category wins over the user's: the rule controls the
+    // field, so the review showed the rule's value, and the payload has
+    // to carry the same one.
+    const ruled = opts.ruleEffects?.get(rowKey(row));
+    const ruledCategoryId = ruled?.get('category');
     const categoryId =
-      row.edits.categoryId !== undefined &&
-      liveCategoryIds.has(row.edits.categoryId)
-        ? row.edits.categoryId
-        : undefined;
+      ruledCategoryId !== undefined
+        ? typeof ruledCategoryId.value === 'string' &&
+          liveCategoryIds.has(ruledCategoryId.value)
+          ? ruledCategoryId.value
+          : undefined
+        : row.edits.categoryId !== undefined &&
+            liveCategoryIds.has(row.edits.categoryId)
+          ? row.edits.categoryId
+          : undefined;
+
+    // The rule's amount, the rule's date and the rule's notes win over
+    // the user's, the same way the category does.
+    //
+    // The amount is the rule's even on a SPLIT row: the engine writes
+    // the rule's amount on the parent whatever the payload says, so the
+    // payload agrees with it. The split's legs then no longer add up to
+    // it — and the split check below catches that, so the import fails
+    // loudly rather than storing a split that does not add up.
+    const ruledAmount = ruled?.get('amount');
+    const ruledDate = ruled?.get('date');
+    const ruledNotes = ruled?.get('notes');
+    const amount =
+      ruledAmount !== undefined && typeof ruledAmount.value === 'number'
+        ? ruledAmount.value
+        : effectiveAmountCents(row);
+    const date =
+      ruledDate !== undefined && typeof ruledDate.value === 'string'
+        ? ruledDate.value
+        : (row.edits.date ?? row.date);
 
     const payload: ImportReviewTransaction = {
       account: opts.accountId,
-      date: row.edits.date ?? row.date,
-      amount: effectiveAmountCents(row),
+      date,
+      amount,
       imported_payee: row.payeeRaw,
       cleared: true,
     };
@@ -280,7 +323,18 @@ function buildPayload(
         ? findPayeeIdByName(row.edits.payeeCanonical, opts.payees)
         : undefined;
 
-    if (transferPayeeId) {
+    // A rule's payee wins over the user's: the rule controls the field,
+    // so the review showed the rule's payee, and the payload has to
+    // carry the same one.
+    const ruledPayee = ruled?.get('payee');
+
+    if (ruledPayee !== undefined) {
+      if (typeof ruledPayee.value === 'string') {
+        payload.payee = ruledPayee.value;
+      }
+      // A rule that CLEARED the payee leaves the row with none, so
+      // neither `payee` nor `payee_name` is sent.
+    } else if (transferPayeeId) {
       payload.payee = transferPayeeId;
     } else if (row.edits.payeeCanonical !== undefined) {
       if (userPayeeId) {
@@ -319,7 +373,11 @@ function buildPayload(
       payload.category = categoryId;
     }
 
-    if (row.edits.memo !== undefined) {
+    if (ruledNotes !== undefined) {
+      if (typeof ruledNotes.value === 'string') {
+        payload.notes = ruledNotes.value;
+      }
+    } else if (row.edits.memo !== undefined) {
       payload.notes = row.edits.memo;
     } else if (row.memo) {
       payload.notes = row.memo;
@@ -329,8 +387,8 @@ function buildPayload(
     // payee, date, imported_id and notes; the categories live on the legs.
     if (isSplitRow(row.edits) && row.edits.splits) {
       // The split is checked against the row it belongs to before it is
-      // sent: the legs have to add up to the row's EFFECTIVE amount, and
-      // the row cannot be a transfer as well.
+      // sent: the legs have to add up to the amount the row is sent
+      // with, and the row cannot be a transfer as well.
       //
       // Upstream does NOT reject an unbalanced split: it stores it and
       // records a `SplitTransactionError` on the parent, which leaves the
@@ -340,7 +398,21 @@ function buildPayload(
       // The pane refuses to save an invalid split, so this can only fire
       // through a bug — and a bug that quietly unbalances a budget is
       // worse than an import that stops with a message.
-      const problem = validateSplitRow(row);
+      //
+      // A row cannot be both a transfer and a split. The domain clears
+      // one when the other is set, so this can only fire through a bug —
+      // and it is checked here because the row is about to be sent.
+      if (effectiveTransferAccountId(row) !== undefined) {
+        throw new SplitValidationError(
+          'SPLIT-006',
+          'SPLIT-006: a row cannot be both a transfer and a split',
+        );
+      }
+
+      // The legs are checked against the amount that is SENT, not the
+      // row's own: a rule that sets the amount changes the parent, and
+      // the legs have to add up to what the parent will hold.
+      const problem = validateSplit(row.edits.splits, amount);
       if (problem) {
         throw new SplitValidationError(
           problem.code,

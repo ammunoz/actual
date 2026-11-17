@@ -38,6 +38,18 @@ export type SplitPaneProps = {
   /** The budget's categories. */
   categories: readonly ReviewCategory[];
   /**
+   * The amount the legs have to add up to.
+   *
+   * It is the row's effective amount — UNLESS a rule controls the
+   * amount, in which case it is the rule's: that is the amount the row
+   * will hold, so it is the amount the legs have to add up to.
+   *
+   * The pane and the apply step have to agree on this. If they did not,
+   * no set of legs could satisfy both, and every such row would be
+   * unimportable with a message that never mentioned the rule.
+   */
+  targetAmountCents?: number;
+  /**
    * Commit the split.
    *
    * The pane hands over the WHOLE edits object, not just the split:
@@ -89,12 +101,18 @@ type DraftLeg = {
  * including from inside a field, where the plain Enter belongs to the
  * field.
  */
-export function SplitPane({ row, categories, onCommit }: SplitPaneProps) {
+export function SplitPane({
+  row,
+  categories,
+  targetAmountCents,
+  onCommit,
+}: SplitPaneProps) {
   const { t } = useTranslation();
 
   // The amount the legs have to add up to: the row's EFFECTIVE amount,
-  // which is what the row would be imported with.
-  const target = effectiveAmountCents(row);
+  // which is what the row would be imported with — or the rule's amount,
+  // when a rule controls it, because that is what the row will hold.
+  const target = targetAmountCents ?? effectiveAmountCents(row);
 
   // The draft. It lives here, in the pane, and not in the review's
   // state: an uncommitted split is not work the user would miss, and
