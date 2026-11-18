@@ -2510,6 +2510,87 @@ ${transactions}
     }
   });
 
+  test('the list is as tall as its content, and the list is what scrolls', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review List Height',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+    const grid = dialog.getByTestId('import-review-grid');
+
+    // The rows are there: a list with no rows would satisfy every
+    // measurement below.
+    await expect(grid.getByTestId('import-review-row')).toHaveCount(3);
+
+    // A SHORT list is exactly as tall as its rows: the list is not a box
+    // with a void under the content, and it is not a box that clips them.
+    const short = await grid.evaluate(element => {
+      const header = element.querySelector(
+        '[data-testid="import-review-header"]',
+      );
+      if (!header) throw new Error('the list has no header row');
+      const rows = Array.from(
+        element.querySelectorAll('[data-testid="import-review-row"]'),
+      );
+      const content =
+        header.getBoundingClientRect().height +
+        rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+      return {
+        list: element.getBoundingClientRect().height,
+        content,
+        scrolls: element.scrollHeight > element.clientHeight,
+      };
+    });
+    expect(short.list).toBeGreaterThanOrEqual(short.content - 1);
+    expect(short.list).toBeLessThanOrEqual(short.content + 1);
+    expect(short.scrolls).toBe(false);
+
+    // And a LONG list stops at its cap instead of growing: its content
+    // is taller than the box, and the box scrolls.
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await importOfxWithRows(60);
+    await expect(dialog.getByTestId('import-review-row')).toHaveCount(60);
+
+    const long = await grid.evaluate(element => {
+      const header = element.querySelector(
+        '[data-testid="import-review-header"]',
+      );
+      if (!header) throw new Error('the list has no header row');
+      const rows = Array.from(
+        element.querySelectorAll('[data-testid="import-review-row"]'),
+      );
+      return {
+        list: element.getBoundingClientRect().height,
+        content:
+          header.getBoundingClientRect().height +
+          rows.reduce(
+            (sum, row) => sum + row.getBoundingClientRect().height,
+            0,
+          ),
+        scrolls: element.scrollHeight > element.clientHeight,
+      };
+    });
+    expect(long.content).toBeGreaterThan(long.list);
+    expect(long.scrolls).toBe(true);
+
+    // The DIALOG is not the thing that scrolls: the list is. The dialog
+    // has its own cap, so measuring the dialog's height would say
+    // nothing about the review — what matters is that the list inside it
+    // does the scrolling and the rest of the review stays whole.
+    const dialogScrolls = await dialog.evaluate(
+      element => element.scrollHeight > element.clientHeight,
+    );
+    expect(dialogScrolls).toBe(false);
+  });
+
   test('the rows keep their height when there are many of them', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Many Rows',
