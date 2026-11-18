@@ -25,27 +25,40 @@ To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key
 
 When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
 
-| Key                            | What it does                                           |
-| ------------------------------ | ------------------------------------------------------ |
-| <Key k="j" />, <Key k="k" />   | Move to the next or previous row                       |
-| <Key k="g" />, <Key k="G" />   | Jump to the first or last row                          |
-| <Key k="a" />                  | Accept the row and move on                             |
-| <Key mod="ctrl" k="a" />       | Accept the row and stay on it                          |
-| <Key mod="ctrl shift" k="a" /> | Accept the row even if the review is not sure about it |
-| <Key k="r" />                  | Drop the row and move on                               |
-| <Key k="u" />                  | Undo the last decision                                 |
-| <Key k="e" />                  | Edit the payee                                         |
-| <Key k="c" />                  | Edit the category                                      |
-| <Key k="m" />                  | Edit the notes                                         |
-| <Key mod="shift" k="4" />      | Edit the amount                                        |
-| <Key k="d" />                  | Edit the date                                          |
-| <Key k="s" />                  | Split the row across categories                        |
-| <Key k="t" />                  | Make the row a transfer                                |
-| <Key k="Tab" />                | Change how careful Actual is about the rows            |
-| <Key k="A" />, <Key k="R" />   | Accept or drop every row                               |
-| <Key k="w" />                  | Put the review aside, and pick it up again later       |
-| <Key mod="ctrl" k="s" />       | Apply the import                                       |
-| <Key k="?" />                  | Show the keys                                          |
+| Key                                         | What it does                                           |
+| ------------------------------------------- | ------------------------------------------------------ |
+| <Key k="j" />, <Key k="k" />                | Move to the next or previous row                       |
+| <Key arrow="down" />, <Key arrow="up" />    | The same, with the arrow keys                          |
+| <Key k="g" />, <Key mod="shift" k="g" />    | Jump to the first or last row                          |
+| <Key k="a" />                               | Accept the row and move on                             |
+| <Key mod="ctrl" k="a" />                    | Accept the row and stay on it                          |
+| <Key mod="ctrl shift" k="a" />              | Accept the row even if the review is not sure about it |
+| <Key k="r" />                               | Drop the row and move on                               |
+| <Key k="u" />                               | Undo the last decision                                 |
+| <Key k="e" />                               | Edit the row's fields one after another                |
+| <Key k="p" />                               | Edit the payee                                         |
+| <Key k="c" />                               | Edit the category                                      |
+| <Key k="m" />                               | Edit the notes                                         |
+| <Key mod="shift" k="4" />                   | Edit the amount                                        |
+| <Key k="d" />                               | Edit the date                                          |
+| <Key k="s" />                               | Split the row across categories                        |
+| <Key k="t" />                               | Make the row a transfer                                |
+| <Key mod="shift" k="e" />                   | Edit the rules on this row                             |
+| <Key k="1" />, <Key k="2" />, <Key k="3" /> | Choose how careful Actual is about the rows            |
+| <Key mod="shift" k="a" />                   | Accept every row                                       |
+| <Key mod="shift" k="r" />                   | Drop every row                                         |
+| <Key k="w" />                               | Put the review aside, and pick it up again later       |
+| <Key mod="ctrl" k="s" />                    | Apply the import                                       |
+| <Key k="escape" />                          | Close the review and throw it away                     |
+| <Key mod="shift" k="/" />                   | Show the keys                                          |
+
+<Key k="e" /> edits a row's fields one after another: the payee, then the category, then the notes, and then the amount if the row is flagged about it. Each field you confirm moves on to the next, and the last one moves you to the next row. The review leaves out the fields it has no business offering: the category of a transfer or a split, the amount of a split, and any field a rule already controls. Press <Key k="p" />, <Key k="c" />, <Key k="m" /> or <Key k="d" /> to edit one field on its own instead.
+
+<Key k="1" />, <Key k="2" /> and <Key k="3" /> choose how careful the review is: paranoid, cautious or trusted. The header shows the level and the key that selects it.
+
+<Key mod="shift" k="e" /> opens the rules that touched the row, so you can see what they did and change them. A rule you create from the review applies to every future transaction with that vendor; it does not change the transactions you already have.
+
+<Key k="escape" /> closes the review and throws away what is in it. If you have made any decisions or edits, the review asks you first. To keep the review instead, put it aside with <Key k="w" />.
 
 The review holds back the rows it is not sure about, and says why: a payee it does not know, a transaction that repeats an earlier one, or a row whose amount or date the file did not supply properly. You can accept a row anyway, or fix it and import it that way.
 
