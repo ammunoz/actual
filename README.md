@@ -2,6 +2,10 @@
   <img src="/demo.png" alt="Actualbudget" />
 </p>
 
+> **This is a fork.** It adds a keyboard-driven import review to Actual, and
+> it changes nothing else about how it works. See [FORK.md](FORK.md) for
+> what it adds — there is a recording of the whole thing.
+
 ## Getting Started
 
 Actual is a local-first personal finance tool. It is 100% free and open-source, written in NodeJS, it has a synchronization element so that all your changes can move between devices without any heavy lifting.
