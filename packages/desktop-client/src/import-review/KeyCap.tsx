@@ -21,6 +21,19 @@ export type KeyCapProps = {
 export function KeyCap({ children }: KeyCapProps) {
   return (
     <Text
+      // The cap OWNS its colours — the fill AND the ink.
+      //
+      // It used to take its ink from whatever it sat in, which was right
+      // on a white surface and wrong on the primary button: the button's
+      // white text over the cap's own white fill made "Ctrl+S" white on
+      // white, and unreadable. A cap that owns both cannot be broken by
+      // the surface it lands on.
+      //
+      // The pair is the app's own: the table's header surface and the
+      // page's ink, which read against each other in every theme — white
+      // on near-black in the light theme, and the reverse of a dark
+      // surface in the others.
+      data-testid="key-cap"
       // A key cap is a visual affordance. It must not change the button's
       // accessible name: "Import" stays "Import" for a screen reader and
       // for every test that finds the button by its name.
@@ -32,11 +45,10 @@ export function KeyCap({ children }: KeyCapProps) {
         marginLeft: 4,
         borderRadius: 3,
         // The edge is what makes the cap a cap, so it is NOT faded: a
-        // faded border is not a border. The LABEL is what carries the
-        // meaning, and it keeps the colour it inherits — the button's own,
-        // which is the full ink.
+        // faded border is not a border.
         border: `1px solid ${theme.pageTextSubdued}`,
         backgroundColor: theme.tableHeaderBackground,
+        color: theme.pageText,
       }}
     >
       {children}

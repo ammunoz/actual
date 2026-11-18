@@ -2647,6 +2647,115 @@ ${transactions}
     );
   });
 
+  test('every key cap can be read', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Key Cap',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    // THE ASSERTION: every key cap's ink reads against its own fill.
+    //
+    // A key cap used to take its ink from whatever it sat in, which was
+    // right on a white surface and wrong on the primary button: the
+    // button's white text over the cap's own white fill made "Ctrl+S"
+    // white on white, and unreadable.
+    //
+    // The colours are the ones the browser computed at runtime, so the
+    // assertion holds in every theme and whatever the theme's tokens
+    // happen to be. AA for normal text is 4.5:1.
+    //
+    // The three themes are all tried, because a cap that reads on white
+    // does not necessarily read on midnight's near-black.
+    for (const theme of ['auto', 'dark', 'midnight']) {
+      await page.evaluate(name => window.Actual.setTheme(name), theme);
+      await expect(page.locator('[data-theme]')).toHaveAttribute(
+        'data-theme',
+        theme,
+      );
+
+      const caps = await dialog.evaluate(element => {
+        // A colour can be translucent, and two translucent colours cannot
+        // be compared: they have to be put together first. So a
+        // translucent fill is put over the nearest opaque thing behind
+        // it, which is what the eye sees.
+        const parse = (color: string) => {
+          const parts = (color.match(/[\d.]+/g) ?? []).map(Number);
+          return {
+            r: parts[0] ?? 0,
+            g: parts[1] ?? 0,
+            b: parts[2] ?? 0,
+            a: parts[3] ?? 1,
+          };
+        };
+        const over = (
+          top: { r: number; g: number; b: number; a: number },
+          bottom: { r: number; g: number; b: number },
+        ) => ({
+          r: top.r * top.a + bottom.r * (1 - top.a),
+          g: top.g * top.a + bottom.g * (1 - top.a),
+          b: top.b * top.a + bottom.b * (1 - top.a),
+        });
+        const backdropOf = (node: Element) => {
+          // The walk starts at the PARENT: the cap's own fill is the top
+          // layer, and what is wanted is the surface BEHIND it. A
+          // translucent fill composited onto itself would report its own
+          // colour and read as perfect, whatever it really looks like.
+          let current: Element | null = node.parentElement;
+          while (current) {
+            const background = parse(getComputedStyle(current).backgroundColor);
+            if (background.a > 0) return background;
+            current = current.parentElement;
+          }
+          return { r: 255, g: 255, b: 255 };
+        };
+
+        return Array.from(
+          element.querySelectorAll('[data-testid="key-cap"]'),
+        ).map(cap => {
+          const style = getComputedStyle(cap);
+          const rect = cap.getBoundingClientRect();
+          const fill = parse(style.backgroundColor);
+          const behind = over(fill, backdropOf(cap));
+          return {
+            text: cap.textContent,
+            color: style.color,
+            background: `rgb(${Math.round(behind.r)}, ${Math.round(behind.g)}, ${Math.round(behind.b)})`,
+            visible: rect.width > 0 && rect.height > 0,
+          };
+        });
+      });
+
+      // The header alone carries five: Escape, the three trust levels,
+      // and the Import button's Ctrl+S. A smaller number means a cap is
+      // missing, not that there are fewer of them.
+      expect(caps.length).toBeGreaterThanOrEqual(5);
+      for (const cap of caps) {
+        expect(cap.visible).toBe(true);
+        expect(contrastRatio(cap.color, cap.background)).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+    }
+
+    // The app is put back the way it was found, so the suite does not
+    // depend on the order its tests run in.
+    await page.evaluate(() => window.Actual.setTheme('auto'));
+    await expect(page.locator('[data-theme]')).toHaveAttribute(
+      'data-theme',
+      'auto',
+    );
+  });
+
   test('the list is as tall as its content, and the list is what scrolls', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review List Height',
