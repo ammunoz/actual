@@ -1634,6 +1634,61 @@ ${transactions}
     );
   });
 
+  test('the payee cell says when the payee is not settled', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Payee States',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The first row's vendor is "POS PURCHASE 4251" — something the
+    // budget has no payee for. There is no payee BEHIND the cell, so the
+    // cell shows the file's own string, and it is MUTED: in normal ink it
+    // looks like a fact, and it is not one.
+    const unresolved = rows
+      .nth(0)
+      .getByTestId('import-review-row-payee')
+      .getByText('POS PURCHASE 4251');
+    await expect(unresolved).toBeVisible();
+    await expect(unresolved).toHaveCSS('font-style', 'italic');
+
+    // The user picks a payee the budget HAS. Now it is settled, and it
+    // says so in the normal ink.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    const settled = rows
+      .nth(0)
+      .getByTestId('import-review-row-payee')
+      .getByText('Kroger');
+    await expect(settled).toBeVisible();
+    await expect(settled).not.toHaveCSS('font-style', 'italic');
+
+    // And the settled payee is a DIFFERENT colour from the unresolved one
+    // on the row below it — measured at runtime, so it holds whatever the
+    // theme's tokens are.
+    const payeeColour = async (index: number, text: string) =>
+      rows
+        .nth(index)
+        .getByTestId('import-review-row-payee')
+        .getByText(text)
+        .evaluate(element => getComputedStyle(element).color);
+    expect(await payeeColour(0, 'Kroger')).not.toBe(
+      await payeeColour(1, 'Demo Grocery Store'),
+    );
+  });
+
   test('the header lines up with the rows', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Header',

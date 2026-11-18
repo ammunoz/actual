@@ -368,10 +368,27 @@ export function KeyboardImportModal({
    * A transfer row says the ACCOUNT the money goes to, the way Actual's
    * own transactions table does: the payee of a transfer is the other
    * account, not the vendor the bank file named.
+   *
+   * The cell is MUTED when the payee is not SETTLED: either there is no
+   * payee behind it at all, or the resolver only guessed one. The
+   * category cell has always worked this way — "Categorize" is muted —
+   * and a payee cell that shows a guess in normal ink looks like a fact
+   * the user can rely on. It is not.
+   *
+   * The muted colour is the app's own secondary-text token, the same one
+   * the category cell's "Categorize" wears. It does not clear WCAG AA on
+   * the modal's background in the light theme — no muted grey in the
+   * palette does — and the ITALIC is the other cue: the cell says
+   * "not settled" in two ways rather than one.
    */
   const payeeCell = (
     row: PreviewRow,
-  ): { label: string; ruled: boolean; cleared: boolean } => {
+  ): {
+    label: string;
+    ruled: boolean;
+    cleared: boolean;
+    muted: boolean;
+  } => {
     // A rule that sets the payee OWNS the cell: the engine's value is
     // what lands, so that is what the cell says.
     const effect = visibleEffectFor(review.ruleEffects, row, 'payee');
@@ -392,29 +409,71 @@ export function KeyboardImportModal({
         label: name ?? (effect.value === null ? '' : String(effect.value)),
         ruled: true,
         cleared: effect.value === null,
+        muted: false,
       };
     }
-    // A split keeps the vendor: the categories live on the legs, and
-    // the parent still carries the payee.
-    if (isSplitRow(row.edits)) {
-      return {
-        label: row.edits.payeeCanonical ?? row.payeeCanonical,
-        ruled: false,
-        cleared: false,
-      };
-    }
+    // The user chose the payee. It is settled, whatever the resolver
+    // thought. An empty or blank choice is not a choice — the same rule
+    // the gate's own flags use.
+    const chosen = row.edits.payeeCanonical?.trim();
+
+    // A transfer row says the ACCOUNT the money goes to, the way Actual's
+    // own transactions table does: the payee of a transfer is the other
+    // account, not the vendor the bank file named.
+    //
+    // A transfer the user has TAKEN AWAY is not a transfer any more, and
+    // `effectiveTransferAccountId` says so — the row falls through to the
+    // file's string below, which is right: there is no payee behind it.
     const transferAccountId = effectiveTransferAccountId(row);
-    if (transferAccountId !== undefined) {
+    if (!chosen && transferAccountId !== undefined) {
       return {
         label: accountNames.get(transferAccountId) ?? t('Transfer'),
         ruled: false,
         cleared: false,
+        muted: false,
       };
     }
+
+    // A FUZZY match is a guess: the resolver found a budget payee it
+    // thinks is close enough, and the review says so.
+    if (!chosen && row.payeeMatchSource === 'fuzzy') {
+      return {
+        label: row.payeeCanonical,
+        ruled: false,
+        cleared: false,
+        muted: true,
+      };
+    }
+
+    // A payee the budget HAS is settled.
+    //
+    // The resolver's sources that mean "the budget has it" are the
+    // prefix match and the vendor map. The others — a fuzzy match, the
+    // strip fallback's made-up name, nothing at all — do not.
+    if (
+      chosen ||
+      row.payeeMatchSource === 'existing-prefix' ||
+      row.payeeMatchSource === 'vendor-map'
+    ) {
+      return {
+        label: chosen ?? row.payeeCanonical,
+        ruled: false,
+        cleared: false,
+        muted: false,
+      };
+    }
+
+    // And when there is no payee behind the cell at all — the resolver
+    // found nothing, or made a name up out of the vendor string — the
+    // cell shows the FILE's own string. That is what the file said, and
+    // it is what the user would be choosing from; the name the resolver
+    // made up ("PURCHASE", out of "POS PURCHASE 4251") is the less
+    // recognisable of the two.
     return {
-      label: row.edits.payeeCanonical ?? row.payeeCanonical,
+      label: row.payeeRaw,
       ruled: false,
       cleared: false,
+      muted: true,
     };
   };
 
@@ -1498,7 +1557,19 @@ export function KeyboardImportModal({
                               title={payee.label}
                             />
                           ) : (
-                            <TextOneLine title={payee.label}>
+                            /* A payee that is not settled — a guess, or
+                               nothing at all — is MUTED, the way the
+                               category's "Categorize" is. It looks like a
+                               fact in normal ink, and it is not one. */
+                            <TextOneLine
+                              title={payee.label}
+                              style={{
+                                fontStyle: payee.muted ? 'italic' : undefined,
+                                color: payee.muted
+                                  ? theme.pageTextSubdued
+                                  : undefined,
+                              }}
+                            >
                               {payee.label}
                             </TextOneLine>
                           ),
