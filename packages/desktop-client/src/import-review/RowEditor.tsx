@@ -80,8 +80,8 @@ export type RowEditorProps = {
  *
  * The pane sits BELOW the table, so the row being edited stays visible
  * while it is edited. It is the only place the keyboard goes while it is
- * open: the review's own bindings are switched off, so `tab` does not
- * cycle the trust level and `escape` does not discard the review.
+ * open: the review's own bindings are switched off, so a letter typed
+ * here is text and `escape` does not discard the review.
  */
 export function RowEditor({
   row,

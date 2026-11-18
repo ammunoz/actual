@@ -10,6 +10,8 @@
  * open), so these bindings never collide with the app-level shortcuts.
  */
 
+import type { TrustLevel } from './types';
+
 export type ReviewAction =
   | 'move-next'
   | 'move-prev'
@@ -28,7 +30,9 @@ export type ReviewAction =
   | 'edit-transfer'
   | 'edit-split'
   | 'edit-rules'
-  | 'cycle-flag'
+  | 'trust-paranoid'
+  | 'trust-cautious'
+  | 'trust-trusted'
   | 'save-session'
   | 'accept-all'
   | 'drop-all'
@@ -67,7 +71,9 @@ export const REVIEW_ACTIONS = Object.freeze([
   'edit-transfer',
   'edit-split',
   'edit-rules',
-  'cycle-flag',
+  'trust-paranoid',
+  'trust-cautious',
+  'trust-trusted',
   'save-session',
   'accept-all',
   'drop-all',
@@ -149,6 +155,94 @@ export const REVIEW_SCOPE = 'keyboard-import-transactions';
  * on" and a binding whose meaning depends on the state of the row under the
  * cursor is one the user cannot predict.
  */
+/**
+ * The trust levels, in the order the header control shows them.
+ */
+export const TRUST_LEVELS: readonly TrustLevel[] = Object.freeze([
+  'paranoid',
+  'cautious',
+  'trusted',
+]);
+
+/**
+ * The key that selects each trust level.
+ *
+ * The chips in the header and the key bindings are ONE fact: the chip
+ * says the key that does what the chip does. Deriving the digit from the
+ * array index would let a reorder desynchronize them, so the digits live
+ * here and the bindings are made from them.
+ */
+export const TRUST_LEVEL_KEYS = Object.freeze({
+  paranoid: '1',
+  cautious: '2',
+  trusted: '3',
+} as const);
+
+/**
+ * The bindings that select the trust levels, made from the table above.
+ */
+const TRUST_BINDINGS: readonly KeyBinding[] = TRUST_LEVELS.map(level => ({
+  keys: TRUST_LEVEL_KEYS[level],
+  action: `trust-${level}`,
+  showInHelp: true,
+}));
+
+/**
+ * The actions that are about the REVIEW, not about the row under the
+ * cursor.
+ *
+ * These stay live while a button or another control has the focus. The
+ * row actions belong to the grid, and a focused control must not swallow
+ * them: with the close button focused, `a` used to accept the focused
+ * row.
+ *
+ * - Escape closes the review, and the dialog is told NOT to dismiss
+ *   itself on Escape, so this is the only way out.
+ * - Ctrl+S applies the import, and it is advertised on the very button
+ *   that might have the focus.
+ * - `w` puts the review aside, and `?` opens the help.
+ * - The bulk actions and the undo work on the whole review.
+ * - The trust keys select a level for the whole review.
+ *
+ * The two lists together are every action the review has, and a test
+ * says so: an action nobody classified would be a row action by
+ * default, which is the safe way round.
+ */
+export const GLOBAL_ACTIONS: readonly ReviewAction[] = Object.freeze([
+  'close',
+  'apply',
+  'save-session',
+  'help',
+  'accept-all',
+  'drop-all',
+  'undo',
+  'trust-paranoid',
+  'trust-cautious',
+  'trust-trusted',
+]);
+
+/**
+ * The actions that act on the row under the cursor.
+ */
+export const ROW_ACTIONS: readonly ReviewAction[] = Object.freeze([
+  'move-next',
+  'move-prev',
+  'move-first',
+  'move-last',
+  'accept',
+  'accept-confirm',
+  'accept-override',
+  'drop',
+  'edit-payee',
+  'edit-category',
+  'edit-memo',
+  'edit-amount',
+  'edit-date',
+  'edit-transfer',
+  'edit-split',
+  'edit-rules',
+]);
+
 export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 'j, down',
@@ -230,11 +324,10 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     action: 'edit-rules',
     showInHelp: true,
   },
-  {
-    keys: 'tab',
-    action: 'cycle-flag',
-    showInHelp: true,
-  },
+  // `tab` is deliberately NOT bound: a dialog has to be tabbable. The
+  // trust level is a control with three direct keys instead of a cycle,
+  // and the keys come from the table above.
+  ...TRUST_BINDINGS,
   {
     keys: 'w',
     action: 'save-session',
@@ -296,19 +389,3 @@ export const CLOSING_ACTIONS: readonly ReviewAction[] = Object.freeze([
   'apply',
   'close',
 ]);
-
-/**
- * The trust levels, in the order the cycle key walks them.
- */
-export const TRUST_LEVELS: readonly ('paranoid' | 'cautious' | 'trusted')[] =
-  Object.freeze(['paranoid', 'cautious', 'trusted']);
-
-/**
- * Pure: the next trust level in the cycle.
- */
-export function nextTrustLevel(
-  current: 'paranoid' | 'cautious' | 'trusted',
-): 'paranoid' | 'cautious' | 'trusted' {
-  const index = TRUST_LEVELS.indexOf(current);
-  return TRUST_LEVELS[(index + 1) % TRUST_LEVELS.length];
-}

@@ -69,7 +69,6 @@ import {
   buildUpdatePayload,
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
-import { nextTrustLevel } from './keymap';
 import { ruleEffectsFor } from './rule-effects';
 import type { ReportedRow, RuleEffects } from './rule-effects';
 import { ruleToWrite } from './rules';
@@ -351,8 +350,8 @@ export type ImportReviewState = {
   moveFocus: (delta: number) => void;
   /** Undo the most recent decision. */
   undo: () => void;
-  /** Cycle the trust level. */
-  cycleTrustLevel: () => void;
+  /** Set the trust level directly, without re-parsing the file. */
+  setTrustLevel: (level: TrustLevel) => void;
   /**
    * Create a rule, or amend the one that already says it.
    *
@@ -537,7 +536,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     focusedIndexRef.current = index;
     setFocusedIndex(index);
   }, []);
-  const [trustLevel, setTrustLevel] = useState<TrustLevel>('cautious');
+  const [trustLevel, setTrustLevelState] = useState<TrustLevel>('cautious');
   const [payees, setPayees] = useState<readonly ReviewPayee[]>([]);
   const [accounts, setAccounts] = useState<readonly ReviewAccount[]>([]);
   const [categories, setCategories] = useState<readonly ReviewCategory[]>([]);
@@ -1095,7 +1094,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         const state = sessionToPreviewState(saved);
         setState(state);
-        setTrustLevel(saved.trustLevel);
+        setTrustLevelState(saved.trustLevel);
         // The cursor has to be a row of THIS review: the session may
         // have been saved from a review with more rows.
         setCursor(
@@ -1625,16 +1624,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     void refreshEffectsFor(last.state.rows);
   }, [refreshEffectsFor, setCursor]);
 
-  const cycleTrustLevel = useCallback(() => {
-    setTrustLevel(current => {
-      const next = nextTrustLevel(current);
-      // The trust level only feeds the gate matrix, so it is applied to the
-      // existing state. Re-parsing would discard the user's decisions.
-      setState(currentState =>
-        currentState ? withTrustLevel(currentState, next) : currentState,
-      );
-      return next;
-    });
+  const setTrustLevel = useCallback((level: TrustLevel) => {
+    // The trust level only feeds the gate matrix, so it is applied to the
+    // existing state. Re-parsing would discard the user's decisions.
+    setTrustLevelState(level);
+    setState(currentState =>
+      currentState ? withTrustLevel(currentState, level) : currentState,
+    );
   }, []);
 
   // The vendor map changed: resolve the rows again.
@@ -2213,7 +2209,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     focus,
     moveFocus,
     undo,
-    cycleTrustLevel,
+    setTrustLevel,
     createRule,
     saveSession,
     apply,

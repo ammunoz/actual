@@ -32,7 +32,7 @@ export type {
 export {
   KEYMAP,
   actionForHotkey,
-  nextTrustLevel,
+  TRUST_LEVEL_KEYS,
   REVIEW_SCOPE,
   TRUST_LEVELS,
 } from './keymap';

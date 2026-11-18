@@ -283,6 +283,26 @@ describe('useImportReview', () => {
     expect(result.current.summary.total).toBe(2);
   });
 
+  it('sets the trust level directly, keeping the rows and their edits', async () => {
+    const { result } = await renderReview();
+
+    act(() => {
+      result.current.edit(0, { memo: 'a note' });
+    });
+    expect(result.current.unsavedWork.hasWork).toBe(true);
+
+    act(() => {
+      result.current.setTrustLevel('trusted');
+    });
+
+    expect(result.current.trustLevel).toBe('trusted');
+    // The gate is re-evaluated on the SAME rows: re-parsing the file would
+    // discard the note the user just wrote.
+    expect(result.current.state?.trustLevel).toBe('trusted');
+    expect(result.current.unsavedWork.hasWork).toBe(true);
+    expect(result.current.state?.rows[0].edits.memo).toBe('a note');
+  });
+
   it('shows the rows only once the rules have reported their effects', async () => {
     // The rows and the rule effects belong together: the cells, the
     // status line and the rule picker all answer questions about the

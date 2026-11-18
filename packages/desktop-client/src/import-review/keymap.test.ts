@@ -1,10 +1,12 @@
 import { HELP_LABELS } from './help-labels';
 import {
   actionForHotkey,
+  GLOBAL_ACTIONS,
   KEYMAP,
-  nextTrustLevel,
   REVIEW_ACTIONS,
   REVIEW_ACTIONS_COVER_EVERY_ACTION,
+  ROW_ACTIONS,
+  TRUST_LEVEL_KEYS,
   TRUST_LEVELS,
 } from './keymap';
 
@@ -51,6 +53,37 @@ describe('KEYMAP', () => {
     const keys = KEYMAP.map(binding => binding.keys);
     expect(keys).not.toContain('h');
     expect(keys).not.toContain('l');
+  });
+
+  it('does not bind tab, so the dialog is tabbable', () => {
+    // `tab` used to cycle the trust level, and the handler prevented the
+    // browser's own focus move. No button in the review was reachable
+    // with the keyboard. Direct trust keys subsume the cycle.
+    const keys = KEYMAP.map(binding => binding.keys);
+    expect(keys).not.toContain('tab');
+    // A shifted tab would swallow the focus move just the same.
+    expect(keys.filter(key => key.endsWith('tab'))).toEqual([]);
+    expect(REVIEW_ACTIONS).not.toContain('cycle-flag');
+  });
+
+  it('classifies every action as row-scoped or review-scoped', () => {
+    // The two lists together are every action the review has. An action
+    // nobody classified would be a row action by default, which is the
+    // safe way round: a row action that should have been a review action
+    // is swallowed by a focused control, not the other way about.
+    const classified = [...ROW_ACTIONS, ...GLOBAL_ACTIONS];
+    expect(new Set(classified).size).toBe(classified.length);
+    expect([...classified].sort()).toEqual([...REVIEW_ACTIONS].sort());
+  });
+
+  it('binds the trust levels directly, one key each', () => {
+    for (const [key, action] of [
+      ['1', 'trust-paranoid'],
+      ['2', 'trust-cautious'],
+      ['3', 'trust-trusted'],
+    ] as const) {
+      expect(KEYMAP.find(binding => binding.keys === key)?.action).toBe(action);
+    }
   });
 
   it('binds w, which puts the review aside', () => {
@@ -190,16 +223,15 @@ describe('actionForHotkey', () => {
   });
 });
 
-describe('nextTrustLevel', () => {
-  it('cycles paranoid -> cautious -> trusted -> paranoid', () => {
-    expect(nextTrustLevel('paranoid')).toBe('cautious');
-    expect(nextTrustLevel('cautious')).toBe('trusted');
-    expect(nextTrustLevel('trusted')).toBe('paranoid');
-  });
-
-  it('covers every trust level', () => {
-    expect(TRUST_LEVELS).toContain('paranoid');
-    expect(TRUST_LEVELS).toContain('cautious');
-    expect(TRUST_LEVELS).toContain('trusted');
+describe('the trust levels', () => {
+  it('covers every level, with one key each', () => {
+    for (const level of TRUST_LEVELS) {
+      expect(TRUST_LEVEL_KEYS[level]).toMatch(/^[123]$/);
+    }
+    expect(TRUST_LEVELS.map(level => TRUST_LEVEL_KEYS[level])).toEqual([
+      '1',
+      '2',
+      '3',
+    ]);
   });
 });

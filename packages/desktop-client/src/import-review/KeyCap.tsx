@@ -21,6 +21,10 @@ export type KeyCapProps = {
 export function KeyCap({ children }: KeyCapProps) {
   return (
     <Text
+      // A key cap is a visual affordance. It must not change the button's
+      // accessible name: "Import" stays "Import" for a screen reader and
+      // for every test that finds the button by its name.
+      aria-hidden
       style={{
         fontSize: 11,
         lineHeight: 1.5,

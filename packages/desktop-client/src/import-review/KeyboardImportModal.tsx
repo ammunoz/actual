@@ -50,7 +50,15 @@ import { hasOverridableHeldRow, isOverridableHeld } from './held-rows';
 import { HelpOverlay } from './HelpOverlay';
 import { HintStrip } from './HintStrip';
 import { KeyCap } from './KeyCap';
-import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
+import {
+  actionForHotkey,
+  CLOSING_ACTIONS,
+  GLOBAL_ACTIONS,
+  KEYMAP,
+  REVIEW_SCOPE,
+  TRUST_LEVEL_KEYS,
+  TRUST_LEVELS,
+} from './keymap';
 import type { ReviewAction } from './keymap';
 import { ReviewColumns } from './review-columns';
 import { RowEditor } from './RowEditor';
@@ -208,6 +216,24 @@ export function KeyboardImportModal({
   // The pane below the table: the editor for a field, the split editor,
   // the help, or the confirmation.
   const [pane, setPane] = useState<PaneMode>(null);
+
+  // A pane owns the keyboard while it is up. When it closes, the focus
+  // has to come back to the grid or the user is typing into a button
+  // that is no longer there.
+  const gridRef = useRef<HTMLDivElement>(null);
+  const paneWasOpenRef = useRef(false);
+  const pendingGridRefocusRef = useRef(false);
+
+  /**
+   * Give the keyboard back to the grid.
+   *
+   * The grid owns the review's keys. A control that acted hands the
+   * keyboard back, so the row keys work again straight away.
+   *
+   * The scroll is not moved: the user's pointer may be over a row
+   * action, and a scroll would take the target out from under it.
+   */
+  const focusGrid = () => gridRef.current?.focus({ preventScroll: true });
 
   // Why the last thing the user asked for did not happen.
   //
@@ -1206,8 +1232,16 @@ export function KeyboardImportModal({
       case 'undo':
         review.undo();
         break;
-      case 'cycle-flag':
-        review.cycleTrustLevel();
+      case 'trust-paranoid':
+      case 'trust-cautious':
+      case 'trust-trusted':
+        review.setTrustLevel(
+          action === 'trust-paranoid'
+            ? 'paranoid'
+            : action === 'trust-cautious'
+              ? 'cautious'
+              : 'trusted',
+        );
         break;
       case 'save-session': {
         // The rows are set only after the rules have reported their
@@ -1386,6 +1420,14 @@ export function KeyboardImportModal({
       return;
     }
     dispatch(action);
+    // The GRID owns the keyboard. A button that acted hands it back, so
+    // the row keys work again straight away — a user who clicked Accept
+    // with the mouse can carry on with the keyboard.
+    //
+    // `edit-payee` is the exception: it opens a PANE, and the pane takes
+    // the keyboard. The other three actions here — accept, drop and
+    // accept anyway — act on the row and open nothing.
+    if (action !== 'edit-payee') focusGrid();
   };
 
   // One binding for the whole keymap. `react-hotkeys-hook` reports the
@@ -1395,17 +1437,46 @@ export function KeyboardImportModal({
   useHotkeys(
     allKeys,
     (event, handler) => {
-      // The letter bindings must not fire while the user is typing.
-      if (event.target instanceof HTMLElement) {
-        const tag = event.target.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      }
       // The matched hotkey, not the parsed key list: for `ctrl+a` and `a`
       // the parsed key list is `['a']` in both cases.
       const action = actionForHotkey(handler.hotkey);
       if (!action) return;
+
+      let inControl = false;
+      if (event.target instanceof HTMLElement) {
+        const target = event.target;
+        // Typing always wins: a letter typed into a field is text, not a
+        // command. A field is a pane here, so this is mostly belt and
+        // braces, but the handler listens on the document.
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+        // Row keys belong to the grid, not to the button the user has
+        // tabbed to. With the close button focused, `a` used to accept
+        // the focused row; with a trust chip focused, `r` would drop it.
+        // The GLOBAL actions are exempt: Escape and Ctrl+S must work
+        // wherever the focus is, or the dialog becomes a trap.
+        inControl =
+          target.closest(
+            'button,[role="button"],[role="switch"],[role="checkbox"],[role="textbox"],[role="combobox"],[role="listbox"],select,a[href]',
+          ) !== null;
+        if (inControl && !GLOBAL_ACTIONS.includes(action)) return;
+      }
+
       event.preventDefault();
       dispatch(action);
+      // A command that fired while a CONTROL had the focus hands the
+      // keyboard back to the grid. Otherwise the focus stays on the
+      // control, and the row keys — which a focused control swallows —
+      // would stay swallowed: tab to the trust chip, press `3`, and `a`
+      // would do nothing.
+      if (inControl && !CLOSING_ACTIONS.includes(action)) {
+        focusGrid();
+      }
     },
     {
       scopes: [REVIEW_SCOPE],
@@ -1423,9 +1494,9 @@ export function KeyboardImportModal({
       // binding is torn down in the LAYOUT phase of the very same commit
       // that opened the pane — before the browser can deliver another key.
       //
-      // A guard inside the handler would not do either. `tab` would still
-      // cycle the trust level, the arrow keys would still move the row
-      // focus, and `escape` would still discard the whole review — and
+      // A guard inside the handler would not do either. The arrow keys
+      // would still move the row focus, letters would still decide rows,
+      // and `escape` would still discard the whole review — and
       // `react-hotkeys-hook` listens on the document, so a child
       // component calling `preventDefault()` does not stop any of them.
       //
@@ -1459,6 +1530,26 @@ export function KeyboardImportModal({
     },
     { enabled: pane?.kind === 'help' },
   );
+
+  // A pane hands the keyboard back to the grid when it closes. Without
+  // this, Escape leaves the focus on a button that has just unmounted and
+  // the next key goes to the browser instead of the review.
+  useEffect(() => {
+    const wasOpen = paneWasOpenRef.current;
+    paneWasOpenRef.current = pane !== null;
+    // Upstream's rule editor opens where a pane closed. Do not pull the
+    // focus back into the review from the modal the user just opened —
+    // remember it instead, and hand the focus back when that modal is
+    // gone. Otherwise a keyboard user loses their place silently.
+    if (wasOpen && pane === null) {
+      if (isEditingRule) pendingGridRefocusRef.current = true;
+      else focusGrid();
+    }
+    if (!isEditingRule && pane === null && pendingGridRefocusRef.current) {
+      pendingGridRefocusRef.current = false;
+      focusGrid();
+    }
+  }, [pane, isEditingRule]);
 
   // The review owns the keyboard while it is open: the app's own hotkeys
   // must not fire under it.
@@ -1519,34 +1610,86 @@ export function KeyboardImportModal({
         <>
           <ModalHeader
             title={t('Review import')}
-            leftContent={<ModalCloseButton onPress={requestClose} />}
-            rightContent={
-              <Button
-                variant="primary"
-                onPress={() => {
-                  void review.apply().then(didChange => {
-                    if (didChange) closeReview();
-                  });
-                }}
-                // The Import button is off while a pane owns the
-                // keyboard: the confirmation's outcomes are Keep and
-                // Discard, and a split the user has not saved would be
-                // applied without.
-                isDisabled={
-                  isLoading ||
-                  rows.length === 0 ||
-                  // A rule is being written: the import would race the
-                  // write, and the rule the user just made might or
-                  // might not be in the import.
-                  creatingRule ||
-                  pane?.kind === 'confirm' ||
-                  pane?.kind === 'rules' ||
-                  pane?.kind === 'split' ||
-                  pane?.kind === 'transfer'
-                }
+            leftContent={
+              // The X closes the review, and so does Escape. The button
+              // says which key does the same thing.
+              <View
+                style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}
               >
-                <Trans>Import</Trans>
-              </Button>
+                <ModalCloseButton onPress={requestClose} />
+                <KeyCap>
+                  <Trans>Escape</Trans>
+                </KeyCap>
+              </View>
+            }
+            rightContent={
+              <View
+                style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}
+              >
+                {/* The trust level is a CONTROL, not a line of text in
+                    the status strip. The keys are on the buttons so a
+                    mouse user and a keyboard user are doing the same
+                    thing, and `tab` can reach the buttons now that it
+                    is no longer the cycle binding. */}
+                {TRUST_LEVELS.map(level => {
+                  const isCurrent = level === review.trustLevel;
+                  return (
+                    <Button
+                      key={level}
+                      variant="bare"
+                      aria-pressed={isCurrent}
+                      data-testid={`import-review-trust-${level}`}
+                      // A pane owns the keyboard: the confirmation's
+                      // outcomes are Keep and Discard, and changing the
+                      // trust level under it would change what they mean.
+                      isDisabled={pane !== null || creatingRule}
+                      onPress={() => {
+                        review.setTrustLevel(level);
+                        // The grid takes the keyboard back, so the row
+                        // keys work again after a chip is clicked.
+                        focusGrid();
+                      }}
+                      style={{
+                        color: isCurrent
+                          ? theme.ruleLockText
+                          : theme.pageTextSubdued,
+                        fontWeight: isCurrent ? 'bold' : undefined,
+                      }}
+                    >
+                      {trustLevelLabel(level)}
+                      <KeyCap>{TRUST_LEVEL_KEYS[level]}</KeyCap>
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="primary"
+                  data-testid="import-review-import"
+                  onPress={() => {
+                    void review.apply().then(didChange => {
+                      if (didChange) closeReview();
+                    });
+                  }}
+                  // The Import button is off while a pane owns the
+                  // keyboard: the confirmation's outcomes are Keep and
+                  // Discard, and a split the user has not saved would be
+                  // applied without.
+                  isDisabled={
+                    isLoading ||
+                    rows.length === 0 ||
+                    // A rule is being written: the import would race the
+                    // write, and the rule the user just made might or
+                    // might not be in the import.
+                    creatingRule ||
+                    pane?.kind === 'confirm' ||
+                    pane?.kind === 'rules' ||
+                    pane?.kind === 'split' ||
+                    pane?.kind === 'transfer'
+                  }
+                >
+                  <Trans>Import</Trans>
+                  <KeyCap>Ctrl+S</KeyCap>
+                </Button>
+              </View>
             }
           />
 
@@ -1667,7 +1810,10 @@ export function KeyboardImportModal({
               }}
             >
               <View
+                ref={gridRef}
                 role="table"
+                tabIndex={0}
+                data-testid="import-review-grid"
                 style={{
                   // The list grows with its content and stops at half the
                   // screen: the modal sizes to what it has to show, and
@@ -2170,6 +2316,7 @@ export function KeyboardImportModal({
                                   </Text>
                                 ) : null}
                                 <Trans>Edit this rule</Trans>
+                                <KeyCap>Shift+E</KeyCap>
                               </Button>
                             </View>
                           );
@@ -2200,9 +2347,11 @@ export function KeyboardImportModal({
                                   'Rule created. This vendor will always use this payee, from now on.',
                                 ),
                               );
+                              focusGrid();
                             }}
                           >
                             <Trans>Always this payee for this vendor</Trans>
+                            <KeyCap>Shift+E</KeyCap>
                           </Button>
                         ) : null}
                         {focusedRules.payeeToCategory &&
@@ -2217,9 +2366,11 @@ export function KeyboardImportModal({
                                   'Rule created. This payee will always use this category, from now on.',
                                 ),
                               );
+                              focusGrid();
                             }}
                           >
                             <Trans>Always this category for this payee</Trans>
+                            <KeyCap>Shift+E</KeyCap>
                           </Button>
                         ) : null}
                       </View>
@@ -2471,7 +2622,10 @@ export function KeyboardImportModal({
                       data-testid="import-review-accept-all"
                       // Nothing to decide is nothing to do.
                       isDisabled={summary.pending === 0}
-                      onPress={() => review.decideAll('accept')}
+                      onPress={() => {
+                        review.decideAll('accept');
+                        focusGrid();
+                      }}
                     >
                       <Trans>Accept all</Trans>
                       <KeyCap>Shift+A</KeyCap>
@@ -2480,7 +2634,10 @@ export function KeyboardImportModal({
                       variant="bare"
                       data-testid="import-review-drop-all"
                       isDisabled={summary.pending === 0}
-                      onPress={() => review.decideAll('drop')}
+                      onPress={() => {
+                        review.decideAll('drop');
+                        focusGrid();
+                      }}
                     >
                       <Trans>Drop all</Trans>
                       <KeyCap>Shift+R</KeyCap>
@@ -2492,7 +2649,10 @@ export function KeyboardImportModal({
                       // closest signal there is: there is nothing to undo
                       // exactly when there is no unsaved work.
                       isDisabled={!review.unsavedWork.hasWork}
-                      onPress={() => review.undo()}
+                      onPress={() => {
+                        review.undo();
+                        focusGrid();
+                      }}
                     >
                       <Trans>Undo</Trans>
                       <KeyCap>u</KeyCap>

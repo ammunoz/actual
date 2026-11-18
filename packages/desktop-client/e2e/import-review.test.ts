@@ -60,6 +60,145 @@ test.describe('Keyboard import review', () => {
     await page?.close();
   });
 
+  test('a focused button does not fire a row key', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Focused Button',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The trust chips are buttons. With one focused, `a` used to accept
+    // the focused row: the hotkey handler only ignored inputs and text
+    // areas, and a button is not either of those.
+    const chip = dialog.getByTestId('import-review-trust-paranoid');
+    await chip.focus();
+    await page.keyboard.press('a');
+    await expect(rows.first()).not.toHaveAttribute('data-decision', 'accept');
+    await expect(dialog.getByText('0 of 3 reviewed')).toBeVisible();
+
+    // The button's OWN keys still work. The bail is about the review's
+    // row keys, not about disabling the control.
+    await page.keyboard.press('Enter');
+    await expect(chip).toHaveAttribute('aria-pressed', 'true');
+
+    // The control hands the keyboard back to the grid once it has done
+    // its job, so the row keys work again straight away.
+    await expect(dialog.getByTestId('import-review-grid')).toBeFocused();
+
+    // Escape is a GLOBAL key, not a row key. The dialog is told not to
+    // dismiss itself on Escape, so if the focus bail swallowed it here
+    // there would be no way out of a review with a button focused.
+    const importButton = dialog.getByTestId('import-review-import');
+    await importButton.focus();
+    await expect(importButton).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('tab moves focus, and escape hands it back to the grid', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Tab',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-row')).toHaveCount(3);
+
+    // `tab` used to be the cycle binding, so it was prevented and NO
+    // control in the review could be reached with the keyboard. Now it
+    // moves focus, and the Import button is reachable.
+    const importButton = dialog.getByTestId('import-review-import');
+    let reached = false;
+    // Twelve is a budget, not a fact: the header has a handful of
+    // controls and the dialog traps the focus, so the walk gets there
+    // well inside this. A bigger header would need a bigger number.
+    for (let press = 0; press < 12; press++) {
+      if (await importButton.evaluate(el => el === document.activeElement)) {
+        reached = true;
+        break;
+      }
+      await page.keyboard.press('Tab');
+    }
+    expect(reached).toBe(true);
+
+    // A pane takes the focus when it opens and gives it back to the rows
+    // when it closes, so the next key after Escape still drives the list.
+    await dialog.getByTestId('import-review-grid').focus();
+    await page.keyboard.press('e');
+    await expect(dialog.getByTestId('import-review-editor')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog.getByTestId('import-review-editor')).not.toBeVisible();
+    await expect(dialog.getByTestId('import-review-grid')).toBeFocused();
+
+    // Ctrl+S is global too. The Import button is focused after the Tab
+    // walk; applying must not depend on where the focus happens to be.
+    await importButton.focus();
+    await page.keyboard.press('ControlOrMeta+s');
+    await expect(dialog).not.toBeVisible();
+    await expect(accountPage.transactionTableRow).toHaveCount(3);
+  });
+
+  test('1, 2 and 3 select the trust level directly', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Trust Keys',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const paranoid = dialog.getByTestId('import-review-trust-paranoid');
+    const cautious = dialog.getByTestId('import-review-trust-cautious');
+    const trusted = dialog.getByTestId('import-review-trust-trusted');
+    await expect(cautious).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'block');
+
+    await page.keyboard.press('3');
+    await expect(trusted).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'warn');
+
+    await page.keyboard.press('1');
+    await expect(paranoid).toHaveAttribute('aria-pressed', 'true');
+
+    await page.keyboard.press('2');
+    await expect(cautious).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'block');
+
+    // The chips do what the keys do: a mouse user is choosing the same
+    // control, not a different one.
+    await trusted.click();
+    await expect(trusted).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'warn');
+
+    // A key pressed while a CONTROL has the focus hands the keyboard
+    // back to the grid. Otherwise the focus stays on the chip and the
+    // row keys — which a focused control swallows — stay swallowed.
+    await paranoid.focus();
+    await page.keyboard.press('3');
+    await expect(dialog.getByTestId('import-review-grid')).toBeFocused();
+    await page.keyboard.press('a');
+    await expect(rows.first()).toHaveAttribute('data-decision', 'accept');
+  });
+
   /**
    * Turn the keyboard review on through the command bar. The feature is
    * opt-in, and the command bar is how a user turns it on.
@@ -1110,10 +1249,12 @@ ${transactions}
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
-    // The trust level is raised so the rows with a vendor the budget
-    // does not know are warned about rather than held back.
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    // The strictest trust level: a vendor the budget does not know is
+    // held back, so what settles the row is the rule the review writes.
+    //
+    // (This used to be two presses of the cycle key, which walked
+    // cautious -> trusted -> paranoid.)
+    await page.keyboard.press('1');
 
     // The user picks a payee for the first row, whose vendor string is
     // "POS PURCHASE 4251" — something the budget has no payee for.
@@ -1140,8 +1281,7 @@ ${transactions}
     // by its guess.
     await importOfx();
     await expect(dialog.getByText('Review import')).toBeVisible();
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
+    await page.keyboard.press('1');
 
     // The import goes through.
     await dialog.getByRole('button', { name: 'Import' }).click();
@@ -3255,7 +3395,7 @@ ${transactions}
     const help = dialog.getByTestId('import-review-help');
     await expect(help).toBeVisible();
     await expect(help.getByText('Accept row despite its flags')).toBeVisible();
-    await expect(help.getByText('Cycle trust level')).toBeVisible();
+    await expect(help.getByText('Use the trusted trust level')).toBeVisible();
 
     // Escape closes the overlay, and the review with it.
     await page.keyboard.press('Escape');
@@ -3281,9 +3421,9 @@ ${transactions}
     await expect(rows).toHaveCount(3);
     await expect(rows.nth(1)).toHaveAttribute('data-gate', 'block');
 
-    // `tab` cycles the trust level: cautious -> trusted. The unknown payee
-    // and the duplicate are only warned about now, so they land.
-    await page.keyboard.press('Tab');
+    // `3` selects the trusted level directly. The unknown payee and the
+    // duplicate are only warned about now, so they land.
+    await page.keyboard.press('3');
     await expect(rows.nth(1)).toHaveAttribute('data-gate', 'warn');
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
     await expect(rows.nth(2)).toHaveAttribute('data-gate', 'warn');
