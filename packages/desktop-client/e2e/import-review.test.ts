@@ -1870,6 +1870,13 @@ ${transactions}
     await expect(field).toHaveAttribute('data-field', 'category');
     await expect(field).toContainText('category');
     await expect(field).toContainText('Food');
+
+    // And the EDIT button says which rule it opens. Two rules can touch
+    // one row, and an anonymous button per rule would leave the user
+    // guessing which one they were about to change.
+    const edit = owned.getByTestId('import-review-edit-rule');
+    await expect(edit).toHaveAttribute('data-field', 'category');
+    await expect(edit).toContainText('category');
   });
 
   test('the zones scroll, and the actions stay reachable', async () => {
@@ -1942,6 +1949,115 @@ ${transactions}
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
     await expect(rows.nth(2)).toHaveAttribute('data-focused', 'true');
+  });
+
+  test('shift+e opens the picker over the rules on the row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Rule Picker',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // The budget has a rule for this vendor, made BEFORE the import: the
+    // rule is in the budget when the preview runs, which is when the
+    // engine applies it.
+    const rulesPage = await navigation.goToRulesPage();
+    const editRuleModal = await rulesPage.createNewRule();
+    await editRuleModal.fill({
+      conditions: [
+        { field: 'imported payee', op: 'is', value: 'Demo Grocery Store' },
+      ],
+      actions: [{ field: 'category', value: 'Food' }],
+    });
+    await editRuleModal.save();
+    await navigation.goToAccountPage('Keyboard Review Rule Picker');
+
+    await enableKeyboardReview();
+    await importSameVendorOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(2);
+
+    // The row's payee is not settled, so the review cannot offer a rule
+    // about it yet. The user picks one, and THEN there is something to
+    // choose from.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // `Shift+E` opens the picker: the rule that touched the row, and the
+    // rule the row could grow.
+    await page.keyboard.press('Shift+E');
+    const picker = dialog.getByTestId('import-review-rule-picker');
+    await expect(picker).toBeVisible();
+
+    // The rule that touched the row is named by the field it owns and by
+    // what it does.
+    const ruleItem = picker.getByTestId('import-review-rule-item');
+    await expect(ruleItem).toHaveCount(1);
+    await expect(ruleItem).toHaveAttribute('data-field', 'category');
+    await expect(ruleItem).toContainText('category');
+    await expect(ruleItem).toContainText('Food');
+
+    // And the rule the row could grow is offered below it.
+    const newRule = picker.getByTestId('import-review-rule-new');
+    await expect(newRule).toHaveCount(1);
+    await expect(newRule).toContainText('always this payee for this vendor');
+
+    // `j` moves to it, and Enter takes it.
+    await page.keyboard.press('j');
+    await page.keyboard.press('Enter');
+    await expect(picker).not.toBeVisible();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'Rule created',
+    );
+  });
+
+  test('shift+e opens the only rule on the row directly', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review One Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // The budget has a rule for this vendor, made BEFORE the import: the
+    // rule is in the budget when the preview runs, which is when the
+    // engine applies it.
+    //
+    // The vendor is one the budget has no payee for, so the row has a
+    // rule and NOTHING else to choose: no rule can be made about a payee
+    // that is not settled.
+    const rulesPage = await navigation.goToRulesPage();
+    const editRuleModal = await rulesPage.createNewRule();
+    await editRuleModal.fill({
+      conditions: [
+        { field: 'imported payee', op: 'is', value: 'POS PURCHASE 4251' },
+      ],
+      actions: [{ field: 'category', value: 'Food' }],
+    });
+    await editRuleModal.save();
+    await navigation.goToAccountPage('Keyboard Review One Rule');
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // ONE thing to choose, and it is a rule to EDIT: the review opens it,
+    // rather than showing a picker with a single item in it.
+    await page.keyboard.press('Shift+E');
+    await expect(dialog.getByTestId('import-review-rule-picker')).toHaveCount(
+      0,
+    );
+    // Upstream's own rule editor is open on top of the review.
+    await expect(page.getByTestId('condition-list')).toBeVisible();
   });
 
   test('the header lines up with the rows', async () => {

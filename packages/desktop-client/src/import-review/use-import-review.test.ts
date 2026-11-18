@@ -283,6 +283,46 @@ describe('useImportReview', () => {
     expect(result.current.summary.total).toBe(2);
   });
 
+  it('shows the rows only once the rules have reported their effects', async () => {
+    // The rows and the rule effects belong together: the cells, the
+    // status line and the rule picker all answer questions about the
+    // same row. A table that appeared before the effects arrived would
+    // say "this row has no rules" about a row that has one.
+    let releaseQuery: () => void = () => undefined;
+    const queryGate = new Promise<void>(resolve => {
+      releaseQuery = resolve;
+    });
+    const base = sendMock.getMockImplementation() as
+      | ((...args: unknown[]) => unknown)
+      | undefined;
+    sendMock.mockImplementation((async (name: string, ...args: unknown[]) => {
+      if (name === 'query') await queryGate;
+      return base?.(name, ...args);
+    }) as never);
+
+    const view = renderHook(() =>
+      useImportReview({
+        accountId: 'a-1',
+        filename: '/tmp/demo.ofx',
+        onImported: vi.fn(),
+      }),
+    );
+    await waitFor(() =>
+      expect(sendMock).toHaveBeenCalledWith('query', expect.anything()),
+    );
+
+    // The budget's answer is still on its way: nothing is on screen that
+    // a keypress could ask about.
+    expect(view.result.current.state).toBeNull();
+
+    await act(async () => {
+      releaseQuery();
+    });
+    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
+    expect(view.result.current.state?.rows).toHaveLength(2);
+    expect(view.result.current.ruleEffects).toBeDefined();
+  });
+
   it('reports no unsaved work for a review the user has not touched', async () => {
     const { result } = await renderReview();
     expect(result.current.unsavedWork).toEqual({

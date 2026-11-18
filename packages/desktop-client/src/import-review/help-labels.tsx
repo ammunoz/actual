@@ -33,6 +33,7 @@ export const HELP_LABELS: Readonly<Record<ReviewAction, ReactNode>> =
     'edit-date': <Trans>Edit date</Trans>,
     'edit-transfer': <Trans>Set transfer target</Trans>,
     'edit-split': <Trans>Edit split</Trans>,
+    'edit-rules': <Trans>Edit the rules on this row</Trans>,
     'cycle-flag': <Trans>Cycle trust level</Trans>,
     'save-session': <Trans>Save this review and close</Trans>,
     'accept-all': <Trans>Accept every row</Trans>,

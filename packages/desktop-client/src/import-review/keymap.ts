@@ -27,6 +27,7 @@ export type ReviewAction =
   | 'edit-date'
   | 'edit-transfer'
   | 'edit-split'
+  | 'edit-rules'
   | 'cycle-flag'
   | 'save-session'
   | 'accept-all'
@@ -65,6 +66,7 @@ export const REVIEW_ACTIONS = Object.freeze([
   'edit-date',
   'edit-transfer',
   'edit-split',
+  'edit-rules',
   'cycle-flag',
   'save-session',
   'accept-all',
@@ -218,6 +220,14 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
   {
     keys: 's',
     action: 'edit-split',
+    showInHelp: true,
+  },
+  {
+    // `shift+e` opens the rules that touched this row. It is a SHIFTED
+    // key because the plain letters are the field editors, and the rules
+    // are about the row rather than about one field.
+    keys: 'shift+e',
+    action: 'edit-rules',
     showInHelp: true,
   },
   {

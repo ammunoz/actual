@@ -1266,12 +1266,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         });
         resolvedMapRawRef.current = vendorMapRawRef.current;
 
-        setState(next);
-        setCursor(0);
-
         if (cancelled) return;
 
-        // Which rows are ALREADY in the budget?
+        // Which rows are ALREADY in the budget, and what did the rules do
+        // to them?
         const { matched, effects } = await lookupMatches(
           next.rows,
           accountId,
@@ -1280,8 +1278,20 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
         if (cancelled) return;
 
+        // **The rows are set AFTER the answers, not before.** The rows
+        // and the rules' effects belong together: a row that a rule
+        // controls says so in the cell, in the status line and in the
+        // rule picker. Setting the rows first would show a table whose
+        // rules were still on their way, and a keypress in that window
+        // would say "this row has no rules" about a row that has one.
+        //
+        // Nothing is lost by waiting: the modal shows a loading overlay
+        // until the review is ready, so the rows were never visible
+        // before the answers arrived.
         setMatchedTransactionIds(matched);
         setRuleEffects(effects);
+        setState(next);
+        setCursor(0);
 
         setStatus('reviewing');
       } catch (err) {

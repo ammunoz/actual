@@ -54,6 +54,7 @@ import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { ReviewColumns } from './review-columns';
 import { RowEditor } from './RowEditor';
+import { describeRule } from './rule-descriptions';
 import {
   editChangesRuledField,
   RULED_FIELD_FOR_MODE,
@@ -62,6 +63,8 @@ import {
 } from './rule-effects';
 import type { RuledField, RuleEffect } from './rule-effects';
 import { RuledCell, useClearedByRuleLabel } from './RuledCell';
+import { RulePicker } from './RulePicker';
+import type { RulePickerItem } from './RulePicker';
 import { rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
@@ -147,6 +150,7 @@ type PaneMode =
   | { kind: 'transfer' }
   | { kind: 'help' }
   | { kind: 'confirm' }
+  | { kind: 'rules'; items: readonly RulePickerItem[] }
   | null;
 
 /**
@@ -838,22 +842,41 @@ export function KeyboardImportModal({
    * The review edits the MEMO; the transaction calls it `notes`. The
    * details panel speaks the review's language.
    */
-  const ruledFieldName = (field: RuledField): string => {
-    switch (field) {
-      case 'payee':
-        return t('payee');
-      case 'category':
-        return t('category');
-      case 'amount':
-        return t('amount');
-      case 'date':
-        return t('date');
-      case 'notes':
-        return t('notes');
-      default:
-        return field;
-    }
-  };
+  const ruledFieldName = useCallback(
+    (field: RuledField): string => {
+      switch (field) {
+        case 'payee':
+          return t('payee');
+        case 'category':
+          return t('category');
+        case 'amount':
+          return t('amount');
+        case 'date':
+          return t('date');
+        case 'notes':
+          return t('notes');
+        default:
+          return field;
+      }
+    },
+    [t],
+  );
+
+  /**
+   * The fields ONE rule owns on this row, in the user's words.
+   *
+   * The picker has one item per RULE — one rule is one editor to open —
+   * but a rule can set two fields. Naming it by every field it owns
+   * keeps that one item unambiguous.
+   */
+  const ruleFieldLabel = useCallback(
+    (ruleId: string): string =>
+      focusedEffects
+        .filter(effect => effect.ruleId === ruleId)
+        .map(effect => ruledFieldName(effect.field))
+        .join(', '),
+    [focusedEffects, ruledFieldName],
+  );
 
   /**
    * What a rule set on a field, as the details panel says it.
@@ -901,6 +924,106 @@ export function KeyboardImportModal({
     [focused, review.categories, review.payees],
   );
 
+  /**
+   * What the rule picker offers.
+   *
+   * The rules that touched this row, each with the field it owns, and the
+   * rules the row could grow.
+   *
+   * **The field is the rule's identity on this row.** Per field there is
+   * exactly one owner — the last rule to act wins — so the field is what
+   * tells two rules on one row apart.
+   */
+  const rulePickerItems = useMemo<readonly RulePickerItem[]>(() => {
+    if (!focused) return [];
+    const items: RulePickerItem[] = [];
+
+    for (const ruleId of focusedRuleIds) {
+      const rule = review.rules.find(candidate => candidate.id === ruleId);
+      // The rule is not in the budget's list — it was made on another
+      // device, or the list is stale. There is nothing to open.
+      if (!rule) continue;
+      const field = focusedEffects.find(
+        effect => effect.ruleId === ruleId,
+      )?.field;
+      const described = describeRule(rule, { payeeNames, categoryNames });
+      items.push({
+        kind: 'edit',
+        id: `rule-${ruleId}`,
+        field,
+        fieldLabel: ruleFieldLabel(ruleId) || undefined,
+        description: described
+          ? `${described.from} → ${described.to}`
+          : t('a rule in this budget'),
+        ruleId,
+      });
+    }
+
+    if (focusedRules?.vendorToPayee) {
+      items.push({
+        kind: 'create',
+        id: 'new-vendor-to-payee',
+        description: t('always this payee for this vendor'),
+        rule: focusedRules.vendorToPayee,
+        message: t(
+          'Rule created. This vendor will always use this payee, from now on.',
+        ),
+      });
+    }
+    if (focusedRules?.payeeToCategory) {
+      items.push({
+        kind: 'create',
+        id: 'new-payee-to-category',
+        description: t('always this category for this payee'),
+        rule: focusedRules.payeeToCategory,
+        message: t(
+          'Rule created. This payee will always use this category, from now on.',
+        ),
+      });
+    }
+
+    return items;
+  }, [
+    categoryNames,
+    focused,
+    focusedEffects,
+    focusedRuleIds,
+    focusedRules,
+    payeeNames,
+    review.rules,
+    ruleFieldLabel,
+    t,
+  ]);
+
+  /**
+   * Open a rule in upstream's own editor.
+   *
+   * The rule is saved there, and when it lands the review asks the engine
+   * again, so the row shows the rule's NEW effect.
+   */
+  const openRuleEditor = (ruleId: string) => {
+    const rule = review.rules.find(candidate => candidate.id === ruleId);
+    // The rule is not in the budget's list — it was made on another
+    // device, or the list is stale. There is nothing to open.
+    if (!rule) {
+      setNotice(t('That rule is not in this budget any more.'));
+      return;
+    }
+    dispatchModal(
+      pushModal({
+        modal: {
+          name: 'edit-rule',
+          options: {
+            rule,
+            onSave: async () => {
+              await review.refreshRuleEffects();
+            },
+          },
+        },
+      }),
+    );
+  };
+
   // A rule is being written. The buttons are disabled while it is, so a
   // second click cannot write the same rule twice.
   const [creatingRule, setCreatingRule] = useState(false);
@@ -935,6 +1058,28 @@ export function KeyboardImportModal({
     } finally {
       setCreatingRule(false);
     }
+  };
+
+  /**
+   * What the user chose in the rule picker.
+   *
+   * A rule that is EDITED opens upstream's editor; a rule that is CREATED
+   * is written, and the review says what it did.
+   */
+  const pickRuleItem = (item: RulePickerItem) => {
+    // The write is guarded in `createRule`, but closing the pane first
+    // would leave the user with a closed pane and no word about why
+    // nothing happened. Say it here, and leave the pane open.
+    if (item.kind === 'create' && creatingRule) {
+      setNotice(t('Another rule is being written. Nothing was changed.'));
+      return;
+    }
+    openPane(null);
+    if (item.kind === 'create') {
+      void createRule(item.rule, item.message);
+      return;
+    }
+    openRuleEditor(item.ruleId);
   };
 
   // The live payee names, so the trust-level chips below agree with the
@@ -1064,7 +1209,14 @@ export function KeyboardImportModal({
       case 'cycle-flag':
         review.cycleTrustLevel();
         break;
-      case 'save-session':
+      case 'save-session': {
+        // The rows are set only after the rules have reported their
+        // effects, and there is a window before that where there is
+        // nothing to save. "Too big to save" would be a lie there.
+        if (review.state === null) {
+          setNotice(t('The review is still loading.'));
+          break;
+        }
         // The review is put aside, not thrown away: the decisions and the
         // edits are saved on this device, and the command bar brings the
         // review back.
@@ -1076,6 +1228,7 @@ export function KeyboardImportModal({
         }
         closeReview();
         break;
+      }
       case 'apply':
         // A rule is being written: the import would race the write, and
         // the rule the user just made might or might not be in the
@@ -1088,6 +1241,39 @@ export function KeyboardImportModal({
       case 'close':
         requestClose();
         break;
+      case 'edit-rules': {
+        // There is no row to look at — the review is still loading, or
+        // the list is empty. Either way there is nothing to say.
+        if (!focused) break;
+        if (rulePickerItems.length === 0) {
+          // The Ownership zone still shows a rule (its id was in the
+          // effects) that the budget's list no longer has. Say so,
+          // rather than claiming there is nothing to edit.
+          //
+          // When no rule fired at all, the wording is softer still: a
+          // split parent can have a rule whose effect is hidden, so
+          // "no rules" would not always be true.
+          setNotice(
+            focusedRuleIds.length > 0
+              ? t('That rule is not in this budget any more.')
+              : t('There are no rules to edit on this row.'),
+          );
+          break;
+        }
+        // ONE thing to choose, and it is a rule to EDIT: open it, rather
+        // than showing a picker with a single item in it.
+        //
+        // A rule to CREATE never opens on its own. Making a rule is a
+        // durable act, and the user asked to edit the rules — so the
+        // picker opens and the choice is made there.
+        const only = rulePickerItems.length === 1 ? rulePickerItems[0] : null;
+        if (only && only.kind === 'edit') {
+          pickRuleItem(only);
+          break;
+        }
+        setPane({ kind: 'rules', items: rulePickerItems });
+        break;
+      }
       case 'edit-split': {
         // A row is EITHER a transfer OR a split, never both.
         //
@@ -1354,6 +1540,7 @@ export function KeyboardImportModal({
                   // might not be in the import.
                   creatingRule ||
                   pane?.kind === 'confirm' ||
+                  pane?.kind === 'rules' ||
                   pane?.kind === 'split' ||
                   pane?.kind === 'transfer'
                 }
@@ -1941,51 +2128,52 @@ export function KeyboardImportModal({
                           })}
                         </Text>
                       ))}
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <View style={{ gap: 6 }}>
                         {/* One button per rule. Two rules can control two
                             fields of the same row, and the button has to
-                            open the rule the user means. */}
-                        {focusedRuleIds.map(ruleId => (
-                          <Button
-                            key={ruleId}
-                            data-testid="import-review-edit-rule"
-                            onPress={() => {
-                              const rule = review.rules.find(
-                                candidate => candidate.id === ruleId,
-                              );
-                              // The rule is not in the budget's list — it
-                              // was made on another device, or the list is
-                              // stale. There is nothing to open.
-                              if (!rule) {
-                                setNotice(
-                                  t(
-                                    'That rule is not in this budget any more.',
-                                  ),
-                                );
-                                return;
-                              }
-                              dispatchModal(
-                                pushModal({
-                                  modal: {
-                                    name: 'edit-rule',
-                                    options: {
-                                      rule,
-                                      // The rule is saved in upstream's own
-                                      // editor. When it lands, the review
-                                      // asks the engine again, so the row
-                                      // shows the rule's NEW effect.
-                                      onSave: async () => {
-                                        await review.refreshRuleEffects();
-                                      },
-                                    },
-                                  },
-                                }),
-                              );
-                            }}
-                          >
-                            <Trans>Edit this rule</Trans>
-                          </Button>
-                        ))}
+                            say WHICH one it opens: the field is the rule's
+                            identity on this row, and the description says
+                            what the rule matches and sets. */}
+                        {focusedRuleIds.map(ruleId => {
+                          const effect = focusedEffects.find(
+                            candidate => candidate.ruleId === ruleId,
+                          );
+                          const item = rulePickerItems.find(
+                            candidate =>
+                              candidate.kind === 'edit' &&
+                              candidate.ruleId === ruleId,
+                          );
+                          const fieldLabel = ruleFieldLabel(ruleId);
+                          return (
+                            <View key={ruleId} style={{ gap: 2 }}>
+                              {item ? (
+                                <Text
+                                  style={{
+                                    fontSize: 11,
+                                    color: theme.pageTextSubdued,
+                                  }}
+                                >
+                                  {item.description}
+                                </Text>
+                              ) : null}
+                              {/* The primary field. The label beside it
+                                  names every field when one rule owns
+                                  more than one. */}
+                              <Button
+                                data-testid="import-review-edit-rule"
+                                data-field={effect?.field}
+                                onPress={() => openRuleEditor(ruleId)}
+                              >
+                                {fieldLabel ? (
+                                  <Text style={{ color: theme.ruleLockText }}>
+                                    {fieldLabel}
+                                  </Text>
+                                ) : null}
+                                <Trans>Edit this rule</Trans>
+                              </Button>
+                            </View>
+                          );
+                        })}
                       </View>
                     </View>
                   ) : null}
@@ -2243,6 +2431,10 @@ export function KeyboardImportModal({
             ) : null}
 
             {pane?.kind === 'help' ? <HelpOverlay /> : null}
+
+            {pane?.kind === 'rules' ? (
+              <RulePicker items={pane.items} onPick={pickRuleItem} />
+            ) : null}
 
             {pane?.kind === 'confirm' ? (
               <ConfirmPane
