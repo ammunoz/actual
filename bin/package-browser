@@ -30,4 +30,12 @@ if [ "$SKIP_TRANSLATIONS" = false ]; then
   packages/desktop-client/bin/remove-untranslated-languages
 fi
 
+# Regenerate the English catalogue from source strings. locale/ is gitignored,
+# so a stale en.json can silently drop a newly added key; react-i18next then
+# fetches it at runtime, t changes identity, and initAll() remounts open modals
+# (resetting their state). Do this every build — it is cheap and idempotent —
+# after the translations clone so it overwrites en.json with current keys.
+echo "Generating i18n..."
+yarn generate:i18n
+
 lage build:browser --to=@actual-app/web

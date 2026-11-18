@@ -300,9 +300,10 @@ git status --porcelain -- packages/desktop-client/src packages/loot-core/src \
 ```
 
 If it lists changed files, rebuild first. This covers app source only - it
-does not track changes to the Vite config or to the staged translations.
-`serve-build.mjs` reads from disk on every request, so you can rebuild while
-the server is up.
+does not track changes to the Vite config. Translation files are regenerated
+automatically by `yarn build:browser`, so a rebuild also refreshes the
+English catalogue (`locale/en.json`). `serve-build.mjs` reads from disk on
+every request, so you can rebuild while the server is up.
 
 **Electron e2e** launches a full Electron app per worker - far heavier than a
 browser page - so use fewer workers:
@@ -340,7 +341,16 @@ TypeScript configuration uses:
 ### 4. Internationalization (i18n)
 
 Use the `Trans` component (and translated strings) for user-facing text.
-Regenerate i18n files with `yarn generate:i18n`.
+Regenerate i18n files with `yarn generate:i18n` after adding or changing any
+user-facing string. Why it matters: the English catalogue
+(`packages/desktop-client/locale/en.json`) is generated, not tracked in git.
+If it is missing a key, react-i18next fetches it at runtime, `t` changes
+identity, and `App.tsx`'s `initAll()` effect re-runs — the whole budget
+reloads and any open modal remounts and loses its cursor/state (the symptom
+is state "jumping back to the first row" with no obvious cause).
+`yarn build:browser` regenerates automatically (so all e2e/desktop build
+paths are covered); run `yarn generate:i18n` manually before `yarn start`
+(dev server) or any e2e run that does not go through a build.
 
 ### 5. Financial Number Typography
 
