@@ -26,20 +26,19 @@ const README_PATH = join(__dirname, '..', '..', '..', '..', 'FORK.md');
  * How the README writes a key, and how the keymap writes the same key.
  *
  * The README writes the keys the way a person reads them — `G` for
- * shift+g, `Esc` for escape, `Shift+/` for the help — and the keymap
+ * shift+g, `Esc` for escape, `?` for the help — and the keymap
  * writes them the way `react-hotkeys-hook` wants: `shift+g`, `escape`,
  * `shift+slash`.
  */
 const KEY_NAMES: Readonly<Record<string, string>> = Object.freeze({
   esc: 'escape',
-  '/': 'slash',
+  '?': 'shift+slash',
   '↓': 'down',
   '↑': 'up',
-  // A key the README writes in a notation the keymap does not use — `?`,
-  // say — is NOT mapped here on purpose. It falls through as itself, and
-  // the test then says the README lists a key the review does not bind,
-  // which is the truth. Mapping it would hide a notation the review
-  // cannot actually match.
+  // A key the README writes in a notation the keymap does not use is
+  // deliberately NOT mapped: it falls through as itself, and the test
+  // then says the README lists a key the review does not bind, which is
+  // the truth.
 });
 
 const MODIFIER_NAMES: Readonly<Record<string, string>> = Object.freeze({

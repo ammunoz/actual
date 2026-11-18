@@ -61,11 +61,13 @@ It applies to `.ofx` and `.qfx` files only. Everything else — CSV, QIF, CAMT
 | <kbd>w</kbd>                                                  | Put the review aside, and pick it up again later       |
 | <kbd>Ctrl</kbd>+<kbd>S</kbd>                                  | Apply the import                                       |
 | <kbd>Esc</kbd>                                                | Close the review                                       |
-| <kbd>Shift</kbd>+<kbd>/</kbd>                                 | Show the keys                                          |
+| <kbd>?</kbd>                                                  | Show the keys                                          |
 
-_The keymap as of `1c230d190`, the last commit that touched
+_The keys as of `1c230d190`, the last commit that touched
 `packages/desktop-client/src/import-review/keymap.ts`. That file is the
-source of truth; when it changes, this table changes with it._
+source of truth for the KEYS; the NOTATION follows the review's own hint
+strip, which writes `?` for `shift+slash`. When either changes, this
+table changes with it._
 
 ### The chain
 
