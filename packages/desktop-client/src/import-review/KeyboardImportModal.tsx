@@ -45,6 +45,7 @@ import { useDispatch, useSelector } from '#redux';
 import { initialChainContext, nextChainField } from './chain-mode';
 import type { ChainContext } from './chain-mode';
 import { ConfirmPane } from './ConfirmPane';
+import { DetailField } from './DetailField';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
 import { hasOverridableHeldRow, isOverridableHeld } from './held-rows';
@@ -713,9 +714,21 @@ export function KeyboardImportModal({
       ? clearedByRule
       : focusedAmount.amount.toFixed(2)
     : undefined;
-  const focusedCategoryGroup = focused
-    ? categoryCell(focused).group
-    : undefined;
+  // The rest of the Evidence zone: the facts the LIST has already shown,
+  // collected here so the row can be read in one place. The group is not
+  // its own fact — it belongs to the category, the way the mockup writes
+  // "Food · Usual Expenses" — so it is folded into that field's value.
+  const focusedDateLabel = focused ? dateCell(focused).date : '';
+  const focusedPayeeCellValue = focused ? payeeCell(focused) : undefined;
+  const focusedCategoryValue = focused ? categoryCell(focused) : undefined;
+  // A category that a rule CLEARED says so; otherwise its name shows. The
+  // group is folded in by the JSX below, where the separator lives, so
+  // there is only one place that writes "Food · Usual Expenses".
+  const focusedCategoryLabel = focusedCategoryValue
+    ? focusedCategoryValue.cleared
+      ? clearedByRule
+      : focusedCategoryValue.label
+    : '';
 
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
@@ -2127,29 +2140,59 @@ export function KeyboardImportModal({
                     <ZoneLabel>
                       <Trans>Evidence</Trans>
                     </ZoneLabel>
-                    {focused.payeeRaw ? (
-                      <Text data-testid="import-review-vendor">
-                        <Trans>Vendor</Trans>: {focused.payeeRaw}
-                      </Text>
-                    ) : null}
-                    <Text
-                      data-testid="import-review-amount"
-                      style={styles.tnum}
+                    <DetailField
+                      label={<Trans>Vendor</Trans>}
+                      testId="import-review-vendor"
                     >
-                      <Trans>Amount</Trans>: {focusedAmountLabel}
-                    </Text>
-                    {focusedCategoryGroup ? (
-                      <Text data-testid="import-review-category-group">
-                        <Trans>Group</Trans>: {focusedCategoryGroup}
-                      </Text>
-                    ) : null}
-                    {focusedMemo ? (
-                      <Text data-testid="import-review-notes">
-                        <Trans>Notes</Trans>: {focusedMemo}
-                      </Text>
-                    ) : null}
+                      {focused.payeeRaw?.trim() || '—'}
+                    </DetailField>
+                    <DetailField
+                      label={<Trans>Date</Trans>}
+                      testId="import-review-date"
+                    >
+                      {focusedDateLabel}
+                    </DetailField>
+                    <DetailField
+                      label={<Trans>Amount</Trans>}
+                      testId="import-review-amount"
+                      numeric
+                    >
+                      {focusedAmountLabel}
+                    </DetailField>
+                    <DetailField
+                      label={<Trans>Payee</Trans>}
+                      testId="import-review-payee"
+                    >
+                      {focusedPayeeCellValue?.cleared
+                        ? clearedByRule
+                        : focusedPayeeCellValue?.label.trim() || '—'}
+                    </DetailField>
+                    <DetailField
+                      label={<Trans>Category</Trans>}
+                      testId="import-review-category"
+                    >
+                      {focusedCategoryValue?.group ? (
+                        <>
+                          {focusedCategoryValue.label} ·{' '}
+                          <Text data-testid="import-review-category-group">
+                            {focusedCategoryValue.group}
+                          </Text>
+                        </>
+                      ) : (
+                        focusedCategoryLabel
+                      )}
+                    </DetailField>
+                    <DetailField
+                      label={<Trans>Notes</Trans>}
+                      testId="import-review-notes"
+                    >
+                      {focusedMemo || '—'}
+                    </DetailField>
                     {review.isAlreadyImported(rowKey(focused)) ? (
-                      <Text data-testid="import-review-already-imported">
+                      <Text
+                        data-testid="import-review-already-imported"
+                        style={{ color: theme.pageTextSubdued }}
+                      >
                         <Trans>This transaction is already in the budget</Trans>
                       </Text>
                     ) : null}

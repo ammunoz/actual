@@ -1636,7 +1636,10 @@ ${transactions}
     // has no notes column, so the detail section is where they show —
     // and the cursor has moved on, so the detail is showing the NEXT
     // row until the user goes back.
-    await expect(dialog.getByTestId('import-review-notes')).toHaveCount(0);
+    // The Notes field is always in the Evidence zone — the mockup shows a
+    // dash when there are none — so "no notes" reads as a dash, not an
+    // absent row that would make the whole zone shift.
+    await expect(dialog.getByTestId('import-review-notes')).toContainText('—');
     await page.keyboard.press('k');
     await expect(dialog.getByTestId('import-review-notes')).toContainText(
       'a note',
@@ -2187,6 +2190,32 @@ ${transactions}
     // ownership and the actions.
     await expect(dialog.getByTestId('import-review-evidence')).toBeVisible();
     await expect(dialog.getByTestId('import-review-reason')).toBeVisible();
+
+    // The mockup's Evidence zone is six fields, each name in a fixed-width
+    // column. A `Label: value` line has no column at all, so the test reads
+    // the six labels' widths and requires them to be EQUAL — a comparison
+    // between measured elements, not an assertion about a pixel.
+    const evidence = dialog.getByTestId('import-review-evidence');
+    const fieldIds = [
+      'import-review-vendor',
+      'import-review-date',
+      'import-review-amount',
+      'import-review-payee',
+      'import-review-category',
+      'import-review-notes',
+    ];
+    const labelWidths: number[] = [];
+    for (const id of fieldIds) {
+      const field = evidence.getByTestId(id);
+      await expect(field).toBeVisible();
+      const label = evidence.getByTestId(`${id}-label`);
+      await expect(label).toBeVisible();
+      labelWidths.push(
+        await label.evaluate(node => node.getBoundingClientRect().width),
+      );
+    }
+    expect(new Set(labelWidths).size).toBe(1);
+    expect(labelWidths[0]).toBeGreaterThan(0);
 
     // The evidence zone carries what the LIST does not: the file's own
     // vendor string, in full.
