@@ -10,6 +10,9 @@ playwright-report
 blob-report
 .playwright-cli
 
+# the demo recording, before it is turned into a GIF
+demo/recordings
+
 # production
 build
 build-electron

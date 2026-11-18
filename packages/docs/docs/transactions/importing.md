@@ -25,6 +25,8 @@ To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key
 
 When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
 
+<img width="800" alt="The keyboard import review: the file's rows with their status, a row being edited field by field, a rule being created, and the imported transactions landing in the budget" src="/img/transactions/importing-keyboard-review.gif" />
+
 | Key                                         | What it does                                           |
 | ------------------------------------------- | ------------------------------------------------------ |
 | <Key k="j" />, <Key k="k" />                | Move to the next or previous row                       |
@@ -50,7 +52,7 @@ When it is on, importing an OFX or QFX file opens the review instead of the usua
 | <Key k="w" />                               | Put the review aside, and pick it up again later       |
 | <Key mod="ctrl" k="s" />                    | Apply the import                                       |
 | <Key k="escape" />                          | Close the review and throw it away                     |
-| <Key mod="shift" k="/" />                   | Show the keys                                          |
+| <Key k="?" />                               | Show the keys                                          |
 
 <Key k="e" /> edits a row's fields one after another: the payee, then the category, then the notes, and then the amount if the row is flagged about it. Each field you confirm moves on to the next, and the last one moves you to the next row. The review leaves out the fields it has no business offering: the category of a transfer or a split, the amount of a split, and any field a rule already controls. Press <Key k="p" />, <Key k="c" />, <Key k="m" /> or <Key k="d" /> to edit one field on its own instead.
 
