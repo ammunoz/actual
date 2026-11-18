@@ -1480,7 +1480,7 @@ ${transactions}
 
     // The row has no category yet, so the group cell is empty.
     const group = rows.nth(0).getByTestId('import-review-row-category-group');
-    await expect(group).toBeEmpty();
+    await expect(group).toHaveText('');
 
     // Give the row the long category.
     await page.keyboard.press('c');
@@ -1518,24 +1518,75 @@ ${transactions}
     // stays the height of a single line. The computed style is the
     // assertion — a height comparison cannot tell the difference,
     // because a wrapped cell grows the row too.
+    //
+    // The cell is the COLUMN, and the text is inside it: the column owns
+    // the width, and the text does the truncating.
     const cell = rows.nth(0).getByTestId('import-review-row-category');
     await expect(cell).toContainText('Deliberately Very Long');
-    const whiteSpace = await cell.evaluate(
+    const text = cell.locator('span');
+    const whiteSpace = await text.evaluate(
       element => getComputedStyle(element).whiteSpace,
     );
     expect(whiteSpace).toBe('nowrap');
 
     // The text is wider than the cell, so it really is truncating.
-    const overflows = await cell.evaluate(
+    const overflows = await text.evaluate(
       element => element.scrollWidth > element.clientWidth,
     );
     expect(overflows).toBe(true);
 
     // And it truncates with an ellipsis, not a hard cut.
-    const textOverflow = await cell.evaluate(
+    const textOverflow = await text.evaluate(
       element => getComputedStyle(element).textOverflow,
     );
     expect(textOverflow).toBe('ellipsis');
+  });
+
+  test('the header lines up with the rows', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Header',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Review import')).toBeVisible();
+
+    const header = dialog.getByTestId('import-review-header');
+    await expect(header).toBeVisible();
+
+    // THE ASSERTION: each column of the header sits over its column of
+    // the row.
+    //
+    // The header and the rows go through the SAME column template, so
+    // they cannot drift apart — and this is what proves it. The
+    // comparison is between two measured elements, so it holds at any
+    // zoom and with any font.
+    const headerLefts = await header.evaluate(element =>
+      Array.from(element.children).map(
+        child => child.getBoundingClientRect().left,
+      ),
+    );
+    const rowLefts = await dialog
+      .getByTestId('import-review-row')
+      .first()
+      .evaluate(element =>
+        Array.from(element.children).map(
+          child => child.getBoundingClientRect().left,
+        ),
+      );
+
+    expect(headerLefts.length).toBe(rowLefts.length);
+    expect(headerLefts.length).toBeGreaterThan(0);
+    for (let index = 0; index < headerLefts.length; index++) {
+      expect(
+        Math.abs(headerLefts[index] - rowLefts[index]),
+      ).toBeLessThanOrEqual(1);
+    }
   });
 
   test('the rows keep their height when there are many of them', async () => {
@@ -1594,6 +1645,24 @@ ${transactions}
       return list.scrollHeight > list.clientHeight;
     });
     expect(scrolls).toBe(true);
+
+    // AND THE HEADER SURVIVES.
+    //
+    // It is the only item in the list's column that could shrink — every
+    // row says `flexShrink: 0` — so without its own `flexShrink: 0` it
+    // would take ALL the negative free space and disappear the moment the
+    // list was full. A header that vanishes when the list is long is a
+    // header nobody has.
+    const header = dialog.getByTestId('import-review-header');
+    const headerHeight = await header.evaluate(element => {
+      const range = document.createRange();
+      range.selectNodeContents(element.querySelector('span'));
+      return {
+        header: element.getBoundingClientRect().height,
+        text: range.getBoundingClientRect().height,
+      };
+    });
+    expect(headerHeight.header).toBeGreaterThanOrEqual(headerHeight.text);
   });
 
   test("the help overlay's rows are readable", async () => {
@@ -1675,7 +1744,12 @@ ${transactions}
     await page.keyboard.press('Enter');
 
     await expect(editor).not.toBeVisible();
-    await expect(rows.nth(0)).toHaveText(/2026-09-15/);
+    // The row shows the date the way the APP shows it — the file's ISO
+    // date is the engine's business, not the user's.
+    const dateCell = rows.nth(0).getByTestId('import-review-row-date');
+    await expect(dateCell).toContainText('2026');
+    await expect(dateCell).toContainText('15');
+    await expect(dateCell).not.toHaveText('2026-09-15');
   });
 
   test('an impossible date is refused rather than committed', async () => {

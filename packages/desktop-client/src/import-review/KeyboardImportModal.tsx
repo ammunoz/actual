@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -26,9 +26,11 @@ import type {
   TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { integerToAmount } from '@actual-app/core/shared/util';
+import { format as formatDate, parseISO } from 'date-fns';
 
 import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
+import { useDateFormat } from '#hooks/useDateFormat';
 import { pushModal, removeModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 
@@ -40,6 +42,7 @@ import { HelpOverlay } from './HelpOverlay';
 import { HintStrip } from './HintStrip';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
+import { ReviewColumns } from './review-columns';
 import { RowEditor } from './RowEditor';
 import {
   editChangesRuledField,
@@ -160,6 +163,18 @@ export function KeyboardImportModal({
       default:
         return t('cautious');
     }
+  };
+
+  // The date, in the app's own format.
+  //
+  // The review shows dates the way the rest of Actual shows them, so the
+  // row reads like the transactions table. An impossible date is shown as
+  // it is: the review flags it, and the user has to see WHAT is wrong.
+  const dateFormat = useDateFormat() || 'MM/dd/yyyy';
+  const reviewDate = (date: string): string => {
+    const parsed = parseISO(date);
+    if (Number.isNaN(parsed.getTime())) return date;
+    return formatDate(parsed, dateFormat);
   };
 
   // The badge says what the gate is doing with the row. A row the gate
@@ -432,7 +447,11 @@ export function KeyboardImportModal({
     const effect = visibleEffectFor(review.ruleEffects, row, 'date');
     if (effect) {
       if (typeof effect.value === 'string') {
-        return { date: effect.value, ruled: true, cleared: false };
+        return {
+          date: reviewDate(effect.value),
+          ruled: true,
+          cleared: false,
+        };
       }
       // The rule CONTROLLED the date and left it empty. The cell says so
       // rather than falling through to the row's own date, which would be
@@ -440,7 +459,7 @@ export function KeyboardImportModal({
       return { date: '', ruled: true, cleared: true };
     }
     return {
-      date: row.edits.date ?? row.date,
+      date: reviewDate(row.edits.date ?? row.date),
       ruled: false,
       cleared: false,
     };
@@ -1130,55 +1149,176 @@ export function KeyboardImportModal({
               </Text>
             </View>
 
+            {/* Where the file is going. It is the table's CAPTION, not a
+                row: it says where everything below it lands. */}
+            <View data-testid="import-review-destination">
+              <Text
+                style={{
+                  color: theme.pageTextSubdued,
+                  fontWeight: 500,
+                }}
+              >
+                {t('Importing into {{account}}', {
+                  account: accountName(accountId),
+                })}
+              </Text>
+            </View>
+
             <View
               style={{
                 border: `1px solid ${theme.tableBorder}`,
                 borderRadius: 6,
-                maxHeight: 420,
-                overflowY: 'auto',
+                overflow: 'hidden',
               }}
             >
-              {rows.map((row, index) => {
-                const isFocused = index === review.focusedIndex;
-                const evaluation = review.evaluations.get(rowKey(row));
-                const badge = evaluation ? gateBadge(row, evaluation) : null;
-                const category = categoryCell(row);
-                const payee = payeeCell(row);
-                const amountCellValue = amountCell(row);
-                const dateCellValue = dateCell(row);
-                // A rule controls a field of this row. The badge says the
-                // ROW is ruled; the cells say WHICH field.
-                //
-                // It comes from the EFFECTS, not from the cells: a rule
-                // that sets the memo locks a field the table does not
-                // show, and the row is still ruled.
-                const isRuled = effectsForRow(row).length > 0;
-                return (
-                  <Fragment
-                    key={row.previewKey ?? row.importedId ?? String(index)}
-                  >
-                    {index === 0 ? (
-                      <View
-                        data-testid="import-review-destination"
-                        style={{
-                          padding: '6px 10px 2px 10px',
-                          borderBottom: `1px solid ${theme.tableBorder}`,
-                          marginBottom: 2,
-                        }}
-                      >
+              <View
+                role="table"
+                style={{
+                  // The list grows with its content and stops at half the
+                  // screen: the modal sizes to what it has to show, and
+                  // the table scrolls only when there is something to
+                  // scroll.
+                  maxHeight: 'min(50vh, 640px)',
+                  // ONE scroll context for the whole table, so the header
+                  // and the rows move together and the columns cannot
+                  // drift apart. It used to be on each row, which meant
+                  // every row had its own scrollbar and the header did
+                  // not follow the body sideways.
+                  overflow: 'auto',
+                }}
+              >
+                {/* The header.
+                    It is INSIDE the scrolling list, so it stays above the
+                    rows as they scroll down, and it goes through the same
+                    column template as they do, so it cannot drift out of
+                    line with them. */}
+                <View
+                  role="row"
+                  data-testid="import-review-header"
+                  style={{
+                    flexDirection: 'row',
+                    gap: 12,
+                    padding: '6px 10px',
+                    // The header is the only item in this column that
+                    // could shrink — every row says `flexShrink: 0` — so
+                    // without this it would take ALL the negative free
+                    // space and disappear the moment the list was full.
+                    flexShrink: 0,
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 1,
+                    backgroundColor: theme.tableHeaderBackground,
+                    borderBottom: `1px solid ${theme.tableBorder}`,
+                  }}
+                >
+                  <ReviewColumns
+                    date={{
+                      testId: 'import-review-header-date',
+                      role: 'columnheader',
+                      children: (
                         <Text
                           style={{
                             color: theme.pageTextSubdued,
                             fontWeight: 500,
                           }}
                         >
-                          {t('Importing into {{account}}', {
-                            account: accountName(accountId),
-                          })}
+                          <Trans>Date</Trans>
                         </Text>
-                      </View>
-                    ) : null}
+                      ),
+                    }}
+                    payee={{
+                      testId: 'import-review-header-payee',
+                      role: 'columnheader',
+                      children: (
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                          }}
+                        >
+                          <Trans>Payee</Trans>
+                        </Text>
+                      ),
+                    }}
+                    category={{
+                      testId: 'import-review-header-category',
+                      role: 'columnheader',
+                      children: (
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                          }}
+                        >
+                          <Trans>Category</Trans>
+                        </Text>
+                      ),
+                    }}
+                    group={{
+                      testId: 'import-review-header-group',
+                      role: 'columnheader',
+                      children: (
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                          }}
+                        >
+                          <Trans>Group</Trans>
+                        </Text>
+                      ),
+                    }}
+                    amount={{
+                      testId: 'import-review-header-amount',
+                      role: 'columnheader',
+                      children: (
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                            textAlign: 'right',
+                          }}
+                        >
+                          <Trans>Amount</Trans>
+                        </Text>
+                      ),
+                    }}
+                    status={{
+                      testId: 'import-review-header-status',
+                      role: 'columnheader',
+                      children: (
+                        <Text
+                          style={{
+                            color: theme.pageTextSubdued,
+                            fontWeight: 500,
+                            textAlign: 'right',
+                          }}
+                        >
+                          <Trans>Status</Trans>
+                        </Text>
+                      ),
+                    }}
+                  />
+                </View>
+                {rows.map((row, index) => {
+                  const isFocused = index === review.focusedIndex;
+                  const evaluation = review.evaluations.get(rowKey(row));
+                  const badge = evaluation ? gateBadge(row, evaluation) : null;
+                  const category = categoryCell(row);
+                  const payee = payeeCell(row);
+                  const amountCellValue = amountCell(row);
+                  const dateCellValue = dateCell(row);
+                  // A rule controls a field of this row. The badge says the
+                  // ROW is ruled; the cells say WHICH field.
+                  //
+                  // It comes from the EFFECTS, not from the cells: a rule
+                  // that sets the memo locks a field the table does not
+                  // show, and the row is still ruled.
+                  const isRuled = effectsForRow(row).length > 0;
+                  return (
                     <View
+                      role="row"
+                      key={row.previewKey ?? row.importedId ?? String(index)}
                       data-testid="import-review-row"
                       data-focused={isFocused ? 'true' : 'false'}
                       data-decision={row.decision}
@@ -1204,229 +1344,180 @@ export function KeyboardImportModal({
                         // the list scrolls. One property, and it cannot be
                         // overridden by the `min-height: 0` above.
                         flexShrink: 0,
-                        // The fixed columns do not shrink, so on a narrow
-                        // viewport the row is wider than the modal. The
-                        // scroll is scoped to the row, so the table does
-                        // not scroll sideways with the rest of the modal
-                        // body — the columns stay aligned with each
-                        // other.
-                        //
-                        // `overflowY` is explicit because CSS computes a
-                        // `visible` axis to `auto` when the other axis
-                        // is not visible. The row's height is its
-                        // content's height, so it never scrolls
-                        // vertically.
-                        overflowX: 'auto',
-                        overflowY: 'hidden',
+                        // The row is as wide as its content needs it to
+                        // be, so a narrow viewport scrolls the TABLE —
+                        // once, with the header on it — rather than
+                        // squashing a column or giving every row its own
+                        // scrollbar.
+                        minWidth: 'max-content',
                         backgroundColor: isFocused
                           ? theme.tableRowHeaderBackground
                           : 'transparent',
                       }}
                     >
-                      {/* The widths below are a budget, not a guess.
-
-                          The modal is 900px. Its container takes 10px of
-                          padding each side, the content View takes 16px,
-                          and the row takes 10px: 828px of row. Six gaps
-                          at 12px leave 756px for the columns. The fixed
-                          ones take 610, so the raw payee — the only
-                          flexible one — gets 146px.
-
-                          It is the flexed one on purpose: the raw
-                          vendor string is long and low-value once it is
-                          resolved, while the category is the budget
-                          decision the user is looking for.
-
-                          That is before any scrollbar, and the modal
-                          clamps at `maxWidth: '100%'`. On a narrow
-                          viewport the raw payee is the one that gives up
-                          its width: the fixed columns carry
-                          `flexShrink: 0`, so they keep their widths and
-                          the payee takes the difference. The row scrolls
-                          sideways when even that is not enough. */}
-                      {dateCellValue.ruled ? (
-                        <RuledCell
-                          width={90}
-                          label={dateCellValue.date}
-                          cleared={dateCellValue.cleared}
-                          testId="import-review-row-date"
-                          title={dateCellValue.date}
-                        />
-                      ) : (
-                        <Text
-                          data-testid="import-review-row-date"
-                          style={{
-                            width: 90,
-                            flexShrink: 0,
-                          }}
-                        >
-                          {dateCellValue.date}
-                        </Text>
-                      )}
-                      {/* The raw vendor string is long and low-value once
-                          it is resolved, so it truncates. The category is
-                          the budget decision the user is looking for, so
-                          it gets the room. */}
-                      <TextOneLine
-                        style={{ flex: 1, minWidth: 0 }}
-                        title={row.payeeRaw}
-                      >
-                        {row.payeeRaw}
-                      </TextOneLine>
-                      {payee.ruled ? (
-                        <RuledCell
-                          width={100}
-                          label={payee.label}
-                          cleared={payee.cleared}
-                          testId="import-review-row-payee"
-                          title={payee.label}
-                        />
-                      ) : (
-                        <TextOneLine
-                          data-testid="import-review-row-payee"
-                          style={{
-                            width: 100,
-                            flexShrink: 0,
-                          }}
-                          title={payee.label}
-                        >
-                          {payee.label}
-                        </TextOneLine>
-                      )}
-                      {/* One line, always: a category name that wraps
-                          makes the row grow, and the rows are the thing
-                          the user is scanning. */}
-                      {category.ruled ? (
-                        <RuledCell
-                          width={150}
-                          label={category.label}
-                          cleared={category.cleared}
-                          testId="import-review-row-category"
-                          title={category.label}
-                        />
-                      ) : (
-                        <TextOneLine
-                          data-testid="import-review-row-category"
-                          style={{
-                            width: 150,
-                            flexShrink: 0,
-                            fontStyle: category.muted ? 'italic' : undefined,
-                            color: category.muted
-                              ? theme.pageTextSubdued
-                              : undefined,
-                          }}
-                          title={category.label}
-                        >
-                          {category.label}
-                        </TextOneLine>
-                      )}
-                      {/* The group, so two categories with the same name
-                          are distinguishable. It is subdued: the name
-                          is what the user is looking for. */}
-                      <TextOneLine
-                        size="small"
-                        data-testid="import-review-row-category-group"
-                        style={{
-                          width: 80,
-                          flexShrink: 0,
-                          color: theme.pageTextSubdued,
-                        }}
-                        title={category.group}
-                      >
-                        {category.group}
-                      </TextOneLine>
-                      {amountCellValue.ruled ? (
-                        <RuledCell
-                          width={100}
-                          label={String(amountCellValue.amount)}
-                          cleared={amountCellValue.cleared}
-                          testId="import-review-row-amount"
-                          title={String(amountCellValue.amount)}
-                          align="right"
-                        />
-                      ) : (
-                        <FinancialText
-                          data-testid="import-review-row-amount"
-                          style={{
-                            width: 100,
-                            flexShrink: 0,
-                            textAlign: 'right',
-                            // A wide amount would otherwise paint over
-                            // the gap and under the badge. The box is
-                            // right-aligned, so the overflow is at the
-                            // LEADING edge — the significant digits are
-                            // what get cut — hence the title.
-                            //
-                            // The RULED amount truncates from the other
-                            // end: its field is right-aligned too, so the
-                            // ellipsis falls on the cents. Either way the
-                            // title carries the whole value.
-                            overflow: 'hidden',
-                          }}
-                          title={String(amountCellValue.amount)}
-                        >
-                          {amountCellValue.amount}
-                        </FinancialText>
-                      )}
-                      {/* The badge column holds the gate badge and the
-                          rule badge, one above the other. The gate badge
-                          is plain coloured text — it is a SAFETY fact
-                          and the user can override it. The rule badge is
-                          a filled pill — it is an OWNERSHIP fact, and
-                          the user cannot override it, only change the
-                          rule. */}
-                      <View
-                        style={{
-                          width: 90,
-                          flexShrink: 0,
-                          flexDirection: 'column',
-                          gap: 4,
-                          alignItems: 'flex-end',
-                        }}
-                      >
-                        {/* The badge is a translated word, and a long
-                            translation would wrap and regrow the row —
-                            the same problem the category had. */}
-                        <TextOneLine
-                          style={{
-                            width: 90,
-                            flexShrink: 0,
-                            textAlign: 'right',
-                            color:
-                              evaluation?.gate === 'block'
-                                ? theme.errorText
-                                : theme.warningText,
-                          }}
-                          title={badge ?? undefined}
-                        >
-                          {badge}
-                        </TextOneLine>
-                        {isRuled ? (
-                          <View
-                            data-testid="import-review-row-ruled"
-                            style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              backgroundColor: theme.noteTagBackground,
-                              padding: '2px 6px',
-                              borderRadius: 3,
-                            }}
-                          >
-                            <SvgTag
-                              width={11}
-                              height={11}
-                              style={{ marginRight: 4 }}
+                      <ReviewColumns
+                        date={{
+                          testId: 'import-review-row-date',
+                          role: 'cell',
+                          ruled: dateCellValue.ruled,
+                          children: dateCellValue.ruled ? (
+                            <RuledCell
+                              label={dateCellValue.date}
+                              cleared={dateCellValue.cleared}
+                              title={dateCellValue.date}
                             />
-                            <Text style={{ color: theme.noteTagText }}>
-                              <Trans>Ruled</Trans>
-                            </Text>
-                          </View>
-                        ) : null}
-                      </View>
+                          ) : (
+                            <TextOneLine title={dateCellValue.date}>
+                              {dateCellValue.date}
+                            </TextOneLine>
+                          ),
+                        }}
+                        payee={{
+                          testId: 'import-review-row-payee',
+                          role: 'cell',
+                          ruled: payee.ruled,
+                          children: payee.ruled ? (
+                            <RuledCell
+                              label={payee.label}
+                              cleared={payee.cleared}
+                              title={payee.label}
+                            />
+                          ) : (
+                            <TextOneLine title={payee.label}>
+                              {payee.label}
+                            </TextOneLine>
+                          ),
+                        }}
+                        category={{
+                          testId: 'import-review-row-category',
+                          role: 'cell',
+                          ruled: category.ruled,
+                          children: category.ruled ? (
+                            <RuledCell
+                              label={category.label}
+                              cleared={category.cleared}
+                              title={category.label}
+                            />
+                          ) : (
+                            /* One line, always: a category name that
+                               wraps makes the row grow, and the rows are
+                               the thing the user is scanning. */
+                            <TextOneLine
+                              title={category.label}
+                              style={{
+                                fontStyle: category.muted
+                                  ? 'italic'
+                                  : undefined,
+                                color: category.muted
+                                  ? theme.pageTextSubdued
+                                  : undefined,
+                              }}
+                            >
+                              {category.label}
+                            </TextOneLine>
+                          ),
+                        }}
+                        group={{
+                          testId: 'import-review-row-category-group',
+                          role: 'cell',
+                          children: (
+                            /* The group, so two categories with the
+                               same name are distinguishable. It is
+                               subdued: the name is what the user is
+                               looking for. */
+                            <TextOneLine
+                              size="small"
+                              title={category.group}
+                              style={{ color: theme.pageTextSubdued }}
+                            >
+                              {category.group}
+                            </TextOneLine>
+                          ),
+                        }}
+                        amount={{
+                          testId: 'import-review-row-amount',
+                          role: 'cell',
+                          ruled: amountCellValue.ruled,
+                          children: amountCellValue.ruled ? (
+                            <RuledCell
+                              label={String(amountCellValue.amount)}
+                              cleared={amountCellValue.cleared}
+                              title={String(amountCellValue.amount)}
+                              align="right"
+                            />
+                          ) : (
+                            <FinancialText
+                              title={String(amountCellValue.amount)}
+                              style={{
+                                textAlign: 'right',
+                                // A wide amount would otherwise paint
+                                // over the gap and under the badge. The
+                                // box is right-aligned, so the overflow
+                                // is at the LEADING edge — the
+                                // significant digits are what get cut —
+                                // hence the title.
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {amountCellValue.amount}
+                            </FinancialText>
+                          ),
+                        }}
+                        status={{
+                          role: 'cell',
+                          children: (
+                            <View
+                              style={{
+                                flexDirection: 'column',
+                                gap: 4,
+                                alignItems: 'flex-end',
+                              }}
+                            >
+                              {/* The badge is a translated word, and a
+                                  long translation would wrap and regrow
+                                  the row — the same problem the category
+                                  had. */}
+                              <TextOneLine
+                                style={{
+                                  textAlign: 'right',
+                                  color:
+                                    evaluation?.gate === 'block'
+                                      ? theme.errorText
+                                      : theme.warningText,
+                                }}
+                                title={badge ?? undefined}
+                              >
+                                {badge}
+                              </TextOneLine>
+                              {isRuled ? (
+                                <View
+                                  data-testid="import-review-row-ruled"
+                                  style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    backgroundColor: theme.noteTagBackground,
+                                    padding: '2px 6px',
+                                    borderRadius: 3,
+                                  }}
+                                >
+                                  <SvgTag
+                                    width={11}
+                                    height={11}
+                                    style={{ marginRight: 4 }}
+                                  />
+                                  <Text style={{ color: theme.noteTagText }}>
+                                    <Trans>Ruled</Trans>
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          ),
+                        }}
+                      />
                     </View>
-                  </Fragment>
-                );
-              })}
+                  );
+                })}
+              </View>
             </View>
 
             {focused ? (
@@ -1486,6 +1577,16 @@ export function KeyboardImportModal({
                 {focused && review.isAlreadyImported(rowKey(focused)) ? (
                   <Text data-testid="import-review-already-imported">
                     <Trans>This transaction is already in the budget</Trans>
+                  </Text>
+                ) : null}
+
+                {/* The file's raw vendor string.
+                    It is not in the list: it is long, and it is evidence
+                    rather than a fact about the row. Here it is in full,
+                    for the row the user is on. */}
+                {focused && focused.payeeRaw ? (
+                  <Text data-testid="import-review-vendor">
+                    <Trans>Vendor</Trans>: {focused.payeeRaw}
                   </Text>
                 ) : null}
 

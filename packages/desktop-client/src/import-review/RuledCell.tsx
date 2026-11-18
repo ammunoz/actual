@@ -20,13 +20,6 @@ import { View } from '@actual-app/components/view';
  * colour says "this is what will land".
  */
 export type RuledCellProps = {
-  /**
-   * The column's width.
-   *
-   * The wrapper keeps the column aligned with the others; the field
-   * inside it hugs its own text.
-   */
-  width: number;
   /** The rule's value, as the user reads it. */
   label: string;
   /**
@@ -36,8 +29,6 @@ export type RuledCellProps = {
    * invisible — so the cell says so instead.
    */
   cleared?: boolean;
-  /** For the test to find. */
-  testId?: string;
   /** The tooltip, for a value too long to show. */
   title?: string;
   /**
@@ -51,10 +42,8 @@ export type RuledCellProps = {
 };
 
 export function RuledCell({
-  width,
   label,
   cleared = false,
-  testId,
   title,
   align = 'left',
 }: RuledCellProps) {
@@ -62,58 +51,52 @@ export function RuledCell({
 
   return (
     <View
-      data-testid={testId}
-      data-ruled="true"
-      style={{ width, flexShrink: 0 }}
+      data-ruled-field="true"
+      title={title}
+      style={{
+        // The field hugs its text. Its column is a `View`, which is a
+        // COLUMN flex box, so `alignSelf` is the horizontal axis here:
+        // the field takes its content's width instead of stretching to
+        // the column.
+        //
+        // `maxWidth` keeps it inside the column when the value is longer
+        // than the column has room for — the text truncates with an
+        // ellipsis rather than the field spilling into the next one.
+        //
+        // A right-aligned field sits at the RIGHT of its column, the
+        // way the plain cell's text does.
+        alignSelf: align === 'right' ? 'flex-end' : 'flex-start',
+        maxWidth: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+        padding: '0 5px',
+        borderRadius: 3,
+        backgroundColor: theme.formInputBackground,
+        // An INSET shadow, not a border: a border would shift the text
+        // by a pixel inside a fixed-width cell, and would need
+        // `boxSizing: 'border-box'` to avoid changing the column's
+        // width.
+        boxShadow: `inset 0 0 0 1px ${theme.ruleLockBorder}`,
+        // The glyph is `fill="currentColor"`, so this paints it too.
+        color: theme.ruleLockText,
+      }}
     >
-      <View
-        data-ruled-field="true"
-        title={title}
+      <SvgTag
+        width={11}
+        height={11}
+        // The glyph is a marker, not the message: at full strength it
+        // crowds the word it sits beside.
+        style={{ opacity: 0.8, flexShrink: 0 }}
+      />
+      <TextOneLine
         style={{
-          // The field hugs its text. The wrapper is a `View`, which is a
-          // COLUMN flex box, so `alignSelf` is the horizontal axis here:
-          // the field takes its content's width instead of stretching to
-          // the column.
-          //
-          // `maxWidth` keeps it inside the column when the value is longer
-          // than the column has room for — the text truncates with an
-          // ellipsis rather than the field spilling into the next one.
-          //
-          // A right-aligned field sits at the RIGHT of its column, the
-          // way the plain cell's text does.
-          alignSelf: align === 'right' ? 'flex-end' : 'flex-start',
-          maxWidth: '100%',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 3,
-          padding: '0 5px',
-          borderRadius: 3,
-          backgroundColor: theme.formInputBackground,
-          // An INSET shadow, not a border: a border would shift the text
-          // by a pixel inside a fixed-width cell, and would need
-          // `boxSizing: 'border-box'` to avoid changing the column's
-          // width.
-          boxShadow: `inset 0 0 0 1px ${theme.ruleLockBorder}`,
-          // The glyph is `fill="currentColor"`, so this paints it too.
           color: theme.ruleLockText,
+          fontStyle: cleared ? 'italic' : undefined,
         }}
       >
-        <SvgTag
-          width={11}
-          height={11}
-          // The glyph is a marker, not the message: at full strength it
-          // crowds the word it sits beside.
-          style={{ opacity: 0.8, flexShrink: 0 }}
-        />
-        <TextOneLine
-          style={{
-            color: theme.ruleLockText,
-            fontStyle: cleared ? 'italic' : undefined,
-          }}
-        >
-          {cleared ? t('Cleared by rule') : label}
-        </TextOneLine>
-      </View>
+        {cleared ? t('Cleared by rule') : label}
+      </TextOneLine>
     </View>
   );
 }
