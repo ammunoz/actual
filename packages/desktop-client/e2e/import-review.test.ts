@@ -592,7 +592,7 @@ ${transactions}
 
     // A row is held back — the second one has no payee name at all — so
     // the strip says the one key that releases it.
-    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+    await expect(dialog.getByText('1 blocked')).toBeVisible();
     await expect(hints).toContainText('Ctrl+Shift+A');
     await expect(hints).toContainText('accept anyway');
 
@@ -635,11 +635,11 @@ ${transactions}
 
     // The second row repeats the first one's FITID: skipped, and held.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('Skipped: 1')).toBeVisible();
+    await expect(dialog.getByText('1 skipped')).toBeVisible();
 
     // And nothing is BLOCKED — which is exactly the case the summary's
     // blocked count would have missed.
-    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+    await expect(dialog.getByText('0 blocked')).toBeVisible();
 
     const hints = dialog.getByTestId('import-review-hints');
     await expect(hints).toContainText('Ctrl+Shift+A');
@@ -1265,8 +1265,8 @@ ${transactions}
     // skipped at the default trust level.
     await expect(rows.nth(2)).toHaveAttribute('data-gate', 'skip');
     await expect(rows.nth(2)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
-    await expect(dialog.getByText('Skipped: 1')).toBeVisible();
+    await expect(dialog.getByText('1 blocked')).toBeVisible();
+    await expect(dialog.getByText('1 skipped')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
@@ -1301,7 +1301,7 @@ ${transactions}
     await page.keyboard.press('a');
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+    await expect(dialog.getByText('1 blocked')).toBeVisible();
   });
 
   test('ctrl+shift+a overrides the trust level', async () => {
@@ -1328,8 +1328,8 @@ ${transactions}
       'accept-override',
     );
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
-    await expect(dialog.getByText('Overridden: 1')).toBeVisible();
+    await expect(dialog.getByText('0 blocked')).toBeVisible();
+    await expect(dialog.getByText('1 overridden')).toBeVisible();
 
     // The overridden row lands. The duplicate is still skipped.
     await dialog.getByRole('button', { name: 'Import' }).click();
@@ -1357,7 +1357,7 @@ ${transactions}
     // The second row has no payee at all, so the trust level holds it
     // back.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('Blocked: 1')).toBeVisible();
+    await expect(dialog.getByText('1 blocked')).toBeVisible();
 
     await page.keyboard.press('j');
     await page.keyboard.press('e');
@@ -1381,7 +1381,7 @@ ${transactions}
     // And the fix RELEASED the row: the gate has nothing to hold back
     // now, so the row lands.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
+    await expect(dialog.getByText('0 blocked')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
@@ -1687,6 +1687,43 @@ ${transactions}
     expect(await payeeColour(0, 'Kroger')).not.toBe(
       await payeeColour(1, 'Demo Grocery Store'),
     );
+  });
+
+  test('the footer carries the bulk actions, and their keys', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Footer',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The bulk actions used to exist only as keys. They are BUTTONS now,
+    // and each one says the key that does it — a button that says what
+    // it does, with the key that does it, is the difference between a
+    // feature and a secret.
+    const acceptAll = dialog.getByTestId('import-review-accept-all');
+    await expect(acceptAll).toContainText('Accept all');
+    await expect(acceptAll).toContainText('Shift+A');
+    const dropAll = dialog.getByTestId('import-review-drop-all');
+    await expect(dropAll).toContainText('Drop all');
+    await expect(dropAll).toContainText('Shift+R');
+
+    // And they do what they say.
+    await acceptAll.click();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'accept');
+
+    // And one undo takes the whole bulk action back.
+    await dialog.getByTestId('import-review-undo').click();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
   });
 
   test('the header lines up with the rows', async () => {
@@ -2917,8 +2954,8 @@ ${transactions}
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
     await expect(rows.nth(2)).toHaveAttribute('data-gate', 'warn');
     await expect(rows.nth(2)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('Blocked: 0')).toBeVisible();
-    await expect(dialog.getByText('Skipped: 0')).toBeVisible();
+    await expect(dialog.getByText('0 blocked')).toBeVisible();
+    await expect(dialog.getByText('0 skipped')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();

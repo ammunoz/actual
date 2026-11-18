@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from 'react';
+import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import {
   SvgClose,
   SvgFlag,
   SvgPause,
+  SvgTag,
 } from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
@@ -47,6 +48,7 @@ import type { EditorMode } from './editor-mode';
 import { hasOverridableHeldRow } from './held-rows';
 import { HelpOverlay } from './HelpOverlay';
 import { HintStrip } from './HintStrip';
+import { KeyCap } from './KeyCap';
 import { actionForHotkey, KEYMAP, REVIEW_SCOPE, TRUST_LEVELS } from './keymap';
 import type { ReviewAction } from './keymap';
 import { ReviewColumns } from './review-columns';
@@ -278,6 +280,25 @@ export function KeyboardImportModal({
     }
     return null;
   };
+
+  /**
+   * One number in the status line: an icon, a count, and a word.
+   *
+   * The icon is the same one the status column wears for the same
+   * state, so the line and the column read as one vocabulary.
+   */
+  const statusCount = (icon: ReactNode, children: ReactNode) => (
+    <View
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+      }}
+    >
+      <View style={{ width: 13, height: 13 }}>{icon}</View>
+      <Text style={styles.tnum}>{children}</Text>
+    </View>
+  );
 
   /**
    * The badge in the status column.
@@ -1214,6 +1235,17 @@ export function KeyboardImportModal({
   const isLoading = review.status === 'parsing' || review.status === 'applying';
   const summary = review.summary;
 
+  // The rows a rule touched. The rule lock's own colour, so the status
+  // line and the ruled cells speak the same language.
+  //
+  // It counts the rows the LIST shows as locked, which is not quite the
+  // same as the rows the rules touched: a rule that sets a split
+  // parent's category says nothing about what will land, and the cell
+  // does not show it.
+  const ruledRowCount = rows.filter(
+    row => visibleEffectsFor(review.ruleEffects, row).length > 0,
+  ).length;
+
   return (
     <Modal
       name={REVIEW_SCOPE}
@@ -1275,58 +1307,92 @@ export function KeyboardImportModal({
               <Text style={{ color: theme.errorText }}>{review.error}</Text>
             ) : null}
 
-            <View
-              style={{
-                flexDirection: 'row',
-                gap: 16,
-                alignItems: 'center',
-                flexWrap: 'wrap',
-              }}
-            >
-              <Text style={styles.tnum}>
-                <Trans>Trust level</Trans>: {trustLevelLabel(review.trustLevel)}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Accepted</Trans>: {summary.accepted}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Dropped</Trans>: {summary.dropped}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Unreviewed</Trans>: {summary.pending}
-              </Text>
-            </View>
+            {/* The status line: where the review is.
 
+                ONE line, and the numbers that matter come first — how far
+                along the user is, what needs attention, and what will
+                land.
+
+                The gate's counts are ALWAYS there, zero included: "0
+                flagged" is a signal — nothing needs a look. The counts
+                that are quiet in most imports — the overrides, the rows a
+                rule touched — only appear when they are not zero,
+                because a count of nothing is noise there.
+
+                The trust level is not here: it is a CONTROL, and it
+                lives in the header with the other controls. */}
             <View
+              data-testid="import-review-status"
               style={{
                 flexDirection: 'row',
-                gap: 16,
+                gap: 14,
                 alignItems: 'center',
                 flexWrap: 'wrap',
               }}
             >
               <Text style={styles.tnum}>
-                <Trans>Blocked</Trans>: {summary.blocked}
+                {t('{{reviewed}} of {{total}} reviewed', {
+                  reviewed: summary.total - summary.pending,
+                  total: summary.total,
+                })}
               </Text>
-              <Text style={styles.tnum}>
-                <Trans>Skipped</Trans>: {summary.skipped}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Flagged</Trans>: {summary.warned}
-              </Text>
-              {summary.overridden > 0 ? (
-                <Text style={styles.tnum}>
-                  <Trans>Overridden</Trans>: {summary.overridden}
-                </Text>
-              ) : null}
-              <Text style={styles.tnum}>
-                <Trans>Will import</Trans>: {summary.willImport}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Incoming</Trans>: {summary.inflowCount}
-              </Text>
-              <Text style={styles.tnum}>
-                <Trans>Outgoing</Trans>: {summary.outflowCount}
+              {statusCount(
+                <SvgFlag
+                  width={13}
+                  height={13}
+                  style={{ color: badgeColour('warning') }}
+                />,
+                t('{{count}} flagged', { count: summary.warned }),
+              )}
+              {statusCount(
+                <SvgPause
+                  width={13}
+                  height={13}
+                  style={{ color: badgeColour('error') }}
+                />,
+                t('{{count}} skipped', { count: summary.skipped }),
+              )}
+              {statusCount(
+                <SvgBlock
+                  width={13}
+                  height={13}
+                  style={{ color: badgeColour('error') }}
+                />,
+                t('{{count}} blocked', { count: summary.blocked }),
+              )}
+              {summary.overridden > 0
+                ? statusCount(
+                    <SvgFlag
+                      width={13}
+                      height={13}
+                      style={{ color: badgeColour('warning') }}
+                    />,
+                    t('{{count}} overridden', { count: summary.overridden }),
+                  )
+                : null}
+              {statusCount(
+                <SvgCheckmark
+                  width={13}
+                  height={13}
+                  style={{ color: badgeColour('success') }}
+                />,
+                t('{{count}} will import', { count: summary.willImport }),
+              )}
+              {ruledRowCount > 0
+                ? statusCount(
+                    <SvgTag
+                      width={13}
+                      height={13}
+                      style={{ color: theme.ruleLockText }}
+                    />,
+                    t('{{count}} set by rules', { count: ruledRowCount }),
+                  )
+                : null}
+              <Text style={{ ...styles.tnum, color: theme.pageTextSubdued }}>
+                {t('{{in}} in · {{out}} out', {
+                  in: summary.inflowCount,
+                  out: summary.outflowCount,
+                })}
               </Text>
             </View>
 
@@ -2001,16 +2067,61 @@ export function KeyboardImportModal({
               />
             ) : null}
 
-            {/* The hint strip says the keys that drive the list — the
-                one thing that says nothing anywhere else. The help
-                overlay lists every key the review has, but it is only
-                reachable with `?` and it does not know what the user is
-                doing.
+            {/* The footer: the bulk actions on the left, and the keys
+                that drive the list on the right.
 
-                A pane that is open already says its own keys where
-                they matter, so the strip keeps quiet while one is. */}
+                The bulk actions used to exist only as keys — they were
+                in the help overlay and nowhere else — and a button that
+                says what it does, with the key that does it, is the
+                difference between a feature and a secret.
+
+                A pane that is open already says its own keys where they
+                matter, so the strip keeps quiet while one is. */}
             {pane === null ? (
-              <HintStrip hasOverridableHeldRow={anyHeldRowOverridable} />
+              <HintStrip
+                hasOverridableHeldRow={anyHeldRowOverridable}
+                actions={
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-accept-all"
+                      // Nothing to decide is nothing to do.
+                      isDisabled={summary.pending === 0}
+                      onPress={() => review.decideAll('accept')}
+                    >
+                      <Trans>Accept all</Trans>
+                      <KeyCap>Shift+A</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-drop-all"
+                      isDisabled={summary.pending === 0}
+                      onPress={() => review.decideAll('drop')}
+                    >
+                      <Trans>Drop all</Trans>
+                      <KeyCap>Shift+R</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-undo"
+                      // The undo stack is not reactive, so this is the
+                      // closest signal there is: there is nothing to undo
+                      // exactly when there is no unsaved work.
+                      isDisabled={!review.unsavedWork.hasWork}
+                      onPress={() => review.undo()}
+                    >
+                      <Trans>Undo</Trans>
+                      <KeyCap>u</KeyCap>
+                    </Button>
+                  </View>
+                }
+              />
             ) : null}
           </View>
         </>

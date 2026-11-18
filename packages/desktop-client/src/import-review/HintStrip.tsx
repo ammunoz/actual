@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -13,10 +15,17 @@ type HintStripProps = {
    * caller asks the evaluation, not the summary.
    */
   hasOverridableHeldRow: boolean;
+  /**
+   * The strip's actions.
+   *
+   * They live on the LEFT, and the keys on the right: the buttons are
+   * what the user does, and the keys are what the list is driven with.
+   */
+  actions?: ReactNode;
 };
 
 /**
- * The hint strip: the keys that matter right now.
+ * The footer: the bulk actions, and the keys that matter right now.
  *
  * The help overlay has every key the review understands, but it is only
  * reachable with `?` and it is a flat list — it does not know what the
@@ -34,7 +43,7 @@ type HintStripProps = {
  * claim a fixed height: the two variants have different lengths, and a
  * row becoming held changes which one is shown.
  */
-export function HintStrip({ hasOverridableHeldRow }: HintStripProps) {
+export function HintStrip({ hasOverridableHeldRow, actions }: HintStripProps) {
   return (
     <View
       data-testid="import-review-hints"
@@ -44,13 +53,23 @@ export function HintStrip({ hasOverridableHeldRow }: HintStripProps) {
       // without the user doing anything.
       role="note"
       style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
         padding: '6px 10px',
         border: `1px solid ${theme.tableBorder}`,
         borderRadius: 6,
         backgroundColor: theme.tableRowHeaderBackground,
       }}
     >
-      <Text style={{ color: theme.pageTextSubdued }}>
+      {actions}
+      <Text
+        style={{
+          color: theme.pageTextSubdued,
+          flex: 1,
+          textAlign: 'right',
+        }}
+      >
         {hasOverridableHeldRow ? HELD_HINT : LIST_HINT}
       </Text>
     </View>

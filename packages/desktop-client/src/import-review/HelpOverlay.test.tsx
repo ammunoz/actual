@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { HelpOverlay } from './HelpOverlay';
+import { KEYMAP } from './keymap';
 
 describe('the help overlay', () => {
   it('says what the review cannot do', () => {
@@ -25,5 +26,23 @@ describe('the help overlay', () => {
     // added without showing up here.
     expect(screen.getByText('Next row')).toBeInTheDocument();
     expect(screen.getByText('Edit split')).toBeInTheDocument();
+  });
+
+  it('shows EVERY binding the keymap has', () => {
+    // The hint strip says the LIVE set — the keys that drive the list —
+    // and the rare ones are in the overlay instead. So the overlay is
+    // where "every key is discoverable" is kept honest, and this is the
+    // guard that says so.
+    render(<HelpOverlay />);
+
+    for (const binding of KEYMAP) {
+      // The keys, as the overlay writes them: `j, down` is "j / down".
+      const text = binding.keys
+        .split(',')
+        .map(part => part.trim())
+        .filter(part => part.length > 0)
+        .join(' / ');
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
   });
 });

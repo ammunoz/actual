@@ -27,6 +27,12 @@ import { Trans } from 'react-i18next';
  * per-field editors (`e`, `c`, `m`, `d`) are named rather than spelled
  * out, because there are four of them and the line is already long.
  *
+ * **The strip says the LIVE set, not everything.** The keys that are
+ * rare — the transfer and the split — are in the help overlay and not
+ * here: the strip shares its line with the bulk actions, and a hint
+ * that wraps onto a second line is a hint that is read less. The strip
+ * says where the rest is: `Shift+/`.
+ *
  * The keys are written the way a person reads them — `Shift+/` for the
  * help, `Ctrl+Shift+A` for the override — and in Title Case, like every
  * other key the review shows. The KEYMAP says `shift+slash` and
@@ -39,8 +45,7 @@ import { Trans } from 'react-i18next';
  */
 export const LIST_HINT = (
   <Trans>
-    j/k move · a accept · r drop · e/c/m/d edit · t transfer · s split · w save
-    & close · Shift+/ help
+    j/k move · a accept · r drop · e/c/m/d edit · w save & close · Shift+/ help
   </Trans>
 );
 
@@ -59,7 +64,7 @@ export const LIST_HINT = (
  */
 export const HELD_HINT = (
   <Trans>
-    Ctrl+Shift+A accept anyway · j/k move · a accept · r drop · e/c/m/d edit · t
-    transfer · s split · w save & close · Shift+/ help
+    Ctrl+Shift+A accept anyway · j/k move · a accept · r drop · e/c/m/d edit · w
+    save & close · Shift+/ help
   </Trans>
 );

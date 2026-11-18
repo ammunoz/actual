@@ -134,8 +134,6 @@ describe('the hint strip', () => {
       'edit-category',
       'edit-memo',
       'edit-date',
-      'edit-transfer',
-      'edit-split',
       'save-session',
       'help',
     ];
