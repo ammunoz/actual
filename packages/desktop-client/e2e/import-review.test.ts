@@ -1188,14 +1188,35 @@ ${transactions}
     const colours = await cell.evaluate(element => {
       const field = element.querySelector('[data-ruled-field="true"]');
       const text = field.querySelector('span');
+      // The token itself, resolved in the theme the app is running: a
+      // probe that wears the token, so the browser does the resolving.
+      const probe = document.createElement('span');
+      document.body.appendChild(probe);
+      probe.style.color = 'var(--color-ruleLockText)';
+      const token = getComputedStyle(probe).color;
+      probe.style.color = 'var(--color-pageTextSubdued)';
+      const dimmed = getComputedStyle(probe).color;
+      probe.remove();
       return {
         color: getComputedStyle(text).color,
         background: getComputedStyle(field).backgroundColor,
+        token,
+        dimmed,
       };
     });
     expect(
       contrastRatio(colours.color, colours.background),
     ).toBeGreaterThanOrEqual(4.5);
+
+    // And the value wears the rule lock's OWN colour, not the dimmed
+    // ink the rest of the review uses for labels. The dimmed ink is the
+    // treatment that failed AA, so this says the same thing in the
+    // review's own words — and in whatever theme the app is running.
+    //
+    // The second assertion is for the failure message: it names the
+    // treatment that is wrong, not just the token that is missing.
+    expect(colours.color).toBe(colours.token);
+    expect(colours.color).not.toBe(colours.dimmed);
 
     // THREE: the field hugs its text. It does not stretch the row, and it
     // does not spill into the next column.
