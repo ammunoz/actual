@@ -3993,6 +3993,49 @@ ${transactions}
     await expect(dialog.getByText('Review import')).toBeVisible();
   });
 
+  test("the question mark opens the review's keys, not the app's help", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Question Mark',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    // The APP's `?` does not open the app's help menu over the review.
+    //
+    // It used to: the app's binding had no scope, so it was always live
+    // — and the review's `?` and the app's `?` both fired.
+    //
+    // The app's binding matches the CHARACTER, so this is the press that
+    // reaches it: the app's `?` is the character without the shift
+    // modifier. A real `?` is Shift+Slash, and the app's binding rejects
+    // that on its own.
+    await page.keyboard.press('?');
+    await expect(page.getByText('Community support (Discord)')).toHaveCount(0);
+    await expect(dialog.getByTestId('import-review-help')).toHaveCount(0);
+
+    // And the review's own `?` opens the review's keys.
+    //
+    // It is pressed as Shift+Slash, because that is what a `?` IS: the
+    // key only produces `?` with the shift held down.
+    await page.keyboard.press('Shift+Slash');
+
+    const help = dialog.getByTestId('import-review-help');
+    await expect(help).toBeVisible();
+    await expect(page.getByText('Community support (Discord)')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(help).not.toBeVisible();
+  });
+
   test('the trusted trust level holds nothing back that it can', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Trusted',

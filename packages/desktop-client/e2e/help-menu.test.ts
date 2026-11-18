@@ -32,6 +32,24 @@ test.describe('Help menu', () => {
     await page.keyboard.press('Escape');
   });
 
+  test('the question mark opens the help menu', async () => {
+    // The `?` key is the app's own shortcut, and it is in the app's
+    // scope so that the keyboard import review — which switches that
+    // scope off while it is open — can have a `?` of its own.
+    //
+    // It is pressed as the CHARACTER, without the shift modifier: the
+    // app's binding matches the character, and the hotkey library
+    // rejects a shifted event for a binding that declares no shift. So
+    // this is the press that reaches the app's binding, and a real `?`
+    // — which is Shift+Slash — does not.
+    await page.keyboard.press('?');
+
+    await expect(page.locator('[data-popover]')).toBeVisible();
+    await expect(page.getByText('Keyboard shortcuts')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+  });
+
   test('Check the keyboard shortcuts modal visuals', async () => {
     await page.getByRole('button', { name: 'Help' }).click();
     await page.getByText('Keyboard shortcuts').click();

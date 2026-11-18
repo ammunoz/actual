@@ -122,7 +122,18 @@ export const HelpMenu = () => {
     }
   };
 
-  useHotkeys('?', () => setMenuOpen(true), { useKey: true });
+  // The `?` key opens the help menu.
+  //
+  // The binding is in the APP's scope, and that matters: a hotkey with
+  // no scope is always live, so this one used to open the help menu
+  // OVER the keyboard import review, which has a `?` of its own — the
+  // review's key list. Scoping it means the review, which switches the
+  // app scope off while it is open, keeps the key to itself.
+  //
+  // The app's own modals do NOT switch the app scope off — upstream's
+  // `Modal` only enables a scope of its own — so `?` still opens this
+  // menu over them.
+  useHotkeys('?', () => setMenuOpen(true), { useKey: true, scopes: ['app'] });
 
   return (
     <SpaceBetween>
