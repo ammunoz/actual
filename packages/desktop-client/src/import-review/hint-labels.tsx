@@ -24,8 +24,9 @@ import { Trans } from 'react-i18next';
  * reachable with `?` and it does not know what the user is doing.
  *
  * The keys here are the ones a person drives the review with. The
- * per-field editors (`e`, `c`, `m`, `d`) are named rather than spelled
- * out, because there are four of them and the line is already long.
+ * editing keys (`e` the chain, `p` the payee, `c`, `m`, `d`) are named
+ * rather than spelled out, because there are five of them and the line is
+ * already long.
  *
  * **The strip says the LIVE set, not everything.** The keys that are
  * rare — the transfer and the split — are in the help overlay and not
@@ -45,7 +46,8 @@ import { Trans } from 'react-i18next';
  */
 export const LIST_HINT = (
   <Trans>
-    j/k move · a accept · r drop · e/c/m/d edit · w save & close · Shift+/ help
+    j/k move · a accept · r drop · e/p/c/m/d edit · w save & close · Shift+/
+    help
   </Trans>
 );
 
@@ -64,7 +66,7 @@ export const LIST_HINT = (
  */
 export const HELD_HINT = (
   <Trans>
-    Ctrl+Shift+A accept anyway · j/k move · a accept · r drop · e/c/m/d edit · w
-    save & close · Shift+/ help
+    Ctrl+Shift+A accept anyway · j/k move · a accept · r drop · e/p/c/m/d edit ·
+    w save & close · Shift+/ help
   </Trans>
 );

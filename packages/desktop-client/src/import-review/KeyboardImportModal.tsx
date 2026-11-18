@@ -43,6 +43,8 @@ import { useDateFormat } from '#hooks/useDateFormat';
 import { pushModal, removeModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 
+import { initialChainContext, nextChainField } from './chain-mode';
+import type { ChainContext } from './chain-mode';
 import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
@@ -153,7 +155,7 @@ function badgeColour(tone: GateBadge['tone']): string {
  * there is only one keyboard and only one of them may have it.
  */
 type PaneMode =
-  | { kind: 'editor'; field: EditorMode }
+  | { kind: 'editor'; field: EditorMode; chain?: ChainContext }
   | { kind: 'split' }
   | { kind: 'transfer' }
   | { kind: 'help' }
@@ -752,6 +754,23 @@ export function KeyboardImportModal({
     ? review.evaluations.get(rowKey(focused))
     : undefined;
 
+  /**
+   * Whether the row is flagged about its AMOUNT.
+   *
+   * The amount is the last field of the chain, and it is only worth a
+   * stop when something is wrong with it — so the chain includes it
+   * only when the row carries this flag.
+   *
+   * These are the EFFECTIVE flags: the ones the gate acts on, after the
+   * user's own edits, not the ones the file came with.
+   */
+  const hasAmountFlag = useMemo(
+    () =>
+      focusedEvaluation?.flags.some(flag => flag.kind === 'amount-mismatch') ??
+      false,
+    [focusedEvaluation],
+  );
+
   const anyHeldRowOverridable = useMemo(
     () => hasOverridableHeldRow(review.evaluations),
     [review.evaluations],
@@ -838,6 +857,25 @@ export function KeyboardImportModal({
     }
     return fields;
   }, [focusedEffects]);
+
+  /**
+   * The chain's next field, and the plan it belongs to.
+   *
+   * The plan is rebuilt from the row as it is NOW: a commit can change
+   * what the row needs — giving a transfer row a payee makes it an
+   * ordinary transaction, and an ordinary transaction needs a category.
+   *
+   * `undefined` means the chain is over: the field the user is on is the
+   * last one.
+   */
+  const advanceChain = useCallback(
+    (current: EditorMode, row: PreviewRow) => {
+      const chain = initialChainContext(row, focusedRuledFields, hasAmountFlag);
+      const next = nextChainField(current, chain, row, focusedRuledFields);
+      return next ? { field: next, chain } : undefined;
+    },
+    [focusedRuledFields, hasAmountFlag],
+  );
 
   /**
    * The rules that control a field of the focused row, by id.
@@ -1358,6 +1396,29 @@ export function KeyboardImportModal({
           current?.kind === 'help' ? null : { kind: 'help' },
         );
         break;
+      case 'edit-chain': {
+        // The chain: the payee, then the category, then the notes, then
+        // the amount if the row is flagged about it.
+        //
+        // It has its own case because it is NOT one of the single-field
+        // editors: `EDITOR_FOR_ACTION` maps the five actions that open
+        // ONE field, and the chain opens several in a row.
+        if (!focused) break;
+        const chain = initialChainContext(
+          focused,
+          focusedRuledFields,
+          hasAmountFlag,
+        );
+        const first = chain.remaining[0];
+        if (!first) {
+          // Every field is ruled, or the row has none to edit. There is
+          // nothing to walk.
+          setNotice(t('There is nothing on this row to edit.'));
+          break;
+        }
+        openPane({ kind: 'editor', field: first, chain });
+        break;
+      }
       case 'edit-payee':
       case 'edit-category':
       case 'edit-memo':
@@ -1424,10 +1485,10 @@ export function KeyboardImportModal({
     // the row keys work again straight away — a user who clicked Accept
     // with the mouse can carry on with the keyboard.
     //
-    // `edit-payee` is the exception: it opens a PANE, and the pane takes
+    // The chain is the exception: it opens a PANE, and the pane takes
     // the keyboard. The other three actions here — accept, drop and
     // accept anyway — act on the row and open nothing.
-    if (action !== 'edit-payee') focusGrid();
+    if (action !== 'edit-payee' && action !== 'edit-chain') focusGrid();
   };
 
   // One binding for the whole keymap. `react-hotkeys-hook` reports the
@@ -2406,10 +2467,14 @@ export function KeyboardImportModal({
                 >
                   <Button
                     variant="bare"
-                    data-testid="import-review-edit-payee"
-                    onPress={event => pressOnce(event, 'edit-payee')}
+                    data-testid="import-review-edit-row"
+                    onPress={event => pressOnce(event, 'edit-chain')}
                   >
-                    <Trans>Edit payee</Trans>
+                    {/* The CHAIN, not the payee alone: `e` walks the
+                        row's fields. The payee on its own is `p`, and
+                        the single-field editors are `c`, `m` and `d` —
+                        the help overlay lists them all. */}
+                    <Trans>Edit row</Trans>
                     <KeyCap>e</KeyCap>
                   </Button>
                   <Button
@@ -2449,6 +2514,13 @@ export function KeyboardImportModal({
 
             {pane?.kind === 'editor' && focused ? (
               <RowEditor
+                // The chain reuses this editor for the next field, and
+                // two fields can start out showing the SAME text — an
+                // empty payee and an empty category, say. Without a key
+                // the second field would inherit the first one's
+                // refusal, its highlighted suggestion and its open list.
+                // The key makes each field a fresh editor.
+                key={pane.field}
                 row={focused}
                 mode={pane.field}
                 payees={review.payees}
@@ -2471,12 +2543,36 @@ export function KeyboardImportModal({
                       editedPayeeId(edits, chosenPayeeId),
                     )
                   ) {
-                    setNotice(
-                      t(
-                        "This row's {{field}} is set by a rule. Edit the rule to change it.",
-                        { field: ruledFieldName(focusedLockedEffect.field) },
-                      ),
+                    const message = t(
+                      "This row's {{field}} is set by a rule. Edit the rule to change it.",
+                      { field: ruledFieldName(focusedLockedEffect.field) },
                     );
+                    // The chain does not stand on a field the user
+                    // cannot change: a rule can start owning a field
+                    // while the chain is running — the user's own payee
+                    // edit can make one fire — so the chain moves on and
+                    // says what it refused.
+                    //
+                    // The rules' effects are refreshed asynchronously, so
+                    // a rule that fires while the editor is ALREADY open
+                    // is caught by the editor's own refusal, which says
+                    // the same thing and leaves the editor where it is.
+                    if (pane?.kind === 'editor' && pane.chain && focused) {
+                      const advanced = advanceChain(pane.field, {
+                        ...focused,
+                        edits: { ...focused.edits, ...edits },
+                      });
+                      if (advanced) {
+                        openPane({
+                          kind: 'editor',
+                          field: advanced.field,
+                          chain: advanced.chain,
+                        });
+                        setNotice(message);
+                        return;
+                      }
+                    }
+                    setNotice(message);
                     return;
                   }
 
@@ -2487,10 +2583,17 @@ export function KeyboardImportModal({
                   // inventing amounts the user never typed is worse
                   // than refusing the edit.
                   //
+                  // Only an edit that CHANGES the amount is refused. An
+                  // edit of the payee or the notes says nothing about
+                  // the amount, and refusing it would leave the row's
+                  // other fields uneditable while the message talked
+                  // about the amount.
+                  //
                   // The way out is the split pane's "Remove split".
                   if (
                     focused &&
                     isSplitRow(focused.edits) &&
+                    edits.amountCents !== undefined &&
                     edits.amountCents !== effectiveAmountCents(focused)
                   ) {
                     setNotice(
@@ -2533,6 +2636,35 @@ export function KeyboardImportModal({
                   }
 
                   review.edit(review.focusedIndex, edits, { chosenPayeeId });
+
+                  // The chain. The editor does not close: it moves on to
+                  // the next field, and the LAST field's commit closes it
+                  // AND moves the cursor on — the row is finished.
+                  //
+                  // A single-field editor has no chain, so it closes and
+                  // leaves the cursor where it was.
+                  if (pane?.kind === 'editor' && pane.chain) {
+                    // The row AS IT WILL BE after this commit: the next
+                    // field depends on what the row is now, not on what
+                    // it was.
+                    const nextRow: PreviewRow = {
+                      ...focused,
+                      edits: { ...focused.edits, ...edits },
+                    };
+                    const advanced = advanceChain(pane.field, nextRow);
+                    if (advanced) {
+                      openPane({
+                        kind: 'editor',
+                        field: advanced.field,
+                        chain: advanced.chain,
+                      });
+                      return;
+                    }
+                    openPane(null);
+                    review.moveFocus(1);
+                    return;
+                  }
+
                   openPane(null);
                 }}
               />

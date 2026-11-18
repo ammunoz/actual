@@ -27,6 +27,9 @@ export const HELP_LABELS: Readonly<Record<ReviewAction, ReactNode>> =
     drop: <Trans>Drop row and advance</Trans>,
     undo: <Trans>Undo last decision</Trans>,
     'edit-payee': <Trans>Edit payee</Trans>,
+    'edit-chain': (
+      <Trans>Edit the row&apos;s fields one after another, then move on</Trans>
+    ),
     'edit-category': <Trans>Edit category</Trans>,
     'edit-memo': <Trans>Edit notes</Trans>,
     'edit-amount': <Trans>Edit amount</Trans>,

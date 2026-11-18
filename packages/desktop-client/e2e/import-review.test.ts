@@ -137,7 +137,7 @@ test.describe('Keyboard import review', () => {
     // A pane takes the focus when it opens and gives it back to the rows
     // when it closes, so the next key after Escape still drives the list.
     await dialog.getByTestId('import-review-grid').focus();
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     await expect(dialog.getByTestId('import-review-editor')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dialog.getByTestId('import-review-editor')).not.toBeVisible();
@@ -468,7 +468,7 @@ ${transactions}
     // import UPDATE path computes `payee: existing.payee || trans.payee`,
     // so the payee the transaction already has WINS and the user's choice
     // is thrown away. The review has to update the transaction in place.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();
     await expect(editor).toHaveAttribute('data-field', 'payee');
@@ -835,7 +835,7 @@ ${transactions}
     await expect(rows).toHaveCount(3);
 
     // The user picks a payee for the first row.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();
     await expect(editor).toHaveAttribute('data-field', 'payee');
@@ -888,7 +888,7 @@ ${transactions}
 
     // The user picks a payee for the first row. "Kroger" is a payee the
     // demo budget already has, so the rule can name it by id.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();
     const input = editor.getByTestId('import-review-editor-input');
@@ -952,7 +952,7 @@ ${transactions}
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor
       .getByTestId('import-review-editor-input')
@@ -997,7 +997,7 @@ ${transactions}
     await expect(rows).toHaveCount(3);
 
     // The user picks a payee for the first row.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     let editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1056,7 +1056,7 @@ ${transactions}
     await expect(rows).toHaveCount(3);
 
     // The user picks a payee for the first row.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     let editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1155,7 +1155,7 @@ ${transactions}
     await expect(rows).toHaveCount(3);
 
     // The user picks a payee for the first row, and a category for it.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     let editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1279,7 +1279,7 @@ ${transactions}
 
     // The user picks a payee for the first row, whose vendor string is
     // "POS PURCHASE 4251" — something the budget has no payee for.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1366,7 +1366,7 @@ ${transactions}
     ).toHaveAttribute('data-ruled', 'true');
 
     // The payee is NOT owned by the rule, so the user picks one.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1497,7 +1497,7 @@ ${transactions}
     await expect(accountPage.transactionTableRow).toHaveCount(2);
   });
 
-  test('e edits the payee, and the fix releases the row', async () => {
+  test('p edits the payee, and the fix releases the row', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Edit Payee',
       offBudget: false,
@@ -1520,7 +1520,7 @@ ${transactions}
     await expect(dialog.getByText('1 blocked')).toBeVisible();
 
     await page.keyboard.press('j');
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
 
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();
@@ -1546,6 +1546,248 @@ ${transactions}
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
     await expect(accountPage.transactionTableRow).toHaveCount(2);
+  });
+
+  test('e walks the row field by field, and the last one moves on', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await expect(editor).toHaveCount(0);
+
+    // `e` opens the CHAIN, and the chain starts at the payee.
+    await page.keyboard.press('e');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    // Committing a field does not close the editor: it moves on to the
+    // next one. That is the whole point of the chain.
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'category');
+
+    // And the next field is a FRESH one: it starts empty, and it does
+    // not inherit the payee field's suggestion list or its refusal.
+    await expect(editor.getByTestId('import-review-editor-input')).toHaveValue(
+      '',
+    );
+
+    await editor.getByTestId('import-review-editor-input').fill('Food');
+    await page.keyboard.press('Enter');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'memo');
+
+    // The LAST field's commit closes the editor AND moves the cursor on:
+    // the row is finished, and the next one is the user's next business.
+    await editor.getByTestId('import-review-editor-input').fill('a note');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+
+    // And the edits are in the row: the notes the user typed. The list
+    // has no notes column, so the detail section is where they show —
+    // and the cursor has moved on, so the detail is showing the NEXT
+    // row until the user goes back.
+    await expect(dialog.getByTestId('import-review-notes')).toHaveCount(0);
+    await page.keyboard.press('k');
+    await expect(dialog.getByTestId('import-review-notes')).toContainText(
+      'a note',
+    );
+  });
+
+  test('p opens the payee alone, and its commit leaves the cursor', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Payee Only',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const editor = dialog.getByTestId('import-review-editor');
+
+    // `p` is the payee ALONE: it opens the payee and nothing else.
+    await page.keyboard.press('p');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // The cursor stayed: a single-field editor does not move on.
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+  });
+
+  test('the chain skips the category on a split row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Split',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The row is split first: a split's legs carry their own categories,
+    // so the parent has none to set.
+    await page.keyboard.press('s');
+    const split = dialog.getByTestId('import-review-split');
+    await expect(split).toBeVisible();
+    for (const [index, category] of [
+      [0, 'General'],
+      [1, 'Food'],
+    ]) {
+      const field = split.getByTestId(
+        `import-review-split-leg-category-${index}`,
+      );
+      await field.click();
+      await field.pressSequentially(category);
+      await page.keyboard.press('Enter');
+    }
+    await split.getByTestId('import-review-split-save').click();
+    await expect(split).not.toBeVisible();
+    await expect(rows.nth(0)).toContainText('Split (2)');
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await page.keyboard.press('e');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    // The category is skipped: the notes come next.
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'memo');
+  });
+
+  test('the chain follows the row: a transfer that gets a payee needs a category', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Transfer',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The row becomes a transfer first: a transfer has no category of
+    // its own.
+    await page.keyboard.press('t');
+    const transfer = dialog.getByTestId('import-review-transfer');
+    await expect(transfer).toBeVisible();
+    const target = transfer.getByTestId('import-review-transfer-target');
+    await target.click();
+    await target.pressSequentially('Ally Savings');
+    await page.keyboard.press('Enter');
+    await transfer.getByTestId('import-review-transfer-save').click();
+    await expect(transfer).not.toBeVisible();
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await page.keyboard.press('e');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    // Giving the row a payee takes the transfer away — the review says
+    // so — and an ordinary transaction needs a category. The chain
+    // follows the row, so the category comes next.
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).toBeVisible();
+    await expect(editor).toHaveAttribute('data-field', 'category');
+  });
+
+  test('the chain starts past a payee a rule owns', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Ruled',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // The budget has a rule for this vendor, made BEFORE the import: the
+    // rule owns the row's payee, so the chain cannot start there.
+    const rulesPage = await navigation.goToRulesPage();
+    const editRuleModal = await rulesPage.createNewRule();
+    await editRuleModal.fill({
+      conditions: [
+        { field: 'imported payee', op: 'is', value: 'POS PURCHASE 4251' },
+      ],
+      actions: [{ field: 'payee', value: 'Demo Grocery Store' }],
+    });
+    await editRuleModal.save();
+    await navigation.goToAccountPage('Keyboard Review Chain Ruled');
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await page.keyboard.press('e');
+    await expect(editor).toBeVisible();
+
+    // The payee is the rule's, so the chain starts at the category.
+    await expect(editor).toHaveAttribute('data-field', 'category');
+  });
+
+  test('escape in the middle of the chain keeps what was committed', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Escape',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const editor = dialog.getByTestId('import-review-editor');
+    await page.keyboard.press('e');
+    await expect(editor).toHaveAttribute('data-field', 'payee');
+
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).toHaveAttribute('data-field', 'category');
+
+    // Escape ends the chain. The field that was committed stays.
+    await page.keyboard.press('Escape');
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toContainText('Kroger');
   });
 
   test('m edits the notes', async () => {
@@ -1763,7 +2005,7 @@ ${transactions}
     // The gate has nothing to say about this row once its payee is
     // settled — the user picks one the budget already has, so the row is
     // no longer an unknown payee the import would create.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1822,7 +2064,7 @@ ${transactions}
 
     // The user picks a payee the budget HAS. Now it is settled, and it
     // says so in the normal ink.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -1931,7 +2173,7 @@ ${transactions}
     // The ACTIONS are the row's own commands, each with the key that
     // does it.
     const actions = dialog.getByTestId('import-review-actions');
-    await expect(actions.getByTestId('import-review-edit-payee')).toContainText(
+    await expect(actions.getByTestId('import-review-edit-row')).toContainText(
       'e',
     );
     await expect(actions.getByTestId('import-review-accept')).toContainText(
@@ -2144,7 +2386,7 @@ ${transactions}
     // The row's payee is not settled, so the review cannot offer a rule
     // about it yet. The user picks one, and THEN there is something to
     // choose from.
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await editor.getByTestId('import-review-editor-input').fill('Kroger');
     await page.keyboard.press('Enter');
@@ -2482,7 +2724,7 @@ ${transactions}
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();
 
@@ -2849,7 +3091,7 @@ ${transactions}
     // the escape in the editor cancels the EDIT, and there is nothing to
     // ask about: the edit was never committed.
     await page.keyboard.press('a');
-    await page.keyboard.press('e');
+    await page.keyboard.press('p');
 
     const editor = dialog.getByTestId('import-review-editor');
     await expect(editor).toBeVisible();

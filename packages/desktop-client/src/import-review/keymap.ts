@@ -23,6 +23,7 @@ export type ReviewAction =
   | 'drop'
   | 'undo'
   | 'edit-payee'
+  | 'edit-chain'
   | 'edit-category'
   | 'edit-memo'
   | 'edit-amount'
@@ -64,6 +65,7 @@ export const REVIEW_ACTIONS = Object.freeze([
   'drop',
   'undo',
   'edit-payee',
+  'edit-chain',
   'edit-category',
   'edit-memo',
   'edit-amount',
@@ -234,6 +236,7 @@ export const ROW_ACTIONS: readonly ReviewAction[] = Object.freeze([
   'accept-override',
   'drop',
   'edit-payee',
+  'edit-chain',
   'edit-category',
   'edit-memo',
   'edit-amount',
@@ -286,7 +289,17 @@ export const KEYMAP: readonly KeyBinding[] = Object.freeze([
     showInHelp: true,
   },
   {
+    // `e` walks the row: the payee, then the category, then the notes,
+    // then the amount if the row is flagged about it. One keypress, one
+    // row finished — so it is the key the row's own actions show.
     keys: 'e',
+    action: 'edit-chain',
+    showInHelp: true,
+  },
+  {
+    // `p` is the payee ALONE. It was free, and the chain needs a key
+    // for the single field.
+    keys: 'p',
     action: 'edit-payee',
     showInHelp: true,
   },
