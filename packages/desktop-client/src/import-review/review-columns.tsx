@@ -11,26 +11,31 @@ import { View } from '@actual-app/components/view';
  * headers did not line up with the body.
  *
  * **The widths are a budget, not a guess.** The modal is 900px. Its
- * container takes 10px of padding each side, the content View takes 16px,
- * and the row takes 10px: 828px of row. Five gaps at 12px leave 768px for
- * the columns, and the list's vertical scrollbar takes about 15 of those.
+ * container takes 10px of padding each side, the list's own border takes
+ * 1, the content View takes 16, and the row takes 10: 826px of row.
+ * Four gaps at 12px leave 778px for the columns, and the list's vertical
+ * scrollbar takes about 15 of those.
  *
- * The five FIXED columns take 534, so the payee — the only flexible one —
- * gets the rest, about 220px. That is enough for a payee name, and
- * nothing truncates: the only long string in the review, the file's raw
- * vendor string, is not in the list at all. It is evidence, and it lives
- * in the detail section, in full, for the row the user is on.
+ * The four FIXED columns take 446, so the payee — the only flexible one —
+ * gets the rest: about 332px, or about 317px once the scrollbar of a
+ * long file is counted. That is enough for a payee name, and nothing
+ * truncates: the only long string in the review, the file's raw vendor
+ * string, is not in the list at all. It is evidence, and it lives in the
+ * detail section, in full, for the row the user is on.
  *
  * The date and the amount are wide enough for the RULED field as well:
  * a ruled cell carries a tag glyph and the field's padding beside the
- * value, and a column that is too narrow for that would clip a date.
+ * value, and a column that is too narrow for that would clip the value.
+ * A ruled date needs about 97px, which is why the date is 100 and not
+ * the 76 a plain date would take. The amount is narrower, and a ruled
+ * amount with a great many digits in it truncates to its tooltip — the
+ * same as an ordinary amount that does.
  */
 export const REVIEW_COLUMNS = {
   date: 100,
   payee: 'flex',
   category: 150,
-  group: 80,
-  amount: 92,
+  amount: 84,
   status: 112,
 } as const;
 
@@ -80,14 +85,12 @@ export function ReviewColumns({
   date,
   payee,
   category,
-  group,
   amount,
   status,
 }: {
   date: ReviewCell;
   payee: ReviewCell;
   category: ReviewCell;
-  group: ReviewCell;
   amount: ReviewCell;
   status: ReviewCell;
 }) {
@@ -116,14 +119,6 @@ export function ReviewColumns({
         role={category.role}
       >
         {category.children}
-      </View>
-      <View
-        style={columnStyle(REVIEW_COLUMNS.group)}
-        data-testid={group.testId}
-        data-ruled={group.ruled ? 'true' : undefined}
-        role={group.role}
-      >
-        {group.children}
       </View>
       <View
         style={columnStyle(REVIEW_COLUMNS.amount)}

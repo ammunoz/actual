@@ -1857,7 +1857,7 @@ ${transactions}
     await expect(rows.nth(0)).toHaveText(/-30/);
   });
 
-  test('the row carries the category group, and the cells do not wrap', async () => {
+  test('the detail carries the category group, and the cells do not wrap', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Category Group',
       offBudget: false,
@@ -1886,9 +1886,10 @@ ${transactions}
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
-    // The row has no category yet, so the group cell is empty.
-    const group = rows.nth(0).getByTestId('import-review-row-category-group');
-    await expect(group).toHaveText('');
+    // The row has no category yet, so the group is not known.
+    await expect(
+      dialog.getByTestId('import-review-category-group'),
+    ).toHaveCount(0);
 
     // Give the row the long category.
     await page.keyboard.press('c');
@@ -1915,12 +1916,15 @@ ${transactions}
     await option.click();
     await expect(editor).not.toBeVisible();
 
-    // The row now carries the category AND the group it belongs to, so
-    // two categories with the same name are distinguishable in the table.
+    // The row now carries the category, and the DETAIL carries the group
+    // it belongs to, so two categories with the same name are
+    // distinguishable. The group is evidence, not a thing to scan: it
+    // belongs to the row the user is on, and the list has five columns
+    // and no room for a sixth.
     await expect(rows.nth(0)).toHaveText(/Deliberately Very Long/);
     await expect(
-      rows.nth(0).getByTestId('import-review-row-category-group'),
-    ).toHaveText('Long Names');
+      dialog.getByTestId('import-review-category-group'),
+    ).toContainText('Long Names');
 
     // And the cell does not WRAP: it truncates on one line, so the row
     // stays the height of a single line. The computed style is the
@@ -2754,6 +2758,141 @@ ${transactions}
       'data-theme',
       'auto',
     );
+  });
+
+  test('the list has five columns, and the payee is the wide one', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Five Columns',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    // The header's cells, in order. The list carries what you scan:
+    // when, who, what, how much, and where it stands. The category's
+    // GROUP is evidence, and evidence is in the detail section.
+    const headers = await dialog
+      .getByTestId('import-review-header')
+      .evaluate(element =>
+        Array.from(element.children).map(
+          child => child.textContent?.trim() ?? '',
+        ),
+      );
+
+    expect(headers).toEqual(['Date', 'Payee', 'Category', 'Amount', 'Status']);
+
+    // The payee is the only flexible column, and it has to be wide
+    // enough that a payee name is never truncated. The comparison is
+    // against the other columns, so it holds at any zoom.
+    const widths = await dialog
+      .getByTestId('import-review-row')
+      .first()
+      .evaluate(element =>
+        Array.from(element.children).map(
+          child => child.getBoundingClientRect().width,
+        ),
+      );
+
+    expect(widths.length).toBe(5);
+    const payeeWidth = widths[1];
+    const categoryWidth = widths[2];
+    const otherWidths = widths.filter((_, index) => index !== 1);
+    for (const width of otherWidths) {
+      expect(payeeWidth).toBeGreaterThan(width);
+    }
+    // And the payee is wide enough for a payee name — more than twice the
+    // category, which is what the column budget gives it. The comparison
+    // is between two measured elements, so it holds at any zoom, and it
+    // fails if the payee is squeezed to its floor.
+    expect(payeeWidth).toBeGreaterThan(categoryWidth * 2);
+  });
+
+  test('the rows are separated, and they light up on hover', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Row Chrome',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // THE ASSERTION: every row is separated from the next by a hairline.
+    //
+    // The rows used to run together with nothing between them, which
+    // made a list of transactions hard to read down a column.
+    const borders = await rows.evaluateAll(elements =>
+      elements.map(element => {
+        const style = getComputedStyle(element);
+        return {
+          width: style.borderBottomWidth,
+          style: style.borderBottomStyle,
+        };
+      }),
+    );
+    borders.forEach((border, index) => {
+      if (index === borders.length - 1) {
+        // The list is a bordered box; its own bottom edge is the last
+        // row's separator. A second one here would make a 2px seam.
+        expect(border.width).toBe('0px');
+      } else {
+        expect(border.width).toBe('1px');
+        expect(border.style).toBe('solid');
+      }
+    });
+
+    // And a row the mouse is over says so, the way every other table in
+    // the app does.
+    const backgroundOf = (index: number) =>
+      rows
+        .nth(index)
+        .evaluate(element => getComputedStyle(element).backgroundColor);
+
+    // A row that is not the focused one, and one that is not hovered:
+    // they look the same.
+    const resting = await backgroundOf(1);
+    expect(await backgroundOf(2)).toBe(resting);
+
+    await rows.nth(1).hover();
+    await page.waitForTimeout(150);
+    const hovered = await backgroundOf(1);
+
+    expect(hovered).not.toBe(resting);
+
+    // The focused row is told apart from a hovered one by an accent down
+    // its leading edge. The wash alone is not enough: in this theme the
+    // hover colour and the focused row's colour are the same navy50.
+    const shadows = await rows.evaluateAll(elements =>
+      elements.map(element => ({
+        focused: element.getAttribute('data-focused') === 'true',
+        boxShadow: getComputedStyle(element).boxShadow,
+      })),
+    );
+    const focusedShadow = shadows.find(row => row.focused)?.boxShadow;
+    const others = shadows.filter(row => !row.focused);
+
+    expect(focusedShadow).toBeTruthy();
+    expect(focusedShadow).not.toBe('none');
+    for (const row of others) {
+      expect(row.boxShadow).toBe('none');
+    }
   });
 
   test('the list is as tall as its content, and the list is what scrolls', async () => {

@@ -1906,20 +1906,6 @@ export function KeyboardImportModal({
                         </Text>
                       ),
                     }}
-                    group={{
-                      testId: 'import-review-header-group',
-                      role: 'columnheader',
-                      children: (
-                        <Text
-                          style={{
-                            color: theme.pageTextSubdued,
-                            fontWeight: 500,
-                          }}
-                        >
-                          <Trans>Group</Trans>
-                        </Text>
-                      ),
-                    }}
                     amount={{
                       testId: 'import-review-header-amount',
                       role: 'columnheader',
@@ -1954,6 +1940,7 @@ export function KeyboardImportModal({
                 </View>
                 {rows.map((row, index) => {
                   const isFocused = index === review.focusedIndex;
+                  const isLast = index === rows.length - 1;
                   const evaluation = review.evaluations.get(rowKey(row));
                   const badge = evaluation ? gateBadge(row, evaluation) : null;
                   const category = categoryCell(row);
@@ -1998,6 +1985,37 @@ export function KeyboardImportModal({
                         backgroundColor: isFocused
                           ? theme.tableRowHeaderBackground
                           : 'transparent',
+                        // The hairline between the rows, and the hover.
+                        //
+                        // Both are the app's own: the transactions table
+                        // separates its rows with the same border and
+                        // washes them with the same colour on hover.
+                        //
+                        // The LAST row's hairline goes, because the list
+                        // is in a bordered box and two borders would
+                        // make a seam along the bottom.
+                        borderBottom: isLast
+                          ? 'none'
+                          : `1px solid ${theme.tableBorder}`,
+                        // The focused row is the row the detail section is
+                        // about, so it has to be findable at a glance —
+                        // and it has to be findable when the mouse is
+                        // over another row, because the hover wash and
+                        // the focused wash are the same colour.
+                        //
+                        // So the focused row gets an ACCENT down its
+                        // leading edge, in the app's own colour for a
+                        // selected row.
+                        boxShadow: isFocused
+                          ? `inset 2px 0 0 ${theme.tableBorderSelected}`
+                          : undefined,
+                        ...(isFocused
+                          ? {}
+                          : {
+                              ':hover': {
+                                backgroundColor: theme.tableRowBackgroundHover,
+                              },
+                            }),
                       }}
                     >
                       <ReviewColumns
@@ -2074,23 +2092,6 @@ export function KeyboardImportModal({
                             </TextOneLine>
                           ),
                         }}
-                        group={{
-                          testId: 'import-review-row-category-group',
-                          role: 'cell',
-                          children: (
-                            /* The group, so two categories with the
-                               same name are distinguishable. It is
-                               subdued: the name is what the user is
-                               looking for. */
-                            <TextOneLine
-                              size="small"
-                              title={category.group}
-                              style={{ color: theme.pageTextSubdued }}
-                            >
-                              {category.group}
-                            </TextOneLine>
-                          ),
-                        }}
                         amount={{
                           testId: 'import-review-row-amount',
                           role: 'cell',
@@ -2156,7 +2157,12 @@ export function KeyboardImportModal({
                       does not carry is the file's own vendor string, the
                       notes, the amount in full and the category's group
                       — and those are exactly the things that get
-                      truncated or left out. */}
+                      truncated or left out.
+
+                      The group is here rather than in the list because
+                      it is evidence, not a thing to scan: it only
+                      matters when two categories share a name, and it
+                      matters for the row the user is ON. */}
                   <View style={{ gap: 4 }} data-testid="import-review-evidence">
                     <ZoneLabel>
                       <Trans>Evidence</Trans>
