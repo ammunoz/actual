@@ -2760,6 +2760,137 @@ ${transactions}
     );
   });
 
+  test('the status line groups its counts into chips', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Status Chips',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // A chip that reads in the light theme need not read in the others:
+    // the rule chip's blue is only AA against the field's surface, and
+    // the dark theme's table band is not that surface. All three are
+    // tried.
+    for (const theme of ['auto', 'dark', 'midnight']) {
+      await page.evaluate(name => window.Actual.setTheme(name), theme);
+      await expect(page.locator('[data-theme]')).toHaveAttribute(
+        'data-theme',
+        theme,
+      );
+
+      // THE ASSERTION: a count that matters is BOXED. Eleven bare numbers
+      // in two lines of text were what the review used to show; a chip
+      // gives a number hierarchy and says which ones to look at.
+      const chips = dialog.getByTestId('import-review-status-chip');
+      const count = await chips.count();
+      expect(count).toBeGreaterThan(0);
+
+      const backgrounds = await chips.evaluateAll(elements =>
+        elements.map(element => {
+          const style = getComputedStyle(element);
+          return {
+            text: element.textContent ?? '',
+            color: style.color,
+            background: style.backgroundColor,
+            radius: style.borderRadius,
+          };
+        }),
+      );
+
+      for (const chip of backgrounds) {
+        expect(chip.background).not.toBe('rgba(0, 0, 0, 0)');
+        expect(chip.radius).not.toBe('0px');
+        // A box counts for nothing if its words cannot be read in it.
+        // The colours are measured at runtime, so this holds in whatever
+        // theme the app is in. AA for normal text is 4.5:1.
+        expect(
+          contrastRatio(chip.color, chip.background),
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+
+      // The gate's counts are always there, zero included: "0 flagged"
+      // says that nothing needs a look.
+      const words = backgrounds.map(chip => chip.text).join(' ');
+      expect(words).toContain('flagged');
+      expect(words).toContain('skipped');
+      expect(words).toContain('blocked');
+      expect(words).toContain('will import');
+    }
+
+    await page.evaluate(() => window.Actual.setTheme('auto'));
+    await expect(page.locator('[data-theme]')).toHaveAttribute(
+      'data-theme',
+      'auto',
+    );
+  });
+
+  test('the progress bar says how far through the file the user is', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Progress',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const measure = () =>
+      dialog.evaluate(element => {
+        const track = element.querySelector(
+          '[data-testid="import-review-progress"]',
+        )!;
+        const fill = element.querySelector(
+          '[data-testid="import-review-progress-fill"]',
+        )!;
+        const reviewed = element.querySelector(
+          '[data-testid="import-review-status-chip"]',
+        )!.textContent!;
+        const match = reviewed.match(/(\d+) of (\d+) reviewed/);
+        return {
+          fraction:
+            fill.getBoundingClientRect().width /
+            track.getBoundingClientRect().width,
+          reviewed: match ? Number(match[1]) : -1,
+          total: match ? Number(match[2]) : -1,
+        };
+      });
+
+    // At the start, nothing has been decided.
+    const atStart = await measure();
+    expect(atStart.total).toBe(3);
+    expect(atStart.fraction).toBeCloseTo(atStart.reviewed / atStart.total, 2);
+
+    // Accept a row: the bar grows by exactly one row's worth. This is a
+    // comparison between two measured elements, not a pixel assertion.
+    await page.keyboard.press('a');
+    const afterOne = await measure();
+    expect(afterOne.reviewed).toBe(atStart.reviewed + 1);
+    expect(afterOne.fraction).toBeCloseTo(
+      afterOne.reviewed / afterOne.total,
+      2,
+    );
+    expect(afterOne.fraction).toBeGreaterThan(atStart.fraction);
+  });
+
   test('the list has five columns, and the payee is the wide one', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Five Columns',

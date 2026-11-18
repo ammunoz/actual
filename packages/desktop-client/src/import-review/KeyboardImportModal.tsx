@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode, SVGProps } from 'react';
+import type { ComponentType, SVGProps } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PressEvent } from 'react-aria-components';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
@@ -62,6 +62,7 @@ import {
 import type { ReviewAction } from './keymap';
 import { ReviewColumns } from './review-columns';
 import { REVIEW_TITLE_ID, ReviewHeader, trustLevelLabel } from './ReviewHeader';
+import { ReviewProgress } from './ReviewProgress';
 import { RowEditor } from './RowEditor';
 import { describeRule } from './rule-descriptions';
 import {
@@ -78,6 +79,7 @@ import { rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
+import { StatusChip } from './StatusChip';
 import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
 import { ZoneLabel } from './ZoneLabel';
@@ -298,25 +300,6 @@ export function KeyboardImportModal({
     }
     return null;
   };
-
-  /**
-   * One number in the status line: an icon, a count, and a word.
-   *
-   * The icon is the same one the status column wears for the same
-   * state, so the line and the column read as one vocabulary.
-   */
-  const statusCount = (icon: ReactNode, children: ReactNode) => (
-    <View
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-      }}
-    >
-      <View style={{ width: 13, height: 13 }}>{icon}</View>
-      <Text style={styles.tnum}>{children}</Text>
-    </View>
-  );
 
   /**
    * The badge in the status column.
@@ -1727,69 +1710,64 @@ export function KeyboardImportModal({
               data-testid="import-review-status"
               style={{
                 flexDirection: 'row',
-                gap: 14,
+                gap: 10,
                 alignItems: 'center',
                 flexWrap: 'wrap',
               }}
             >
-              <Text style={styles.tnum}>
+              {/* How far through the file the user is. The bar is
+                  decorative: the chip beside it says the same thing in
+                  words. */}
+              <ReviewProgress
+                reviewed={summary.total - summary.pending}
+                total={summary.total}
+              />
+              <StatusChip tone="neutral">
                 {t('{{reviewed}} of {{total}} reviewed', {
                   reviewed: summary.total - summary.pending,
                   total: summary.total,
                 })}
-              </Text>
-              {statusCount(
-                <SvgFlag
-                  width={13}
-                  height={13}
-                  style={{ color: badgeColour('warning') }}
-                />,
-                t('{{count}} flagged', { count: summary.warned }),
-              )}
-              {statusCount(
-                <SvgPause
-                  width={13}
-                  height={13}
-                  style={{ color: badgeColour('error') }}
-                />,
-                t('{{count}} skipped', { count: summary.skipped }),
-              )}
-              {statusCount(
-                <SvgBlock
-                  width={13}
-                  height={13}
-                  style={{ color: badgeColour('error') }}
-                />,
-                t('{{count}} blocked', { count: summary.blocked }),
-              )}
-              {summary.overridden > 0
-                ? statusCount(
-                    <SvgFlag
-                      width={13}
-                      height={13}
-                      style={{ color: badgeColour('warning') }}
-                    />,
-                    t('{{count}} overridden', { count: summary.overridden }),
-                  )
-                : null}
-              {statusCount(
-                <SvgCheckmark
-                  width={13}
-                  height={13}
-                  style={{ color: badgeColour('success') }}
-                />,
-                t('{{count}} will import', { count: summary.willImport }),
-              )}
-              {ruledRowCount > 0
-                ? statusCount(
-                    <SvgTag
-                      width={13}
-                      height={13}
-                      style={{ color: theme.ruleLockText }}
-                    />,
-                    t('{{count}} set by rules', { count: ruledRowCount }),
-                  )
-                : null}
+              </StatusChip>
+              <StatusChip
+                tone="warning"
+                icon={<SvgFlag width={12} height={12} />}
+              >
+                {t('{{count}} flagged', { count: summary.warned })}
+              </StatusChip>
+              <StatusChip
+                tone="error"
+                icon={<SvgPause width={12} height={12} />}
+              >
+                {t('{{count}} skipped', { count: summary.skipped })}
+              </StatusChip>
+              <StatusChip
+                tone="error"
+                icon={<SvgBlock width={12} height={12} />}
+              >
+                {t('{{count}} blocked', { count: summary.blocked })}
+              </StatusChip>
+              {summary.overridden > 0 ? (
+                <StatusChip
+                  tone="warning"
+                  icon={<SvgFlag width={12} height={12} />}
+                >
+                  {t('{{count}} overridden', { count: summary.overridden })}
+                </StatusChip>
+              ) : null}
+              <StatusChip
+                tone="success"
+                icon={<SvgCheckmark width={12} height={12} />}
+              >
+                {t('{{count}} will import', { count: summary.willImport })}
+              </StatusChip>
+              {ruledRowCount > 0 ? (
+                <StatusChip
+                  tone="rule"
+                  icon={<SvgTag width={12} height={12} />}
+                >
+                  {t('{{count}} set by rules', { count: ruledRowCount })}
+                </StatusChip>
+              ) : null}
               <Text style={{ ...styles.tnum, color: theme.pageTextSubdued }}>
                 {t('{{in}} in · {{out}} out', {
                   in: summary.inflowCount,
