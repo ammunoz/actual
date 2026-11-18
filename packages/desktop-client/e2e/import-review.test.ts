@@ -943,17 +943,22 @@ ${transactions}
 
     // THE ASSERTION, in three parts.
     //
-    // ONE: the row says it is ruled. The badge is the row's own word for
-    // it, and it is only there when a rule controls a field of the row.
+    // ONE: the row says WHICH field the rule controls.
+    //
+    // The provenance is on the FIELD, not on the row: the cell's own tag
+    // glyph and the ruled field say it, and a row-level badge was the
+    // weaker signal for the same fact.
     const firstRow = rows.first();
-    await expect(firstRow.getByTestId('import-review-row-ruled')).toBeVisible();
+    await expect(
+      firstRow.getByTestId('import-review-row-category'),
+    ).toHaveAttribute('data-ruled', 'true');
 
     // And it is THIS row and not the others: the rule's condition is on
-    // the payee, and only the first row has one. A badge on every row
-    // would say the badge means nothing.
+    // the payee, and only the first row has one. A mark on every row
+    // would say the mark means nothing.
     await expect(
-      rows.nth(1).getByTestId('import-review-row-ruled'),
-    ).toHaveCount(0);
+      rows.nth(1).getByTestId('import-review-row-category'),
+    ).not.toHaveAttribute('data-ruled', 'true');
 
     // TWO: the details panel says WHICH field, and what the rule sets it
     // to. The value matters as much as the field: the user has to see
@@ -1194,10 +1199,11 @@ ${transactions}
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(2);
 
-    // The rule owns the category, so the row is ruled.
+    // The rule owns the category, so the category cell is ruled. The
+    // provenance is on the FIELD, not on the row.
     await expect(
-      rows.first().getByTestId('import-review-row-ruled'),
-    ).toBeVisible();
+      rows.first().getByTestId('import-review-row-category'),
+    ).toHaveAttribute('data-ruled', 'true');
 
     // The payee is NOT owned by the rule, so the user picks one.
     await page.keyboard.press('e');
@@ -1540,6 +1546,92 @@ ${transactions}
       element => getComputedStyle(element).textOverflow,
     );
     expect(textOverflow).toBe('ellipsis');
+  });
+
+  test('the status column says what the gate is doing with the row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Status',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The status column carries an ICON and a WORD. The icon is the state
+    // at a glance — a shape the user can see without reading — and the
+    // word says it exactly.
+    const blocked = rows.nth(1).getByTestId('import-review-row-status');
+    await expect(blocked).toContainText('Blocked');
+    await expect(blocked.locator('svg')).toHaveCount(1);
+
+    // The skipped row says so too, with its own icon: a pause, not the
+    // cross the blocked row wears.
+    const skipped = rows.nth(2).getByTestId('import-review-row-status');
+    await expect(skipped).toContainText('Skipped');
+    await expect(skipped.locator('svg')).toHaveCount(1);
+
+    // And the GATE's word comes first: a row the user accepted and the
+    // trust level flagged is still flagged, because the flag is the
+    // safety fact and the decision is the user's.
+    await page.keyboard.press('a');
+    await expect(
+      rows.nth(0).getByTestId('import-review-row-status'),
+    ).toContainText('Flagged');
+  });
+
+  test("the user's own decision is a state the status column carries", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Status Decision',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The gate has nothing to say about this row once its payee is
+    // settled — the user picks one the budget already has, so the row is
+    // no longer an unknown payee the import would create.
+    await page.keyboard.press('e');
+    const editor = dialog.getByTestId('import-review-editor');
+    await editor.getByTestId('import-review-editor-input').fill('Kroger');
+    await page.keyboard.press('Enter');
+    await expect(editor).not.toBeVisible();
+
+    // Until the user decides, the row the gate has nothing to say about
+    // carries NO badge and NO icon: the column is empty, not empty with
+    // a picture in it.
+    const quiet = rows.nth(0).getByTestId('import-review-row-status');
+    await expect(quiet).toBeEmpty();
+    await expect(quiet.locator('svg')).toHaveCount(0);
+
+    // So the badge is the user's decision.
+    await page.keyboard.press('a');
+    const accepted = rows.nth(0).getByTestId('import-review-row-status');
+    await expect(accepted).toContainText('Accepted');
+    await expect(accepted.locator('svg')).toHaveCount(1);
+
+    // And a dropped row says so — and is struck through, so the word says
+    // it and the strike says it without needing a colour to say it with.
+    await page.keyboard.press('j');
+    await page.keyboard.press('r');
+    const dropped = rows.nth(2).getByTestId('import-review-row-status');
+    await expect(dropped).toContainText('Dropped');
+    await expect(dropped.getByText('Dropped')).toHaveCSS(
+      'text-decoration-line',
+      'line-through',
+    );
   });
 
   test('the header lines up with the rows', async () => {

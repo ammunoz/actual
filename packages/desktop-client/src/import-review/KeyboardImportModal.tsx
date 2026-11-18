@@ -1,9 +1,16 @@
+import type { ComponentType, SVGProps } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
-import { SvgTag } from '@actual-app/components/icons/v1';
+import {
+  SvgBlock,
+  SvgCheckmark,
+  SvgClose,
+  SvgFlag,
+  SvgPause,
+} from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { TextOneLine } from '@actual-app/components/text-one-line';
@@ -71,6 +78,57 @@ export type KeyboardImportModalProps = {
   session?: ImportReviewSession | undefined;
   onImported: (didChange: boolean) => void;
 };
+
+/**
+ * The badge in the status column.
+ *
+ * The ICON carries the state and the WORD says it exactly: "Skipped" is
+ * the trust level holding a row back, and no other word says that.
+ *
+ * The colours are the app's own semantic tokens, taken the way the app's
+ * own status badge takes them (`schedules/StatusBadge.tsx`): the DARKER
+ * variant of each, because the lighter one does not clear WCAG AA on the
+ * modal's background in the light theme — orange700 is 2.86:1 on white.
+ */
+type GateBadge = {
+  label: string;
+  tone: 'error' | 'warning' | 'success' | 'muted';
+  Icon: ComponentType<SVGProps<SVGSVGElement>>;
+};
+
+/**
+ * The colour a badge's tone wears.
+ *
+ * **Red means "this row will not import as-is."** Both the blocked rows
+ * and the skipped ones wear it, because that is the fact the user needs
+ * before anything else: the gate is holding this row back. The ICON says
+ * which kind — a cross for the data being broken, a pause for the trust
+ * level holding it — and the word says it exactly. Amber means "it will
+ * import, but look at it".
+ *
+ * The tokens are the app's own semantic ones, taken the way the app's own
+ * status badge takes them (`schedules/StatusBadge.tsx`): the DARKER
+ * variant of each, because the lighter one does not clear WCAG AA on the
+ * modal's background in the light theme — orange700 is 2.86:1 on white.
+ *
+ * The DROPPED badge wears the plain ink rather than a muted grey. A muted
+ * grey that clears AA does not exist in the app's palette, and the word is
+ * a state the user has to read: `pageTextSubdued` is 2.15:1 on white. The
+ * STRIKE-THROUGH carries the "gone" instead of a colour.
+ */
+function badgeColour(tone: GateBadge['tone']): string {
+  switch (tone) {
+    case 'error':
+      return theme.errorTextDarker;
+    case 'warning':
+      return theme.warningTextDark;
+    case 'success':
+      return theme.noticeText;
+    case 'muted':
+    default:
+      return theme.pageText;
+  }
+}
 
 /**
  * What the pane below the table is showing.
@@ -185,19 +243,83 @@ export function KeyboardImportModal({
   // A dropped row is badged as dropped: the user threw it away, which is a
   // stronger statement than the gate, and badging it "Blocked" would say
   // the opposite of what happened to it.
+  //
+  // The GATE decides, except that a dropped row is final: a row the user
+  // threw away is badged as dropped whatever the gate said. Everywhere
+  // else the gate's word comes first and the user's decision is the
+  // fallback: a row the user accepted and the trust level flagged is
+  // still flagged, because the flag is the safety fact and the decision
+  // is the user's.
   const gateBadge = (
     row: { decision: string },
     evaluation: RowEvaluation,
-  ): string | null => {
-    if (row.decision === 'drop') return t('Dropped');
+  ): GateBadge | null => {
+    if (row.decision === 'drop') {
+      return { label: t('Dropped'), tone: 'muted', Icon: SvgClose };
+    }
     // An override that is in EFFECT. A hard-blocked row the user tried to
     // override is still blocked, so it is badged as blocked, the same way
     // the summary counts it.
-    if (evaluation.overridden && evaluation.willImport) return t('Overridden');
-    if (evaluation.gate === 'block') return t('Blocked');
-    if (evaluation.gate === 'skip') return t('Skipped');
-    if (evaluation.gate === 'warn') return t('Flagged');
+    if (evaluation.overridden && evaluation.willImport) {
+      return { label: t('Overridden'), tone: 'warning', Icon: SvgFlag };
+    }
+    if (evaluation.gate === 'block') {
+      return { label: t('Blocked'), tone: 'error', Icon: SvgBlock };
+    }
+    if (evaluation.gate === 'skip') {
+      return { label: t('Skipped'), tone: 'error', Icon: SvgPause };
+    }
+    if (evaluation.gate === 'warn') {
+      return { label: t('Flagged'), tone: 'warning', Icon: SvgFlag };
+    }
+    // The user's own decision, on a row the gate has nothing to say about.
+    if (row.decision === 'accept') {
+      return { label: t('Accepted'), tone: 'success', Icon: SvgCheckmark };
+    }
     return null;
+  };
+
+  /**
+   * The badge in the status column.
+   *
+   * An icon and a word. The icon is the state at a glance — a shape the
+   * user can see without reading — and the word says it exactly.
+   */
+  const renderStatusBadge = (badge: GateBadge | null) => {
+    if (!badge) return null;
+    const { Icon } = badge;
+    const colour = badgeColour(badge.tone);
+    return (
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 4,
+        }}
+      >
+        {/* The icon is DECORATIVE: the word beside it says the state,
+            and a screen reader should not be offered a nameless
+            graphic as well. */}
+        <Icon
+          width={14}
+          height={14}
+          aria-hidden="true"
+          style={{ color: colour }}
+        />
+        <TextOneLine
+          style={{
+            color: colour,
+            // A dropped row is struck through: the word says it, and the
+            // strike says it without needing a colour to say it with.
+            textDecoration: badge.tone === 'muted' ? 'line-through' : undefined,
+          }}
+          title={badge.label}
+        >
+          {badge.label}
+        </TextOneLine>
+      </View>
+    );
   };
 
   // The payee names, for the same reason as the category names: a rule
@@ -1308,13 +1430,6 @@ export function KeyboardImportModal({
                   const payee = payeeCell(row);
                   const amountCellValue = amountCell(row);
                   const dateCellValue = dateCell(row);
-                  // A rule controls a field of this row. The badge says the
-                  // ROW is ruled; the cells say WHICH field.
-                  //
-                  // It comes from the EFFECTS, not from the cells: a rule
-                  // that sets the memo locks a field the table does not
-                  // show, and the row is still ruled.
-                  const isRuled = effectsForRow(row).length > 0;
                   return (
                     <View
                       role="row"
@@ -1465,53 +1580,8 @@ export function KeyboardImportModal({
                         }}
                         status={{
                           role: 'cell',
-                          children: (
-                            <View
-                              style={{
-                                flexDirection: 'column',
-                                gap: 4,
-                                alignItems: 'flex-end',
-                              }}
-                            >
-                              {/* The badge is a translated word, and a
-                                  long translation would wrap and regrow
-                                  the row — the same problem the category
-                                  had. */}
-                              <TextOneLine
-                                style={{
-                                  textAlign: 'right',
-                                  color:
-                                    evaluation?.gate === 'block'
-                                      ? theme.errorText
-                                      : theme.warningText,
-                                }}
-                                title={badge ?? undefined}
-                              >
-                                {badge}
-                              </TextOneLine>
-                              {isRuled ? (
-                                <View
-                                  data-testid="import-review-row-ruled"
-                                  style={{
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    backgroundColor: theme.noteTagBackground,
-                                    padding: '2px 6px',
-                                    borderRadius: 3,
-                                  }}
-                                >
-                                  <SvgTag
-                                    width={11}
-                                    height={11}
-                                    style={{ marginRight: 4 }}
-                                  />
-                                  <Text style={{ color: theme.noteTagText }}>
-                                    <Trans>Ruled</Trans>
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-                          ),
+                          testId: 'import-review-row-status',
+                          children: renderStatusBadge(badge),
                         }}
                       />
                     </View>
