@@ -58,6 +58,8 @@ import type {
 import type { RuleEntity } from '@actual-app/core/types/models/rule';
 
 import { aqlQuery } from '#queries/aqlQuery';
+import { useDispatch } from '#redux';
+import { setNewTransactions } from '#transactions/transactionsSlice';
 
 import {
   findImportedTransactions,
@@ -479,6 +481,9 @@ function payeeRefs(payees: readonly ReviewPayee[]): readonly ReviewPayeeRef[] {
 export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const { accountId, filename, session, onImported } = opts;
   const { t } = useTranslation();
+  // The rows that land are MARKED in the budget, so the transaction list
+  // says which ones the import just brought in.
+  const dispatch = useDispatch();
 
   const [status, setStatus] = useState<ReviewStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -2014,6 +2019,24 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
         return false;
       }
+      // The rows that landed are MARKED, so the budget says which
+      // transactions the import just brought in and which ones it
+      // matched. Upstream's own import does the same, and its new rows
+      // render bold.
+      //
+      // The mark goes on BEFORE the errors are read: an import can land
+      // some rows and refuse others, and the rows that DID land are in
+      // the budget whether or not the review likes the rest.
+      //
+      // The action is the REDUX one, not a local setter: the transaction
+      // table keeps its own state under the same name.
+      dispatch(
+        setNewTransactions({
+          newTransactions: added,
+          matchedTransactions: updated,
+        }),
+      );
+
       if (importErrors && importErrors.length > 0) {
         setStatus('reviewing');
         // The edits above are already written, so the message says so:
@@ -2082,6 +2105,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     accounts,
     categories,
     clearFromStore,
+    dispatch,
     matchedTransactionIds,
     reconcileSplits,
     ruleEffects,

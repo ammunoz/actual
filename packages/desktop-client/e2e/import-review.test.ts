@@ -3438,5 +3438,17 @@ ${transactions}
     // within the file, so a repeated FITID is a second transaction here -
     // which is exactly what the duplicate flag is there to warn about.
     await expect(accountPage.transactionTableRow).toHaveCount(3);
+
+    // And they are MARKED: upstream renders a transaction the import
+    // just brought in in bold, and the review's rows are marked the same
+    // way. Without the mark, a keyboard import lands rows that look
+    // exactly like the ones that were always there.
+    const landed = accountPage.transactionTableRow.filter({
+      hasText: 'Demo Grocery Store',
+    });
+    await expect(landed.first()).toBeVisible();
+    await expect(
+      landed.first().getByText('Demo Grocery Store', { exact: true }).first(),
+    ).toHaveCSS('font-weight', '600');
   });
 });

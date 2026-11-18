@@ -1,5 +1,10 @@
+import { createElement } from 'react';
+import type { ReactNode } from 'react';
+import { Provider } from 'react-redux';
+
 import { send } from '@actual-app/core/platform/client/connection';
 import type { RuleEntity } from '@actual-app/core/types/models/rule';
+import { configureStore } from '@reduxjs/toolkit';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
 import { useCustomSyncedPref } from './use-custom-synced-pref';
@@ -24,6 +29,22 @@ vi.mock('./use-import-session', () => ({
     clear: vi.fn(),
   })),
 }));
+
+/**
+ * A store for the review to dispatch into.
+ *
+ * The rows that land are MARKED, and that mark is a Redux action. The
+ * test does not care what the app's store does with it — only that the
+ * action was dispatched — so the store is a stub whose reducer ignores
+ * everything it is given.
+ */
+function testStore() {
+  const store = configureStore({ reducer: () => ({}) });
+  const dispatch = vi.spyOn(store, 'dispatch');
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(Provider, { store, children });
+  return { dispatch, wrapper };
+}
 
 describe('toReviewRows', () => {
   it('reads the FITID from imported_id', () => {
@@ -266,12 +287,15 @@ describe('useImportReview', () => {
   });
 
   async function renderReview() {
-    const view = renderHook(() =>
-      useImportReview({
-        accountId: 'a-1',
-        filename: '/tmp/demo.ofx',
-        onImported: vi.fn(),
-      }),
+    const { wrapper } = testStore();
+    const view = renderHook(
+      () =>
+        useImportReview({
+          accountId: 'a-1',
+          filename: '/tmp/demo.ofx',
+          onImported: vi.fn(),
+        }),
+      { wrapper },
     );
     await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
     return view;
@@ -320,12 +344,15 @@ describe('useImportReview', () => {
       return base?.(name, ...args);
     }) as never);
 
-    const view = renderHook(() =>
-      useImportReview({
-        accountId: 'a-1',
-        filename: '/tmp/demo.ofx',
-        onImported: vi.fn(),
-      }),
+    const { wrapper } = testStore();
+    const view = renderHook(
+      () =>
+        useImportReview({
+          accountId: 'a-1',
+          filename: '/tmp/demo.ofx',
+          onImported: vi.fn(),
+        }),
+      { wrapper },
     );
     await waitFor(() =>
       expect(sendMock).toHaveBeenCalledWith('query', expect.anything()),
@@ -688,6 +715,62 @@ describe('useImportReview', () => {
     expect(imports[0][1]?.accountId).toBe('a-1');
   });
 
+  it('marks the rows that landed, so the budget says what just arrived', async () => {
+    const { dispatch, wrapper } = testStore();
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'rules-get':
+          return RULES;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          return { data: [], dependencies: [] };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: ['trx-1'],
+            updated: ['trx-2'],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const view = renderHook(
+      () =>
+        useImportReview({
+          accountId: 'a-1',
+          filename: '/tmp/demo.ofx',
+          onImported: vi.fn(),
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
+
+    await act(async () => {
+      await view.result.current.apply();
+    });
+
+    // The mark is a REDUX action, so the transaction list can render the
+    // new rows the way it renders upstream's own import.
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'transactions/setNewTransactions',
+        payload: {
+          newTransactions: ['trx-1'],
+          matchedTransactions: ['trx-2'],
+        },
+      }),
+    );
+  });
+
   it('asks the budget about the account the rows go into', async () => {
     await renderReview();
 
@@ -843,13 +926,16 @@ describe('useImportReview', () => {
     // re-open the review on every render, and the review would never
     // settle.
     const session = { ...SAVED_SESSION, focusedIndex: 99 };
-    const view = renderHook(() =>
-      useImportReview({
-        accountId: 'a-1',
-        filename: '/tmp/demo.ofx',
-        session,
-        onImported: vi.fn(),
-      }),
+    const { wrapper } = testStore();
+    const view = renderHook(
+      () =>
+        useImportReview({
+          accountId: 'a-1',
+          filename: '/tmp/demo.ofx',
+          session,
+          onImported: vi.fn(),
+        }),
+      { wrapper },
     );
     await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
 
@@ -937,13 +1023,16 @@ describe('useImportReview', () => {
       setPref,
     ]);
 
-    const view = renderHook(() =>
-      useImportReview({
-        accountId: 'a-1',
-        filename: '/tmp/demo.ofx',
-        session: SAVED_SESSION,
-        onImported: vi.fn(),
-      }),
+    const { wrapper } = testStore();
+    const view = renderHook(
+      () =>
+        useImportReview({
+          accountId: 'a-1',
+          filename: '/tmp/demo.ofx',
+          session: SAVED_SESSION,
+          onImported: vi.fn(),
+        }),
+      { wrapper },
     );
     await waitFor(() => expect(view.result.current.status).toBe('reviewing'));
 
