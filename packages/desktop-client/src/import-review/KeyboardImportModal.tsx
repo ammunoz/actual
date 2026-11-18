@@ -32,12 +32,11 @@ import type {
   PreviewRow,
   ReviewCategory,
   RowEvaluation,
-  TrustLevel,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { integerToAmount } from '@actual-app/core/shared/util';
 import { format as formatDate, parseISO } from 'date-fns';
 
-import { Modal, ModalCloseButton, ModalHeader } from '#components/common/Modal';
+import { Modal } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { pushModal, removeModal } from '#modals/modalsSlice';
@@ -58,11 +57,11 @@ import {
   GLOBAL_ACTIONS,
   KEYMAP,
   REVIEW_SCOPE,
-  TRUST_LEVEL_KEYS,
   TRUST_LEVELS,
 } from './keymap';
 import type { ReviewAction } from './keymap';
 import { ReviewColumns } from './review-columns';
+import { REVIEW_TITLE_ID, ReviewHeader, trustLevelLabel } from './ReviewHeader';
 import { RowEditor } from './RowEditor';
 import { describeRule } from './rule-descriptions';
 import {
@@ -243,21 +242,6 @@ export function KeyboardImportModal({
   // belongs to may not even be open: a row that cannot be split is
   // refused before the pane opens.
   const [notice, setNotice] = useState<string | null>(null);
-
-  // The trust level is a domain value, so it is translated at the point it
-  // is shown rather than translated inside the domain layer.
-  const trustLevelLabel = (level: TrustLevel): string => {
-    switch (level) {
-      case 'paranoid':
-        return t('paranoid');
-      case 'cautious':
-        return t('cautious');
-      case 'trusted':
-        return t('trusted');
-      default:
-        return t('cautious');
-    }
-  };
 
   // The date, in the app's own format.
   //
@@ -1665,93 +1649,59 @@ export function KeyboardImportModal({
       // props over the overlay's own AFTER it sets `isDismissable`, so
       // this one replaces it.
       isDismissable={false}
+      // The dialog is labelled by its title, so a screen reader says what
+      // the review is instead of the app's generic "Modal dialog".
+      ariaLabelledBy={REVIEW_TITLE_ID}
       containerProps={{ style: { width: 900, maxWidth: '100%' } }}
     >
       {() => (
         <>
-          <ModalHeader
-            title={t('Review import')}
-            leftContent={
-              // The X closes the review, and so does Escape. The button
-              // says which key does the same thing.
-              <View
-                style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}
-              >
-                <ModalCloseButton onPress={requestClose} />
-                <KeyCap>
-                  <Trans>Escape</Trans>
-                </KeyCap>
-              </View>
+          {/*
+              The review's own header, not the app's `ModalHeader`.
+
+              `ModalHeader` centres its title and positions its
+              `rightContent` absolutely at `right: 0`. Every other modal
+              puts one small close button there; this review put the trust
+              level there, and it reached the title — the two painted over
+              each other and the header read "Review impor-t-paranoid".
+
+              The review's header is one flex row instead, so nothing is
+              positioned over anything else.
+          */}
+          <ReviewHeader
+            trustLevel={review.trustLevel}
+            // A pane owns the keyboard: the confirmation's outcomes are
+            // Keep and Discard, and changing the trust level under it
+            // would change what they mean.
+            isTrustDisabled={pane !== null || creatingRule}
+            onTrustLevelChange={level => {
+              review.setTrustLevel(level);
+              // The grid takes the keyboard back, so the row keys work
+              // again after a chip is clicked.
+              focusGrid();
+            }}
+            willImport={summary.willImport}
+            // The Import button is off while a pane owns the keyboard:
+            // the confirmation's outcomes are Keep and Discard, and a
+            // split the user has not saved would be applied without.
+            isImportDisabled={
+              isLoading ||
+              rows.length === 0 ||
+              // A rule is being written: the import would race the
+              // write, and the rule the user just made might or might
+              // not be in the import.
+              creatingRule ||
+              pane?.kind === 'confirm' ||
+              pane?.kind === 'rules' ||
+              pane?.kind === 'split' ||
+              pane?.kind === 'transfer'
             }
-            rightContent={
-              <View
-                style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}
-              >
-                {/* The trust level is a CONTROL, not a line of text in
-                    the status strip. The keys are on the buttons so a
-                    mouse user and a keyboard user are doing the same
-                    thing, and `tab` can reach the buttons now that it
-                    is no longer the cycle binding. */}
-                {TRUST_LEVELS.map(level => {
-                  const isCurrent = level === review.trustLevel;
-                  return (
-                    <Button
-                      key={level}
-                      variant="bare"
-                      aria-pressed={isCurrent}
-                      data-testid={`import-review-trust-${level}`}
-                      // A pane owns the keyboard: the confirmation's
-                      // outcomes are Keep and Discard, and changing the
-                      // trust level under it would change what they mean.
-                      isDisabled={pane !== null || creatingRule}
-                      onPress={() => {
-                        review.setTrustLevel(level);
-                        // The grid takes the keyboard back, so the row
-                        // keys work again after a chip is clicked.
-                        focusGrid();
-                      }}
-                      style={{
-                        color: isCurrent
-                          ? theme.ruleLockText
-                          : theme.pageTextSubdued,
-                        fontWeight: isCurrent ? 'bold' : undefined,
-                      }}
-                    >
-                      {trustLevelLabel(level)}
-                      <KeyCap>{TRUST_LEVEL_KEYS[level]}</KeyCap>
-                    </Button>
-                  );
-                })}
-                <Button
-                  variant="primary"
-                  data-testid="import-review-import"
-                  onPress={() => {
-                    void review.apply().then(didChange => {
-                      if (didChange) closeReview();
-                    });
-                  }}
-                  // The Import button is off while a pane owns the
-                  // keyboard: the confirmation's outcomes are Keep and
-                  // Discard, and a split the user has not saved would be
-                  // applied without.
-                  isDisabled={
-                    isLoading ||
-                    rows.length === 0 ||
-                    // A rule is being written: the import would race the
-                    // write, and the rule the user just made might or
-                    // might not be in the import.
-                    creatingRule ||
-                    pane?.kind === 'confirm' ||
-                    pane?.kind === 'rules' ||
-                    pane?.kind === 'split' ||
-                    pane?.kind === 'transfer'
-                  }
-                >
-                  <Trans>Import</Trans>
-                  <KeyCap>Ctrl+S</KeyCap>
-                </Button>
-              </View>
-            }
+            onApply={() => {
+              void review.apply().then(didChange => {
+                if (didChange) closeReview();
+              });
+            }}
+            onClose={requestClose}
           />
 
           <View style={{ padding: 16, gap: 12 }}>
@@ -2288,7 +2238,7 @@ export function KeyboardImportModal({
                                 isCurrent ? { fontWeight: 'bold' } : undefined
                               }
                             >
-                              {trustLevelLabel(level)}: {label}
+                              {trustLevelLabel(t, level)}: {label}
                             </Text>
                           );
                         })}

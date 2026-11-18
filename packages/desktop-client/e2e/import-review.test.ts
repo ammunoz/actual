@@ -2510,6 +2510,143 @@ ${transactions}
     }
   });
 
+  test('the header does not put the title under the trust level', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Header Overlap',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    // The heading, not the text: the review says "Importing into {the
+    // account}", and an account called "…Review Import…" would match a
+    // plain text search for the title as well.
+    const title = dialog.getByRole('heading', { name: 'Review import' });
+    await expect(title).toBeVisible();
+
+    const trust = dialog.getByTestId('import-review-trust-paranoid');
+
+    // THE ASSERTION: the title and the trust control do not overlap.
+    //
+    // The app's own `ModalHeader` centres its title in
+    // `calc(100% - 60px)` and positions its `rightContent` absolutely at
+    // `right: 0`, so a wide right side reaches the title and the two
+    // paint over each other — the header read "Review impor-t-paranoid".
+    // The review's own header is one flex row, so nothing can be
+    // positioned over anything else.
+    //
+    // The comparison is between two measured elements, so it holds at any
+    // zoom and with any font.
+    const boxes = await Promise.all(
+      [title, trust].map(element => element.boundingBox()),
+    );
+    const [titleBox, trustBox] = boxes;
+
+    // A box that is not there cannot overlap anything, but it is also not
+    // a passing measurement — so it is a failure, said plainly.
+    if (!titleBox || !trustBox) {
+      throw new Error('The title or the trust control was not on the screen');
+    }
+
+    const overlapsHorizontally =
+      titleBox.x < trustBox.x + trustBox.width &&
+      trustBox.x < titleBox.x + titleBox.width;
+    const overlapsVertically =
+      titleBox.y < trustBox.y + trustBox.height &&
+      trustBox.y < titleBox.y + titleBox.height;
+
+    expect(overlapsHorizontally && overlapsVertically).toBe(false);
+  });
+
+  test('the trust level says which one it is', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Trust Says',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    // The segments' colours are in a class rather than in an inline
+    // style, so the button's own hover and disabled rules still apply.
+    // That only works if the segment's own rules win — and they are not
+    // guaranteed to, because the cascade between two emotion classes
+    // depends on which was written to the sheet first. So it is pinned:
+    // the current level must LOOK different from the others.
+    const current = dialog.getByTestId('import-review-trust-cautious');
+    const other = dialog.getByTestId('import-review-trust-trusted');
+
+    const styleOf = (locator: typeof current) =>
+      locator.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { color: style.color, background: style.backgroundColor };
+      });
+
+    const currentStyle = await styleOf(current);
+    const otherStyle = await styleOf(other);
+
+    expect(currentStyle.color).not.toBe(otherStyle.color);
+    expect(currentStyle.background).not.toBe(otherStyle.background);
+  });
+
+  test('the Import button says how much it will import', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Import Count',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    // The blocked file, so the number that will land is NOT the number of
+    // rows: the trust level holds some of them back.
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    // The heading, not the text: the review says "Importing into {the
+    // account}", and an account called "…Review Import…" would match a
+    // plain text search for the title as well.
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    // The count is the number of rows that will land: not dropped, and
+    // not held back by the trust level.
+    const rows = dialog.getByTestId('import-review-row');
+    // The rows arrive after the title: the file is parsed first.
+    await expect(rows).toHaveCount(3);
+    const willImport = await rows.evaluateAll(
+      elements =>
+        elements.filter(
+          element =>
+            element.getAttribute('data-decision') !== 'drop' &&
+            element.getAttribute('data-held') !== 'true',
+        ).length,
+    );
+    // The trust level holds rows back, so the button must not be counting
+    // the rows.
+    expect(willImport).toBeGreaterThan(0);
+    expect(willImport).toBeLessThan(3);
+
+    const importButton = dialog.getByTestId('import-review-import');
+    // The whole label, not "a digit somewhere in the button": the button
+    // says how much it will import, and that is what it says.
+    await expect(importButton).toHaveAccessibleName(
+      `Import ${willImport} transaction${willImport === 1 ? '' : 's'}`,
+    );
+  });
+
   test('the list is as tall as its content, and the list is what scrolls', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review List Height',
