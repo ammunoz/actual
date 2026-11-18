@@ -80,8 +80,8 @@ function namesKey(tokens: string[], key: string): boolean {
  */
 function writtenKey(keys: string): string {
   const key = keys.split(',')[0].trim();
-  // `shift+slash` is the key `shift+/` — the slash, with shift.
-  if (key === 'shift+slash') return 'Shift+/';
+  // `shift+slash` is the `?` key — the character on the cap.
+  if (key === 'shift+slash') return '?';
   // A lone letter stays lowercase: `a` is `a`, not `A`. Only the
   // modifier names are capitalised, the way the repo writes them.
   if (key.length === 1) return key;
@@ -112,7 +112,8 @@ describe('the hint strip', () => {
     // The strip spells the modifier keys the way a person reads them,
     // so they are matched against their KEYMAP form.
     const asKeymap = (key: string): string[] => {
-      if (key === 'Shift+/') return ['shift+slash'];
+      if (key === '?') return ['shift+slash'];
+      if (key === 'Shift+E') return ['shift+e'];
       if (key === 'Ctrl+Shift+A') return ['ctrl+shift+a'];
       return [key];
     };
@@ -130,11 +131,8 @@ describe('the hint strip', () => {
       'move-prev',
       'accept',
       'drop',
-      'edit-payee',
-      'edit-category',
-      'edit-memo',
-      'edit-date',
-      'save-session',
+      'edit-chain',
+      'edit-rules',
       'help',
     ];
 

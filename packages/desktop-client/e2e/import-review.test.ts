@@ -749,6 +749,42 @@ ${transactions}
     await expect(hints).toBeVisible();
   });
 
+  test('the hint strip says how to open the rules and the key list', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Hint Keys',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(
+      dialog.getByRole('heading', { name: 'Review import' }),
+    ).toBeVisible();
+
+    const hints = dialog.getByTestId('import-review-hints');
+    await expect(hints).toContainText('Shift+E rules');
+    await expect(hints).toContainText('? help');
+
+    // A hint that wraps onto a second line is a hint that is read less.
+    // The comparison is between the text's measured height and its own
+    // line height, so it holds at any zoom.
+    const hintText = hints.getByTestId('import-review-hint-text');
+    await expect(hintText).toBeVisible();
+    const box = await hintText.evaluate(element => {
+      const style = getComputedStyle(element);
+      return {
+        height: element.getBoundingClientRect().height,
+        lineHeight:
+          parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2,
+      };
+    });
+    expect(box.height).toBeLessThan(box.lineHeight * 1.6);
+  });
+
   test('the hint strip says the override for a SKIPPED row too', async () => {
     // A duplicate FITID is SKIPPED at the cautious trust level, not
     // blocked. It is still held back, and the override is still what

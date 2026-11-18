@@ -12,13 +12,21 @@ import { KEYMAP } from './keymap';
  * The keys as they are shown to the user.
  *
  * The keymap spells a binding the way `react-hotkeys-hook` wants it
- * (`'j, down'`); the user reads it as two keys.
+ * (`'j, down'`); the user reads it as two keys. The shifted keys are
+ * spelled the way the strip spells them, so the two surfaces agree on
+ * what a key is called.
  */
-function formatKeys(keys: string): string {
+const KEY_NAMES: Readonly<Record<string, string>> = Object.freeze({
+  'shift+slash': '?',
+  'shift+e': 'Shift+E',
+});
+
+export function formatKeys(keys: string): string {
   return keys
     .split(',')
     .map(part => part.trim())
     .filter(part => part.length > 0)
+    .map(part => KEY_NAMES[part] ?? part)
     .join(' / ');
 }
 

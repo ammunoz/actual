@@ -64,6 +64,7 @@ export function HintStrip({ hasOverridableHeldRow, actions }: HintStripProps) {
     >
       {actions}
       <Text
+        data-testid="import-review-hint-text"
         style={{
           color: theme.pageTextSubdued,
           flex: 1,

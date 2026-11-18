@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { HelpOverlay } from './HelpOverlay';
+import { formatKeys, HelpOverlay } from './HelpOverlay';
 import { KEYMAP } from './keymap';
 
 describe('the help overlay', () => {
@@ -36,13 +36,9 @@ describe('the help overlay', () => {
     render(<HelpOverlay />);
 
     for (const binding of KEYMAP) {
-      // The keys, as the overlay writes them: `j, down` is "j / down".
-      const text = binding.keys
-        .split(',')
-        .map(part => part.trim())
-        .filter(part => part.length > 0)
-        .join(' / ');
-      expect(screen.getByText(text)).toBeInTheDocument();
+      // The keys, spelled the way the overlay spells them — the same
+      // function the overlay uses, so the two cannot drift apart.
+      expect(screen.getByText(formatKeys(binding.keys))).toBeInTheDocument();
     }
   });
 });
