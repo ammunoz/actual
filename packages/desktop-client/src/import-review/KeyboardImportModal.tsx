@@ -909,39 +909,6 @@ export function KeyboardImportModal({
     [focusedEffects, ruledFieldName],
   );
 
-  /**
-   * What a rule set on a field, as the details panel says it.
-   *
-   * The VALUE matters as much as the field: the user has to see what
-   * the rule will do, not merely that something will.
-   *
-   * It agrees with the CELL, because a panel that says one thing and a
-   * cell that says another is worse than either.
-   */
-  const ruledValueLabel = (effect: RuleEffect): string => {
-    if (effect.field === 'payee') {
-      if (effect.value === null) return t('no payee');
-      // A payee the budget does not have — deleted, or a stale list — is
-      // shown as its id, so the panel and the cell say the same thing.
-      return payeeNames.get(String(effect.value)) ?? String(effect.value);
-    }
-    if (effect.field === 'category') {
-      if (effect.value === null) return t('no category');
-      return categoryNames.get(String(effect.value)) ?? String(effect.value);
-    }
-    if (effect.field === 'amount') {
-      if (effect.value === null) return t('no amount');
-      return typeof effect.value === 'number'
-        ? String(integerToAmount(effect.value))
-        : t('an amount');
-    }
-    if (effect.field === 'date') {
-      if (effect.value === null) return t('no date');
-      return typeof effect.value === 'string' ? effect.value : t('a date');
-    }
-    return typeof effect.value === 'string' ? effect.value : t('some notes');
-  };
-
   // The rules the focused row could have.
   //
   // A rule is offered only when it can be written truthfully: the
@@ -2119,13 +2086,28 @@ export function KeyboardImportModal({
 
             {focused ? (
               <View
-                style={{ gap: 12, maxHeight: 260 }}
+                style={{
+                  gap: 12,
+                  // A FIXED height, not a maxHeight: the detail is a
+                  // dedicated region whose size must not depend on what
+                  // the selected row happens to contain. If it shrank
+                  // for a clean row and grew for a flagged one, moving
+                  // the cursor would make the whole layout jump — the
+                  // exact failure the design rejected when it chose
+                  // master-detail over an inline inspector.
+                  // The detail region is 260px tall — the design's
+                  // vertical budget for a region that never changes size.
+                  height: 260,
+                  border: `1px solid ${theme.tableBorder}`,
+                  borderRadius: 6,
+                  overflow: 'hidden',
+                }}
                 data-testid="import-review-details"
               >
                 {/* The zones scroll; the ACTIONS stay put, because the
                     actions are what the user came for. */}
                 <View
-                  style={{ gap: 12, flex: 1, overflowY: 'auto' }}
+                  style={{ gap: 12, flex: 1, overflowY: 'auto', padding: 14 }}
                   data-testid="import-review-zones"
                 >
                   {/* ZONE 1 — EVIDENCE: the facts about this row.
@@ -2179,54 +2161,71 @@ export function KeyboardImportModal({
                       The plain sentence first, then the outcome at each
                       trust level, then the machine code — which is
                       useful when something goes wrong and is not a
-                      headline. */}
-                  {focusedEvaluation?.flags.length ? (
-                    <View style={{ gap: 4 }} data-testid="import-review-reason">
-                      <ZoneLabel>
-                        <Trans>Reason</Trans>
-                      </ZoneLabel>
+                      headline.
+
+                      The zone is ALWAYS here. A clean row has a reason
+                      too: nothing was flagged, and the gate will let it
+                      through at every level. */}
+                  <View
+                    style={{
+                      gap: 4,
+                      borderTop: `1px solid ${theme.tableBorder}`,
+                      paddingTop: 10,
+                    }}
+                    data-testid="import-review-reason"
+                  >
+                    <ZoneLabel>
+                      <Trans>Reason</Trans>
+                    </ZoneLabel>
+                    {focusedEvaluation?.flags.length ? (
                       <Text>
                         {focusedEvaluation.flags
                           .map(flag => flagReason(flag.kind))
                           .join(' · ')}
                       </Text>
-                      {focusedEvaluation.held ? (
-                        <Text style={{ color: theme.errorText }}>
-                          {focusedEvaluation.overridable
-                            ? t(
-                                'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
-                              )
-                            : t(
-                                'Held back: this row cannot be imported until its date or amount is fixed.',
-                              )}
-                        </Text>
-                      ) : null}
-                      <View style={{ flexDirection: 'row', gap: 12 }}>
-                        {TRUST_LEVELS.map(level => {
-                          const gate = gateRow(focused, level, {
-                            livePayeeNames,
-                          });
-                          const label =
-                            gate === 'block'
-                              ? t('Blocked')
-                              : gate === 'skip'
-                                ? t('Skipped')
-                                : gate === 'warn'
-                                  ? t('Flagged')
-                                  : t('Allowed');
-                          const isCurrent = level === review.trustLevel;
-                          return (
-                            <Text
-                              key={level}
-                              style={
-                                isCurrent ? { fontWeight: 'bold' } : undefined
-                              }
-                            >
-                              {trustLevelLabel(t, level)}: {label}
-                            </Text>
-                          );
-                        })}
-                      </View>
+                    ) : (
+                      <Text style={{ color: theme.pageTextSubdued }}>
+                        <Trans>Nothing to flag on this row.</Trans>
+                      </Text>
+                    )}
+                    {focusedEvaluation?.held ? (
+                      <Text style={{ color: theme.errorText }}>
+                        {focusedEvaluation.overridable
+                          ? t(
+                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
+                            )
+                          : t(
+                              'Held back: this row cannot be imported until its date or amount is fixed.',
+                            )}
+                      </Text>
+                    ) : null}
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      {TRUST_LEVELS.map(level => {
+                        const gate = gateRow(focused, level, {
+                          livePayeeNames,
+                        });
+                        const label =
+                          gate === 'block'
+                            ? t('Blocked')
+                            : gate === 'skip'
+                              ? t('Skipped')
+                              : gate === 'warn'
+                                ? t('Flagged')
+                                : t('Allowed');
+                        const isCurrent = level === review.trustLevel;
+                        return (
+                          <Text
+                            key={level}
+                            style={
+                              isCurrent ? { fontWeight: 'bold' } : undefined
+                            }
+                          >
+                            {trustLevelLabel(t, level)}: {label}
+                          </Text>
+                        );
+                      })}
+                    </View>
+                    {focusedEvaluation?.flags.length ? (
                       <Text
                         data-testid="import-review-flag-codes"
                         style={{
@@ -2243,83 +2242,112 @@ export function KeyboardImportModal({
                           .map(flag => flag.code)
                           .join(' · ')}
                       </Text>
-                    </View>
-                  ) : null}
+                    ) : null}
+                  </View>
 
                   {/* ZONE 3 — OWNERSHIP: what the rules did to this row.
 
                       The field a rule owns is the rule's identity on this
                       row: two rules can touch one row, and each of them
-                      has to be openable in its own right. */}
-                  {focusedEffects.length > 0 ? (
-                    <View style={{ gap: 4 }} data-testid="import-review-ruled">
-                      <ZoneLabel>
-                        <Trans>Ownership</Trans>
-                      </ZoneLabel>
-                      {focusedEffects.map(effect => (
-                        <Text
-                          key={effect.field}
-                          data-testid="import-review-ruled-field"
-                          data-field={effect.field}
-                          style={{ color: theme.ruleLockText }}
-                        >
-                          {t('A rule sets the {{field}} to {{value}}.', {
-                            field: ruledFieldName(effect.field),
-                            value: ruledValueLabel(effect),
-                          })}
-                        </Text>
-                      ))}
-                      <View style={{ gap: 6 }}>
-                        {/* One button per rule. Two rules can control two
-                            fields of the same row, and the button has to
-                            say WHICH one it opens: the field is the rule's
-                            identity on this row, and the description says
-                            what the rule matches and sets. */}
-                        {focusedRuleIds.map(ruleId => {
-                          const effect = focusedEffects.find(
-                            candidate => candidate.ruleId === ruleId,
+                      has to be openable in its own right.
+
+                      The zone is ALWAYS here, like the other three. A
+                      row no rule touched says so instead of vanishing. */}
+                  <View
+                    style={{
+                      gap: 4,
+                      borderTop: `1px solid ${theme.tableBorder}`,
+                      paddingTop: 10,
+                    }}
+                    data-testid="import-review-ruled"
+                  >
+                    <ZoneLabel>
+                      <Trans>Ownership</Trans>
+                    </ZoneLabel>
+                    {focusedEffects.length ? (
+                      <>
+                        {focusedEffects.map(effect => {
+                          const rule = review.rules.find(
+                            candidate => candidate.id === effect.ruleId,
                           );
-                          const item = rulePickerItems.find(
-                            candidate =>
-                              candidate.kind === 'edit' &&
-                              candidate.ruleId === ruleId,
-                          );
-                          const fieldLabel = ruleFieldLabel(ruleId);
+                          const described = rule
+                            ? describeRule(rule, { payeeNames, categoryNames })
+                            : undefined;
                           return (
-                            <View key={ruleId} style={{ gap: 2 }}>
-                              {item ? (
-                                <Text
-                                  style={{
-                                    fontSize: 11,
-                                    color: theme.pageTextSubdued,
-                                  }}
-                                >
-                                  {item.description}
-                                </Text>
-                              ) : null}
-                              {/* The primary field. The label beside it
-                                  names every field when one rule owns
-                                  more than one. */}
+                            <View
+                              key={effect.field}
+                              style={{
+                                flexDirection: 'row',
+                                gap: 6,
+                                alignItems: 'center',
+                              }}
+                              data-testid="import-review-ruled-field"
+                              data-field={effect.field}
+                            >
+                              <SvgTag
+                                width={11}
+                                height={11}
+                                style={{
+                                  color: theme.ruleLockText,
+                                  opacity: 0.8,
+                                }}
+                              />
+                              <Text
+                                style={{
+                                  color: theme.ruleLockText,
+                                  minWidth: 64,
+                                }}
+                              >
+                                {ruledFieldName(effect.field)}
+                              </Text>
+                              <Text>
+                                {described
+                                  ? t('rule "{{description}}"', {
+                                      description: `${described.from} → ${described.to}`,
+                                    })
+                                  : t('a rule in this budget')}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                        <View style={{ gap: 6, marginTop: 4 }}>
+                          {/* One button per rule. Two rules can control
+                              two fields of the same row, and the button
+                              has to say WHICH one it opens: the fields
+                              above name the rule's identity on this row.
+                              The description is on the field's line, so
+                              the button just says what it does. */}
+                          {focusedRuleIds.map(ruleId => {
+                            const effect = focusedEffects.find(
+                              candidate => candidate.ruleId === ruleId,
+                            );
+                            return (
                               <Button
+                                key={ruleId}
+                                variant="bare"
                                 data-testid="import-review-edit-rule"
                                 data-field={effect?.field}
                                 onPress={() => openRuleEditor(ruleId)}
                               >
-                                {fieldLabel ? (
-                                  <Text style={{ color: theme.ruleLockText }}>
-                                    {fieldLabel}
-                                  </Text>
-                                ) : null}
                                 <Trans>Edit this rule</Trans>
-                                <KeyCap>Shift+E</KeyCap>
                               </Button>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  ) : null}
+                            );
+                          })}
+                        </View>
+                      </>
+                    ) : (
+                      <Text style={{ color: theme.pageTextSubdued }}>
+                        <Trans>No rule touched this row.</Trans>
+                      </Text>
+                    )}
+                  </View>
+                </View>
 
+                <View style={{ flexShrink: 0 }}>
+                  {/* The rule offer is a contextual ACTION: it rides
+                    along with a correction and never interrupts the
+                    accept rhythm. It stays beside the actions, out of
+                    the scroll. */}
                   {focusedRules &&
                   ((focusedRules.vendorToPayee &&
                     !focusedRuledFields.has('payee')) ||
@@ -2385,63 +2413,91 @@ export function KeyboardImportModal({
                     Every button says the key that does it, so the row is
                     driveable without reading the key list. */}
                 <View
-                  style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}
-                  data-testid="import-review-actions"
-                  // The click count: 1 for the first click of a
-                  // sequence, 2 for the second. The buttons use it to
-                  // swallow the second press of a double-click.
-                  // The CAPTURE phase, and that is not an accident: the
-                  // capture phase always runs before the button's own
-                  // handlers, and react-aria stops the pointer event's
-                  // propagation on the button — so a handler on the
-                  // bubble phase would never see the mousedown at all.
-                  onMouseDownCapture={event => {
-                    multiClick.current = event.detail > 1;
+                  style={{
+                    gap: 6,
+                    // The zones above are the scroll; these siblings must
+                    // never be the ones that get squeezed.
+                    flexShrink: 0,
+                    borderTop: `1px solid ${theme.tableBorder}`,
+                    paddingTop: 10,
                   }}
+                  data-testid="import-review-actions"
                 >
-                  <Button
-                    variant="bare"
-                    data-testid="import-review-edit-row"
-                    onPress={event => pressOnce(event, 'edit-chain')}
+                  <ZoneLabel>
+                    <Trans>Actions</Trans>
+                  </ZoneLabel>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                    }}
+                    // The click count: 1 for the first click of a
+                    // sequence, 2 for the second. The buttons use it to
+                    // swallow the second press of a double-click.
+                    // The CAPTURE phase, and that is not an accident: the
+                    // capture phase always runs before the button's own
+                    // handlers, and react-aria stops the pointer event's
+                    // propagation on the button — so a handler on the
+                    // bubble phase would never see the mousedown at all.
+                    onMouseDownCapture={event => {
+                      multiClick.current = event.detail > 1;
+                    }}
                   >
-                    {/* The CHAIN, not the payee alone: `e` walks the
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-edit-row"
+                      onPress={event => pressOnce(event, 'edit-chain')}
+                    >
+                      {/* The CHAIN, not the payee alone: `e` walks the
                         row's fields. The payee on its own is `p`, and
                         the single-field editors are `c`, `m` and `d` —
                         the help overlay lists them all. */}
-                    <Trans>Edit row</Trans>
-                    <KeyCap>e</KeyCap>
-                  </Button>
-                  <Button
-                    variant="bare"
-                    data-testid="import-review-accept"
-                    onPress={event => pressOnce(event, 'accept')}
-                  >
-                    <Trans>Accept</Trans>
-                    <KeyCap>a</KeyCap>
-                  </Button>
-                  <Button
-                    variant="bare"
-                    data-testid="import-review-drop"
-                    onPress={event => pressOnce(event, 'drop')}
-                  >
-                    <Trans>Drop</Trans>
-                    <KeyCap>r</KeyCap>
-                  </Button>
-                  {/* The override is for a row the gate is HOLDING.
+                      <Trans>Edit transaction</Trans>
+                      <KeyCap>e</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-accept"
+                      onPress={event => pressOnce(event, 'accept')}
+                    >
+                      <Trans>Accept</Trans>
+                      <KeyCap>a</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-drop"
+                      onPress={event => pressOnce(event, 'drop')}
+                    >
+                      <Trans>Drop</Trans>
+                      <KeyCap>r</KeyCap>
+                    </Button>
+                    {/* The override is for a row the gate is HOLDING.
                       `overridable` on its own is not that: it says the
                       row is not hard-blocked, which is true of almost
                       every row. A clean row would get a second accept
                       button that means nothing. */}
-                  {focusedEvaluation && isOverridableHeld(focusedEvaluation) ? (
+                    {focusedEvaluation &&
+                    isOverridableHeld(focusedEvaluation) ? (
+                      <Button
+                        variant="bare"
+                        data-testid="import-review-accept-anyway"
+                        onPress={event => pressOnce(event, 'accept-override')}
+                      >
+                        <Trans>Accept anyway</Trans>
+                        <KeyCap>Ctrl+Shift+A</KeyCap>
+                      </Button>
+                    ) : null}
                     <Button
                       variant="bare"
-                      data-testid="import-review-accept-anyway"
-                      onPress={event => pressOnce(event, 'accept-override')}
+                      data-testid="import-review-edit-rules"
+                      onPress={event => pressOnce(event, 'edit-rules')}
                     >
-                      <Trans>Accept anyway</Trans>
-                      <KeyCap>Ctrl+Shift+A</KeyCap>
+                      <Trans>Rules</Trans>
+                      <KeyCap>Shift+E</KeyCap>
                     </Button>
-                  ) : null}
+                  </View>
                 </View>
               </View>
             ) : null}

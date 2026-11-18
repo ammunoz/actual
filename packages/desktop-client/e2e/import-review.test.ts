@@ -2270,20 +2270,66 @@ ${transactions}
     const owned = dialog.getByTestId('import-review-ruled');
     await expect(owned).toBeVisible();
 
-    // It says WHICH field the rule owns, and what it set it to: the
-    // field and the value, so the user can see the rule's effect before
-    // it lands.
+    // It says WHICH field the rule owns, and quotes the rule itself: the
+    // field is the rule's identity on this row, and the quoted match → set
+    // pair says what the rule does.
     const field = owned.getByTestId('import-review-ruled-field');
     await expect(field).toHaveAttribute('data-field', 'category');
     await expect(field).toContainText('category');
-    await expect(field).toContainText('Food');
+    await expect(field).toContainText('rule "Demo Grocery Store → Food"');
 
-    // And the EDIT button says which rule it opens. Two rules can touch
-    // one row, and an anonymous button per rule would leave the user
-    // guessing which one they were about to change.
+    // And the EDIT button opens that rule. Two rules can touch one row,
+    // so the button carries the field it owns; the quoted description is
+    // on the field's line above it rather than repeated in the button.
     const edit = owned.getByTestId('import-review-edit-rule');
     await expect(edit).toHaveAttribute('data-field', 'category');
-    await expect(edit).toContainText('category');
+    await expect(edit).toContainText('Edit this rule');
+  });
+
+  test('the detail section never changes size as the rows change', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Fixed Detail',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    // The blocked file: the rows carry different amounts of evidence —
+    // one has a flag, one is held back, one is skipped — and none of
+    // them is ruled. The region must be the same size for all three.
+    await importBlockedOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    const details = dialog.getByTestId('import-review-details');
+    const heights: number[] = [];
+
+    for (let index = 0; index < 3; index++) {
+      if (index > 0) {
+        // The cursor is keyboard-driven; clicking a row does not move it.
+        await page.keyboard.press('j');
+      }
+      await expect(rows.nth(index)).toHaveAttribute('data-focused', 'true');
+
+      const box = await details.boundingBox();
+      expect(box).not.toBeNull();
+      heights.push(box!.height);
+
+      // All four zones are ALWAYS here. A row that is clean says so in
+      // the reason; a row no rule touched says so in the ownership; no
+      // zone vanishes and leaves a gap.
+      for (const zone of ['Evidence', 'Reason', 'Ownership', 'Actions']) {
+        await expect(details.getByText(zone, { exact: true })).toBeVisible();
+      }
+    }
+
+    // This is a comparison between measurements of the SAME element in
+    // different states, not an assertion about a pixel value.
+    expect(heights[1]).toBe(heights[0]);
+    expect(heights[2]).toBe(heights[0]);
   });
 
   test('the zones scroll, and the actions stay reachable', async () => {
