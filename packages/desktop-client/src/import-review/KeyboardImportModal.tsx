@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode, SVGProps } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PressEvent } from 'react-aria-components';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -45,7 +46,7 @@ import { useDispatch, useSelector } from '#redux';
 import { ConfirmPane } from './ConfirmPane';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
-import { hasOverridableHeldRow } from './held-rows';
+import { hasOverridableHeldRow, isOverridableHeld } from './held-rows';
 import { HelpOverlay } from './HelpOverlay';
 import { HintStrip } from './HintStrip';
 import { KeyCap } from './KeyCap';
@@ -60,13 +61,14 @@ import {
   visibleEffectsFor,
 } from './rule-effects';
 import type { RuledField, RuleEffect } from './rule-effects';
-import { RuledCell } from './RuledCell';
+import { RuledCell, useClearedByRuleLabel } from './RuledCell';
 import { rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
 import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
+import { ZoneLabel } from './ZoneLabel';
 
 export type KeyboardImportModalProps = {
   accountId: string;
@@ -699,6 +701,23 @@ export function KeyboardImportModal({
     accountNames.get(id) ?? t('Unknown account');
   const focused = rows[review.focusedIndex];
 
+  // The facts the EVIDENCE zone shows: the amount that will land, in
+  // full (the list's column can truncate it), and the category's group.
+  //
+  // The amount is the money format the rest of the review uses, so the
+  // detail section and the list's column say the same number the same
+  // way.
+  const focusedAmount = focused ? amountCell(focused) : undefined;
+  const clearedByRule = useClearedByRuleLabel();
+  const focusedAmountLabel = focusedAmount
+    ? focusedAmount.cleared
+      ? clearedByRule
+      : focusedAmount.amount.toFixed(2)
+    : undefined;
+  const focusedCategoryGroup = focused
+    ? categoryCell(focused).group
+    : undefined;
+
   const focusedEvaluation = focused
     ? review.evaluations.get(rowKey(focused))
     : undefined;
@@ -966,6 +985,12 @@ export function KeyboardImportModal({
     confirmClose();
   };
 
+  /**
+   * Do what an action does.
+   *
+   * The button in the ACTIONS zone and the key do the same thing, the
+   * cursor included: the mouse user is working through the queue too.
+   */
   const dispatch = (action: ReviewAction) => {
     // A notice belongs to the thing that was refused. It does not
     // survive into the next thing the user does — a refusal about one
@@ -1139,6 +1164,42 @@ export function KeyboardImportModal({
         break;
       }
     }
+  };
+
+  // Whether the press that is about to happen is the SECOND of a
+  // double-click.
+  //
+  // A double-click would accept the row the cursor moved to as well:
+  // the first press accepts the row and the cursor moves on, and the
+  // second press lands on the same button — which now acts on the NEXT
+  // row.
+  //
+  // The mouse's own click count says a press is the second of a pair,
+  // and the second press is swallowed. A keyboard's double-Enter is
+  // NOT swallowed: two Enters in a row is the keyboard user accepting
+  // two rows, which is what the queue is for.
+  const multiClick = useRef(false);
+
+  /**
+   * Do what a button in the ACTIONS zone does, once.
+   */
+  const pressOnce = (event: PressEvent, action: ReviewAction) => {
+    const isSecondOfAPair = multiClick.current;
+    // The flag is consumed either way, so a press that did not come
+    // from the mouse cannot inherit it.
+    multiClick.current = false;
+    // A MOUSE is what a double-click is. A keyboard's double-Enter is
+    // not swallowed: two Enters in a row is the keyboard user accepting
+    // two rows, which is what the queue is for. And a touch is not
+    // swallowed either: the flag can only be set by a mousedown, and a
+    // touch screen has no reason to have set it.
+    if (
+      isSecondOfAPair &&
+      (event.pointerType === 'mouse' || event.pointerType === 'pen')
+    ) {
+      return;
+    }
+    dispatch(action);
   };
 
   // One binding for the whole keymap. `react-hotkeys-hook` reports the
@@ -1692,14 +1753,20 @@ export function KeyboardImportModal({
                           ruled: amountCellValue.ruled,
                           children: amountCellValue.ruled ? (
                             <RuledCell
-                              label={String(amountCellValue.amount)}
+                              label={amountCellValue.amount.toFixed(2)}
                               cleared={amountCellValue.cleared}
-                              title={String(amountCellValue.amount)}
+                              // A CLEARED field has no amount, so it has
+                              // no amount to put in the tooltip.
+                              title={
+                                amountCellValue.cleared
+                                  ? undefined
+                                  : amountCellValue.amount.toFixed(2)
+                              }
                               align="right"
                             />
                           ) : (
                             <FinancialText
-                              title={String(amountCellValue.amount)}
+                              title={amountCellValue.amount.toFixed(2)}
                               style={{
                                 textAlign: 'right',
                                 // A wide amount would otherwise paint
@@ -1711,7 +1778,7 @@ export function KeyboardImportModal({
                                 overflow: 'hidden',
                               }}
                             >
-                              {amountCellValue.amount}
+                              {amountCellValue.amount.toFixed(2)}
                             </FinancialText>
                           ),
                         }}
@@ -1728,197 +1795,316 @@ export function KeyboardImportModal({
             </View>
 
             {focused ? (
-              <View style={{ gap: 4 }} data-testid="import-review-details">
-                {focusedEvaluation && focusedEvaluation.flags.length > 0 ? (
-                  <>
-                    <Text>
-                      {focusedEvaluation.flags
-                        .map(flag => flagReason(flag.kind))
-                        .join(' · ')}
-                    </Text>
-                    <Text style={styles.tnum}>
-                      {focusedEvaluation.flags
-                        .map(flag => flag.code)
-                        .join(' · ')}
-                    </Text>
-                    {focusedEvaluation.held ? (
-                      <Text style={{ color: theme.errorText }}>
-                        {focusedEvaluation.overridable
-                          ? t(
-                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
-                            )
-                          : t(
-                              'Held back: this row cannot be imported until its date or amount is fixed.',
-                            )}
+              <View
+                style={{ gap: 12, maxHeight: 260 }}
+                data-testid="import-review-details"
+              >
+                {/* The zones scroll; the ACTIONS stay put, because the
+                    actions are what the user came for. */}
+                <View
+                  style={{ gap: 12, flex: 1, overflowY: 'auto' }}
+                  data-testid="import-review-zones"
+                >
+                  {/* ZONE 1 — EVIDENCE: the facts about this row.
+
+                      The list carries the date, the payee, the category
+                      and the amount for the row the user is on. What it
+                      does not carry is the file's own vendor string, the
+                      notes, the amount in full and the category's group
+                      — and those are exactly the things that get
+                      truncated or left out. */}
+                  <View style={{ gap: 4 }} data-testid="import-review-evidence">
+                    <ZoneLabel>
+                      <Trans>Evidence</Trans>
+                    </ZoneLabel>
+                    {focused.payeeRaw ? (
+                      <Text data-testid="import-review-vendor">
+                        <Trans>Vendor</Trans>: {focused.payeeRaw}
                       </Text>
                     ) : null}
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {TRUST_LEVELS.map(level => {
-                        const gate = gateRow(focused, level, {
-                          livePayeeNames,
-                        });
-                        const label =
-                          gate === 'block'
-                            ? t('Blocked')
-                            : gate === 'skip'
-                              ? t('Skipped')
-                              : gate === 'warn'
-                                ? t('Flagged')
-                                : t('Allowed');
-                        const isCurrent = level === review.trustLevel;
-                        return (
-                          <Text
-                            key={level}
-                            style={
-                              isCurrent ? { fontWeight: 'bold' } : undefined
-                            }
-                          >
-                            {trustLevelLabel(level)}: {label}
-                          </Text>
-                        );
-                      })}
-                    </View>
-                  </>
-                ) : null}
-
-                {focused && review.isAlreadyImported(rowKey(focused)) ? (
-                  <Text data-testid="import-review-already-imported">
-                    <Trans>This transaction is already in the budget</Trans>
-                  </Text>
-                ) : null}
-
-                {/* The file's raw vendor string.
-                    It is not in the list: it is long, and it is evidence
-                    rather than a fact about the row. Here it is in full,
-                    for the row the user is on. */}
-                {focused && focused.payeeRaw ? (
-                  <Text data-testid="import-review-vendor">
-                    <Trans>Vendor</Trans>: {focused.payeeRaw}
-                  </Text>
-                ) : null}
-
-                {focusedMemo ? (
-                  <Text data-testid="import-review-notes">
-                    <Trans>Notes</Trans>: {focusedMemo}
-                  </Text>
-                ) : null}
-
-                {focusedEffects.length > 0 ? (
-                  <View style={{ gap: 4 }} data-testid="import-review-ruled">
-                    {focusedEffects.map(effect => (
-                      <Text
-                        key={effect.field}
-                        data-testid="import-review-ruled-field"
-                        data-field={effect.field}
-                        style={{ color: theme.noteTagText }}
-                      >
-                        {t('A rule sets the {{field}} to {{value}}.', {
-                          field: ruledFieldName(effect.field),
-                          value: ruledValueLabel(effect),
-                        })}
+                    <Text
+                      data-testid="import-review-amount"
+                      style={styles.tnum}
+                    >
+                      <Trans>Amount</Trans>: {focusedAmountLabel}
+                    </Text>
+                    {focusedCategoryGroup ? (
+                      <Text data-testid="import-review-category-group">
+                        <Trans>Group</Trans>: {focusedCategoryGroup}
                       </Text>
-                    ))}
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      {/* One button per rule. Two rules can control two
-                          fields of the same row, and the button has to
-                          open the rule the user means. */}
-                      {focusedRuleIds.map(ruleId => (
-                        <Button
-                          key={ruleId}
-                          data-testid="import-review-edit-rule"
-                          onPress={() => {
-                            const rule = review.rules.find(
-                              candidate => candidate.id === ruleId,
-                            );
-                            // The rule is not in the budget's list — it
-                            // was made on another device, or the list is
-                            // stale. There is nothing to open.
-                            if (!rule) {
-                              setNotice(
-                                t('That rule is not in this budget any more.'),
+                    ) : null}
+                    {focusedMemo ? (
+                      <Text data-testid="import-review-notes">
+                        <Trans>Notes</Trans>: {focusedMemo}
+                      </Text>
+                    ) : null}
+                    {review.isAlreadyImported(rowKey(focused)) ? (
+                      <Text data-testid="import-review-already-imported">
+                        <Trans>This transaction is already in the budget</Trans>
+                      </Text>
+                    ) : null}
+                  </View>
+
+                  {/* ZONE 2 — REASON: why the gate is doing what it is
+                      doing with this row.
+
+                      The plain sentence first, then the outcome at each
+                      trust level, then the machine code — which is
+                      useful when something goes wrong and is not a
+                      headline. */}
+                  {focusedEvaluation?.flags.length ? (
+                    <View style={{ gap: 4 }} data-testid="import-review-reason">
+                      <ZoneLabel>
+                        <Trans>Reason</Trans>
+                      </ZoneLabel>
+                      <Text>
+                        {focusedEvaluation.flags
+                          .map(flag => flagReason(flag.kind))
+                          .join(' · ')}
+                      </Text>
+                      {focusedEvaluation.held ? (
+                        <Text style={{ color: theme.errorText }}>
+                          {focusedEvaluation.overridable
+                            ? t(
+                                'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
+                              )
+                            : t(
+                                'Held back: this row cannot be imported until its date or amount is fixed.',
+                              )}
+                        </Text>
+                      ) : null}
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        {TRUST_LEVELS.map(level => {
+                          const gate = gateRow(focused, level, {
+                            livePayeeNames,
+                          });
+                          const label =
+                            gate === 'block'
+                              ? t('Blocked')
+                              : gate === 'skip'
+                                ? t('Skipped')
+                                : gate === 'warn'
+                                  ? t('Flagged')
+                                  : t('Allowed');
+                          const isCurrent = level === review.trustLevel;
+                          return (
+                            <Text
+                              key={level}
+                              style={
+                                isCurrent ? { fontWeight: 'bold' } : undefined
+                              }
+                            >
+                              {trustLevelLabel(level)}: {label}
+                            </Text>
+                          );
+                        })}
+                      </View>
+                      <Text
+                        data-testid="import-review-flag-codes"
+                        style={{
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: theme.pageTextSubdued,
+                          border: `1px solid ${theme.tableBorder}`,
+                          borderRadius: 3,
+                          padding: '0 4px',
+                          alignSelf: 'flex-start',
+                        }}
+                      >
+                        {focusedEvaluation.flags
+                          .map(flag => flag.code)
+                          .join(' · ')}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {/* ZONE 3 — OWNERSHIP: what the rules did to this row.
+
+                      The field a rule owns is the rule's identity on this
+                      row: two rules can touch one row, and each of them
+                      has to be openable in its own right. */}
+                  {focusedEffects.length > 0 ? (
+                    <View style={{ gap: 4 }} data-testid="import-review-ruled">
+                      <ZoneLabel>
+                        <Trans>Ownership</Trans>
+                      </ZoneLabel>
+                      {focusedEffects.map(effect => (
+                        <Text
+                          key={effect.field}
+                          data-testid="import-review-ruled-field"
+                          data-field={effect.field}
+                          style={{ color: theme.ruleLockText }}
+                        >
+                          {t('A rule sets the {{field}} to {{value}}.', {
+                            field: ruledFieldName(effect.field),
+                            value: ruledValueLabel(effect),
+                          })}
+                        </Text>
+                      ))}
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        {/* One button per rule. Two rules can control two
+                            fields of the same row, and the button has to
+                            open the rule the user means. */}
+                        {focusedRuleIds.map(ruleId => (
+                          <Button
+                            key={ruleId}
+                            data-testid="import-review-edit-rule"
+                            onPress={() => {
+                              const rule = review.rules.find(
+                                candidate => candidate.id === ruleId,
                               );
-                              return;
-                            }
-                            dispatchModal(
-                              pushModal({
-                                modal: {
-                                  name: 'edit-rule',
-                                  options: {
-                                    rule,
-                                    // The rule is saved in upstream's own
-                                    // editor. When it lands, the review
-                                    // asks the engine again, so the row
-                                    // shows the rule's NEW effect.
-                                    onSave: async () => {
-                                      await review.refreshRuleEffects();
+                              // The rule is not in the budget's list — it
+                              // was made on another device, or the list is
+                              // stale. There is nothing to open.
+                              if (!rule) {
+                                setNotice(
+                                  t(
+                                    'That rule is not in this budget any more.',
+                                  ),
+                                );
+                                return;
+                              }
+                              dispatchModal(
+                                pushModal({
+                                  modal: {
+                                    name: 'edit-rule',
+                                    options: {
+                                      rule,
+                                      // The rule is saved in upstream's own
+                                      // editor. When it lands, the review
+                                      // asks the engine again, so the row
+                                      // shows the rule's NEW effect.
+                                      onSave: async () => {
+                                        await review.refreshRuleEffects();
+                                      },
                                     },
                                   },
-                                },
-                              }),
-                            );
-                          }}
-                        >
-                          <Trans>Edit this rule</Trans>
-                        </Button>
-                      ))}
+                                }),
+                              );
+                            }}
+                          >
+                            <Trans>Edit this rule</Trans>
+                          </Button>
+                        ))}
+                      </View>
                     </View>
-                  </View>
-                ) : null}
+                  ) : null}
 
-                {focusedRules &&
-                ((focusedRules.vendorToPayee &&
-                  !focusedRuledFields.has('payee')) ||
-                  (focusedRules.payeeToCategory &&
-                    !focusedRuledFields.has('category'))) ? (
-                  <>
-                    <View
-                      style={{ flexDirection: 'row', gap: 8 }}
-                      data-testid="import-review-rules"
-                    >
-                      {focusedRules.vendorToPayee &&
-                      !focusedRuledFields.has('payee') ? (
-                        <Button
-                          data-testid="import-review-rule-vendor-to-payee"
-                          isDisabled={creatingRule}
-                          onPress={() => {
-                            void createRule(
-                              focusedRules.vendorToPayee,
-                              t(
-                                'Rule created. This vendor will always use this payee, from now on.',
-                              ),
-                            );
-                          }}
-                        >
-                          <Trans>Always this payee for this vendor</Trans>
-                        </Button>
-                      ) : null}
-                      {focusedRules.payeeToCategory &&
-                      !focusedRuledFields.has('category') ? (
-                        <Button
-                          data-testid="import-review-rule-payee-to-category"
-                          isDisabled={creatingRule}
-                          onPress={() => {
-                            void createRule(
-                              focusedRules.payeeToCategory,
-                              t(
-                                'Rule created. This payee will always use this category, from now on.',
-                              ),
-                            );
-                          }}
-                        >
-                          <Trans>Always this category for this payee</Trans>
-                        </Button>
-                      ) : null}
+                  {focusedRules &&
+                  ((focusedRules.vendorToPayee &&
+                    !focusedRuledFields.has('payee')) ||
+                    (focusedRules.payeeToCategory &&
+                      !focusedRuledFields.has('category'))) ? (
+                    <View style={{ gap: 4 }}>
+                      <View
+                        style={{ flexDirection: 'row', gap: 8 }}
+                        data-testid="import-review-rules"
+                      >
+                        {focusedRules.vendorToPayee &&
+                        !focusedRuledFields.has('payee') ? (
+                          <Button
+                            data-testid="import-review-rule-vendor-to-payee"
+                            isDisabled={creatingRule}
+                            onPress={() => {
+                              void createRule(
+                                focusedRules.vendorToPayee,
+                                t(
+                                  'Rule created. This vendor will always use this payee, from now on.',
+                                ),
+                              );
+                            }}
+                          >
+                            <Trans>Always this payee for this vendor</Trans>
+                          </Button>
+                        ) : null}
+                        {focusedRules.payeeToCategory &&
+                        !focusedRuledFields.has('category') ? (
+                          <Button
+                            data-testid="import-review-rule-payee-to-category"
+                            isDisabled={creatingRule}
+                            onPress={() => {
+                              void createRule(
+                                focusedRules.payeeToCategory,
+                                t(
+                                  'Rule created. This payee will always use this category, from now on.',
+                                ),
+                              );
+                            }}
+                          >
+                            <Trans>Always this category for this payee</Trans>
+                          </Button>
+                        ) : null}
+                      </View>
+                      <Text data-testid="import-review-rules-note">
+                        <Trans>
+                          A rule applies to every transaction with that vendor,
+                          from now on. It does not change the transactions you
+                          already have.
+                        </Trans>
+                      </Text>
                     </View>
-                    <Text data-testid="import-review-rules-note">
-                      <Trans>
-                        A rule applies to every transaction with that vendor,
-                        from now on. It does not change the transactions you
-                        already have.
-                      </Trans>
-                    </Text>
-                  </>
-                ) : null}
+                  ) : null}
+                </View>
+
+                {/* ZONE 4 — ACTIONS: what the user can do with this row.
+
+                    Every button says the key that does it, so the row is
+                    driveable without reading the key list. */}
+                <View
+                  style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}
+                  data-testid="import-review-actions"
+                  // The click count: 1 for the first click of a
+                  // sequence, 2 for the second. The buttons use it to
+                  // swallow the second press of a double-click.
+                  // The CAPTURE phase, and that is not an accident: the
+                  // capture phase always runs before the button's own
+                  // handlers, and react-aria stops the pointer event's
+                  // propagation on the button — so a handler on the
+                  // bubble phase would never see the mousedown at all.
+                  onMouseDownCapture={event => {
+                    multiClick.current = event.detail > 1;
+                  }}
+                >
+                  <Button
+                    variant="bare"
+                    data-testid="import-review-edit-payee"
+                    onPress={event => pressOnce(event, 'edit-payee')}
+                  >
+                    <Trans>Edit payee</Trans>
+                    <KeyCap>e</KeyCap>
+                  </Button>
+                  <Button
+                    variant="bare"
+                    data-testid="import-review-accept"
+                    onPress={event => pressOnce(event, 'accept')}
+                  >
+                    <Trans>Accept</Trans>
+                    <KeyCap>a</KeyCap>
+                  </Button>
+                  <Button
+                    variant="bare"
+                    data-testid="import-review-drop"
+                    onPress={event => pressOnce(event, 'drop')}
+                  >
+                    <Trans>Drop</Trans>
+                    <KeyCap>r</KeyCap>
+                  </Button>
+                  {/* The override is for a row the gate is HOLDING.
+                      `overridable` on its own is not that: it says the
+                      row is not hard-blocked, which is true of almost
+                      every row. A clean row would get a second accept
+                      button that means nothing. */}
+                  {focusedEvaluation && isOverridableHeld(focusedEvaluation) ? (
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-accept-anyway"
+                      onPress={event => pressOnce(event, 'accept-override')}
+                    >
+                      <Trans>Accept anyway</Trans>
+                      <KeyCap>Ctrl+Shift+A</KeyCap>
+                    </Button>
+                  ) : null}
+                </View>
               </View>
             ) : null}
 

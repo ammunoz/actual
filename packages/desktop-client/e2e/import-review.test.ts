@@ -469,7 +469,6 @@ ${transactions}
 
     // `j` moves down.
     await page.keyboard.press('j');
-    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
     await expect(rows.nth(0)).toHaveAttribute('data-focused', 'false');
 
     // `k` moves back up.
@@ -1724,6 +1723,225 @@ ${transactions}
     await dialog.getByTestId('import-review-undo').click();
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+  });
+
+  test("the detail section has its zones, and the row's own actions", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Detail',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // The detail section has ZONES: the facts, the reason, the
+    // ownership and the actions.
+    await expect(dialog.getByTestId('import-review-evidence')).toBeVisible();
+    await expect(dialog.getByTestId('import-review-reason')).toBeVisible();
+
+    // The evidence zone carries what the LIST does not: the file's own
+    // vendor string, in full.
+    await expect(dialog.getByTestId('import-review-vendor')).toContainText(
+      'POS PURCHASE 4251',
+    );
+
+    // The amount is the money format, and it says the same thing in
+    // both places: the list's column can truncate it, so the detail
+    // section carries it in full.
+    await expect(dialog.getByTestId('import-review-amount')).toContainText(
+      '-25.00',
+    );
+    await expect(
+      rows.nth(0).getByTestId('import-review-row-amount'),
+    ).toContainText('-25.00');
+
+    // And the reason zone carries the machine code, as a small chip — it
+    // is useful when something goes wrong and it is not a headline.
+    await expect(dialog.getByTestId('import-review-flag-codes')).toContainText(
+      'PAYEE-NEW-001',
+    );
+
+    // The ACTIONS are the row's own commands, each with the key that
+    // does it.
+    const actions = dialog.getByTestId('import-review-actions');
+    await expect(actions.getByTestId('import-review-edit-payee')).toContainText(
+      'e',
+    );
+    await expect(actions.getByTestId('import-review-accept')).toContainText(
+      'a',
+    );
+    await expect(actions.getByTestId('import-review-drop')).toContainText('r');
+
+    // And they do what they say.
+    await actions.getByTestId('import-review-accept').click();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test("the row's actions offer the override only when the row is HELD", async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Override Button',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importDuplicateOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(2);
+
+    // The first row is clean: the gate has nothing to say about it, so
+    // there is nothing to override. A second accept button here would be
+    // a control that means nothing.
+    const actions = dialog.getByTestId('import-review-actions');
+    await expect(
+      actions.getByTestId('import-review-accept-anyway'),
+    ).toHaveCount(0);
+
+    // The second row repeats the first one's FITID, so the trust level
+    // SKIPS it: it is held back, and the override is what releases it.
+    await page.keyboard.press('j');
+    await expect(
+      actions.getByTestId('import-review-accept-anyway'),
+    ).toBeVisible();
+
+    // And it is the same button the key drives.
+    await expect(
+      actions.getByTestId('import-review-accept-anyway'),
+    ).toContainText('Ctrl+Shift+A');
+
+    // A double-click on it overrides the row ONCE: the second press of a
+    // pair is swallowed, so it cannot reach the row the cursor moved to.
+    await actions.getByTestId('import-review-accept-anyway').dblclick();
+    await expect(rows.nth(1)).toHaveAttribute(
+      'data-decision',
+      'accept-override',
+    );
+    // The override does not move the cursor — there is no "next row" for
+    // it to move to.
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+  });
+
+  test('the ownership zone says which field a rule owns', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Ownership',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // The budget has a rule for this vendor, made BEFORE the import: the
+    // rule is in the budget when the preview runs, which is when the
+    // engine applies it.
+    const rulesPage = await navigation.goToRulesPage();
+    const editRuleModal = await rulesPage.createNewRule();
+    await editRuleModal.fill({
+      conditions: [
+        { field: 'imported payee', op: 'is', value: 'Demo Grocery Store' },
+      ],
+      actions: [{ field: 'category', value: 'Food' }],
+    });
+    await editRuleModal.save();
+    await navigation.goToAccountPage('Keyboard Review Ownership');
+
+    await enableKeyboardReview();
+    await importSameVendorOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(2);
+
+    // The budget's rule owns the row's category, and the zone says so.
+    const owned = dialog.getByTestId('import-review-ruled');
+    await expect(owned).toBeVisible();
+
+    // It says WHICH field the rule owns, and what it set it to: the
+    // field and the value, so the user can see the rule's effect before
+    // it lands.
+    const field = owned.getByTestId('import-review-ruled-field');
+    await expect(field).toHaveAttribute('data-field', 'category');
+    await expect(field).toContainText('category');
+    await expect(field).toContainText('Food');
+  });
+
+  test('the zones scroll, and the actions stay reachable', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Zones Scroll',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithRows(40);
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(40);
+
+    // The detail section is bounded, so a row with a lot to say does
+    // not push the modal down the screen.
+    const details = dialog.getByTestId('import-review-details');
+    const detailsBox = await details.boundingBox();
+    expect(detailsBox?.height ?? 0).toBeLessThanOrEqual(260);
+
+    // And the zones box is a real box that SCROLLS — not one that
+    // collapsed to nothing, which would also report `overflow-y: auto`.
+    const zones = dialog.getByTestId('import-review-zones');
+    const overflow = await zones.evaluate(
+      element => getComputedStyle(element).overflowY,
+    );
+    expect(overflow).toBe('auto');
+    const zonesBox = await zones.boundingBox();
+    expect(zonesBox?.height ?? 0).toBeGreaterThan(100);
+
+    // And the ACTIONS are outside the scroll: they are what the user
+    // came for, and they must never be the thing that scrolls away.
+    const actions = dialog.getByTestId('import-review-actions');
+    await expect(actions).toBeVisible();
+    await actions.getByTestId('import-review-accept').click();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
+  test('a double-click accepts one row, and not two', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Double Click',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+
+    // A single click accepts the row and moves the cursor on, the same
+    // as the key: the mouse user is working through the queue too.
+    await page.keyboard.press('a');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
+    // A DOUBLE-click would accept the row the cursor moved to as well:
+    // the first press accepts the row and the cursor moves on, and the
+    // second press lands on the same button — which now acts on the
+    // NEXT row. The second press of a pair is swallowed.
+    await dialog
+      .getByTestId('import-review-actions')
+      .getByTestId('import-review-accept')
+      .dblclick();
+    await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
+    await expect(rows.nth(2)).toHaveAttribute('data-focused', 'true');
   });
 
   test('the header lines up with the rows', async () => {

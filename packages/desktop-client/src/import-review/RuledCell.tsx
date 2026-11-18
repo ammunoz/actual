@@ -6,6 +6,17 @@ import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
 /**
+ * What a ruled field says when the rule CLEARED it.
+ *
+ * One string for one fact: the cell in the list and the detail section
+ * both say it, so they cannot drift apart.
+ */
+export function useClearedByRuleLabel(): string {
+  const { t } = useTranslation();
+  return t('Cleared by rule');
+}
+
+/**
  * A field a budget rule controls.
  *
  * The review shows the rule's value and says it is not the user's to
@@ -47,7 +58,7 @@ export function RuledCell({
   title,
   align = 'left',
 }: RuledCellProps) {
-  const { t } = useTranslation();
+  const clearedLabel = useClearedByRuleLabel();
 
   return (
     <View
@@ -95,7 +106,7 @@ export function RuledCell({
           fontStyle: cleared ? 'italic' : undefined,
         }}
       >
-        {cleared ? t('Cleared by rule') : label}
+        {cleared ? clearedLabel : label}
       </TextOneLine>
     </View>
   );
