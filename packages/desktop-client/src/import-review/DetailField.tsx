@@ -23,7 +23,7 @@ export type DetailFieldProps = {
 };
 
 /**
- * One fact in the detail section's Evidence zone.
+ * One fact in the detail section's Transaction zone.
  *
  * The label sits in a fixed-width column and the value starts after it, so
  * a person can scan the names on the left and read the facts on the right.

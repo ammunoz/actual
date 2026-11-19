@@ -2191,14 +2191,14 @@ ${transactions}
 
     // The detail section has ZONES: the facts, the reason, the
     // ownership and the actions.
-    await expect(dialog.getByTestId('import-review-evidence')).toBeVisible();
-    await expect(dialog.getByTestId('import-review-reason')).toBeVisible();
+    await expect(dialog.getByTestId('import-review-transaction')).toBeVisible();
+    await expect(dialog.getByTestId('import-review-verdict')).toBeVisible();
 
     // The mockup's Evidence zone is six fields, each name in a fixed-width
     // column. A `Label: value` line has no column at all, so the test reads
     // the six labels' widths and requires them to be EQUAL — a comparison
     // between measured elements, not an assertion about a pixel.
-    const evidence = dialog.getByTestId('import-review-evidence');
+    const transaction = dialog.getByTestId('import-review-transaction');
     const fieldIds = [
       'import-review-vendor',
       'import-review-date',
@@ -2209,9 +2209,9 @@ ${transactions}
     ];
     const labelWidths: number[] = [];
     for (const id of fieldIds) {
-      const field = evidence.getByTestId(id);
+      const field = transaction.getByTestId(id);
       await expect(field).toBeVisible();
-      const label = evidence.getByTestId(`${id}-label`);
+      const label = transaction.getByTestId(`${id}-label`);
       await expect(label).toBeVisible();
       labelWidths.push(
         await label.evaluate(node => node.getBoundingClientRect().width),
@@ -2223,7 +2223,7 @@ ${transactions}
     // A flex child of this column can collapse to nothing and let the
     // next line paint over it. Each field must sit BELOW the one before
     // it — a comparison of measured boxes, not a pixel assertion.
-    const rowBoxes = await evidence.evaluate(
+    const rowBoxes = await transaction.evaluate(
       (root, ids) =>
         ids.map(id => {
           const rect = root
@@ -2392,7 +2392,7 @@ ${transactions}
     await expect(rows).toHaveCount(2);
 
     // The budget's rule owns the row's category, and the zone says so.
-    const owned = dialog.getByTestId('import-review-ruled');
+    const owned = dialog.getByTestId('import-review-rules-zone');
     await expect(owned).toBeVisible();
 
     // The label counts the rules, the way the mockup writes "Ownership —
@@ -2438,7 +2438,7 @@ ${transactions}
     await importOfx();
 
     const dialog = page.getByRole('dialog');
-    const reason = dialog.getByTestId('import-review-reason');
+    const reason = dialog.getByTestId('import-review-verdict');
     await expect(reason).toBeVisible();
 
     // The mockup says what the gate saw, then the outcome AT THE CURRENT
@@ -2512,9 +2512,9 @@ ${transactions}
       // the reason; a row no rule touched says so in the ownership; no
       // zone vanishes and leaves a gap.
       const zones = [
-        ['Evidence', 'import-review-evidence'],
-        ['Reason', 'import-review-reason'],
-        ['Ownership', 'import-review-ruled'],
+        ['Transaction', 'import-review-transaction'],
+        ['Reason', 'import-review-verdict'],
+        ['Ownership', 'import-review-rules-zone'],
         ['Actions', 'import-review-actions'],
       ] as const;
       for (const [name, testId] of zones) {

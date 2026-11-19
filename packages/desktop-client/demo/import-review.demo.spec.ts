@@ -176,7 +176,7 @@ test('records the keyboard import review, from the command bar to the budget', a
     // ------------------------------------------------------------------
     await page.keyboard.press('j');
     await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
-    await expect(dialog.getByTestId('import-review-reason')).toContainText(
+    await expect(dialog.getByTestId('import-review-verdict')).toContainText(
       'trust level',
     );
     await beat(1900);

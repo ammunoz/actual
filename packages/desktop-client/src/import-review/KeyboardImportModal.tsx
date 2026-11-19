@@ -88,7 +88,7 @@ import { SplitPane } from './SplitPane';
 import { StatusChip } from './StatusChip';
 import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
-import { ZoneLabel } from './ZoneLabel';
+import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
 
 export type KeyboardImportModalProps = {
   accountId: string;
@@ -2220,7 +2220,7 @@ export function KeyboardImportModal({
                   style={{ gap: 6, flex: 1, overflowY: 'auto', padding: 8 }}
                   data-testid="import-review-zones"
                 >
-                  {/* ZONE 1 — EVIDENCE: the facts about this row.
+                  {/* ZONE 1 — TRANSACTION: the facts about this row.
 
                       The list carries the date, the payee, the category
                       and the amount for the row the user is on. What it
@@ -2229,19 +2229,23 @@ export function KeyboardImportModal({
                       — and those are exactly the things that get
                       truncated or left out.
 
-                      The group is here rather than in the list because
-                      it is evidence, not a thing to scan: it only
-                      matters when two categories share a name, and it
-                      matters for the row the user is ON. */}
+                      The fields are split by WHERE they come from: the
+                      bank's facts first, then what will land in the
+                      budget. The group is here rather than in the list
+                      because it only matters when two categories share
+                      a name, and it matters for the row the user is ON. */}
                   <View
                     style={{ gap: 2, flexShrink: 0 }}
-                    data-testid="import-review-evidence"
+                    data-testid="import-review-transaction"
                   >
                     <ZoneLabel>
-                      <Trans>Evidence</Trans>
+                      <Trans>Transaction</Trans>
                     </ZoneLabel>
+                    <ZoneSubhead>
+                      <Trans>From the bank</Trans>
+                    </ZoneSubhead>
                     <DetailField
-                      label={<Trans>Vendor</Trans>}
+                      label={<Trans>Description</Trans>}
                       testId="import-review-vendor"
                     >
                       {focused.payeeRaw?.trim() || '—'}
@@ -2264,6 +2268,9 @@ export function KeyboardImportModal({
                     >
                       {focusedAmountLabel}
                     </DetailField>
+                    <ZoneSubhead>
+                      <Trans>In your budget</Trans>
+                    </ZoneSubhead>
                     <DetailField
                       label={<Trans>Payee</Trans>}
                       testId="import-review-payee"
@@ -2321,7 +2328,7 @@ export function KeyboardImportModal({
                       borderTop: `1px solid ${theme.tableBorder}`,
                       paddingTop: 8,
                     }}
-                    data-testid="import-review-reason"
+                    data-testid="import-review-verdict"
                   >
                     <ZoneLabel>
                       <Trans>Reason</Trans>
@@ -2469,7 +2476,7 @@ export function KeyboardImportModal({
                       borderTop: `1px solid ${theme.tableBorder}`,
                       paddingTop: 8,
                     }}
-                    data-testid="import-review-ruled"
+                    data-testid="import-review-rules-zone"
                   >
                     <ZoneLabel>
                       {/* The number is `ruleCount`, not `count`: i18next
