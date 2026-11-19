@@ -32,8 +32,9 @@ export type DetailFieldProps = {
  * A `Label: value` line does neither: the eye has to find each colon and
  * the values never line up.
  *
- * The width and the alignment are the mockup's — a 72px label column — and
- * the colours are the app's own tokens, so the field reads in every theme.
+ * The width and the alignment are the mockup's — an 84px label column with
+ * a 10px gap — and the colours are the app's own tokens, so the field reads
+ * in every theme.
  */
 export function DetailField({
   label,
@@ -49,7 +50,7 @@ export function DetailField({
         // flex column would otherwise shrink into the field below it.
         flexShrink: 0,
         flexDirection: 'row',
-        gap: 6,
+        gap: 10,
         alignItems: 'baseline',
       }}
       data-testid={testId}
@@ -59,8 +60,11 @@ export function DetailField({
         style={{
           color: theme.tableHeaderText,
           fontWeight: 400,
-          flex: '0 0 72px',
-          minWidth: 72,
+          // 84px fits the longest name ("Description" measures 74px at
+          // 13px) with room to spare. At 72px it overran the column and
+          // left only a 4px visual gap before the value.
+          flex: '0 0 84px',
+          minWidth: 84,
         }}
       >
         {label}

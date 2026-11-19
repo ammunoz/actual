@@ -23,7 +23,7 @@ export type OwnershipRowProps = {
  * One field owned by a rule, in the detail section's Rules zone.
  *
  * The field is the rule's identity on this row: two rules can touch one
- * row, and each needs its own line. The name sits in the same 72px column
+ * row, and each needs its own line. The name sits in the same 84px column
  * the Transaction zone uses, in the rule's own blue, with the glyph inside
  * that column the way the mockup draws it. The description names the rule
  * in a single translated sentence, so locales can order it as they need.
@@ -49,8 +49,9 @@ export function OwnershipRow({
       <View
         style={{
           color: theme.ruleLockText,
-          minWidth: 72,
-          flex: '0 0 72px',
+          // The same 84px column the detail fields use.
+          minWidth: 84,
+          flex: '0 0 84px',
           flexDirection: 'row',
           alignItems: 'center',
           gap: 4,
