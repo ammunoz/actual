@@ -25,7 +25,9 @@ To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key
 
 When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
 
-The list shows each row's date, payee, category, amount and status. The detail section below it is about the row you are on. Its Evidence zone lines up the vendor string from the file with the date, amount, payee, category and notes. Reason says what the gate saw and what it will do at the trust level you chose; when the row is flagged, a **Why?** link shows what each trust level would do. Ownership names the fields any rules set, and Actions holds the row's commands, each with its key. The detail section does not change size as you move between rows.
+The list shows each row's date, payee, category, amount and status. A caption above the columns names the account the rows will land in. Above the list, the status line shows how far through the file you are, how many rows will import, and the inflow and outflow totals.
+
+The detail section below the list is about the row you are on, and is split into two columns. **Transaction** shows the file's own details and what will land in your budget, grouped under **From the bank** and **In your budget**. The date is spelled out in full, and the amount shows your budget's currency. **Review status** leads with the gate's decision at the trust level you chose, then explains why; when the row is flagged, a **Why?** link shows what each trust level would do. **Rules** names the fields any rules set, and reveals the rest when more than two are set. **Actions** holds the row's commands, each with its key, and stays in place while the two columns scroll. The detail section does not change size as you move between rows.
 
 <img width="800" loading="lazy" alt="The keyboard import review: the file's rows with their status, a row being edited field by field, a rule being created, and the imported transactions landing in the budget" src="/img/transactions/importing-keyboard-review.gif" />
 
