@@ -62,6 +62,7 @@ import {
   TRUST_LEVELS,
 } from './keymap';
 import type { ReviewAction } from './keymap';
+import { OwnershipRow } from './OwnershipRow';
 import { ReviewColumns } from './review-columns';
 import { REVIEW_TITLE_ID, ReviewHeader, trustLevelLabel } from './ReviewHeader';
 import { ReviewProgress } from './ReviewProgress';
@@ -2403,7 +2404,23 @@ export function KeyboardImportModal({
                     data-testid="import-review-ruled"
                   >
                     <ZoneLabel>
-                      <Trans>Ownership</Trans>
+                      {/* The number is `ruleCount`, not `count`: i18next
+                          treats a `count` as a plural and the generated
+                          catalogue would split each sentence into `_one`
+                          and `_other`, with the singular copy in the
+                          plural slot. Two literal keys, like the Import
+                          button's, keep both sentences correct. */}
+                      {focusedRuleIds.length === 0 ? (
+                        <Trans>Ownership</Trans>
+                      ) : focusedRuleIds.length === 1 ? (
+                        t('Ownership — {{ruleCount}} rule touched this row', {
+                          ruleCount: focusedRuleIds.length,
+                        })
+                      ) : (
+                        t('Ownership — {{ruleCount}} rules touched this row', {
+                          ruleCount: focusedRuleIds.length,
+                        })
+                      )}
                     </ZoneLabel>
                     {focusedEffects.length ? (
                       <>
@@ -2415,40 +2432,20 @@ export function KeyboardImportModal({
                             ? describeRule(rule, { payeeNames, categoryNames })
                             : undefined;
                           return (
-                            <View
+                            <OwnershipRow
                               key={effect.field}
-                              style={{
-                                flexDirection: 'row',
-                                gap: 6,
-                                alignItems: 'center',
-                              }}
-                              data-testid="import-review-ruled-field"
-                              data-field={effect.field}
-                            >
-                              <SvgTag
-                                width={11}
-                                height={11}
-                                style={{
-                                  color: theme.ruleLockText,
-                                  opacity: 0.8,
-                                }}
-                              />
-                              <Text
-                                style={{
-                                  color: theme.ruleLockText,
-                                  minWidth: 64,
-                                }}
-                              >
-                                {ruledFieldName(effect.field)}
-                              </Text>
-                              <Text>
-                                {described
+                              field={effect.field}
+                              label={ruledFieldName(effect.field)}
+                              fieldTestId="import-review-ruled-field"
+                              fieldNameTestId="import-review-ruled-field-name"
+                              description={
+                                described
                                   ? t('rule "{{description}}"', {
                                       description: `${described.from} → ${described.to}`,
                                     })
-                                  : t('a rule in this budget')}
-                              </Text>
-                            </View>
+                                  : t('a rule in this budget')
+                              }
+                            />
                           );
                         })}
                         <View style={{ gap: 6, marginTop: 4 }}>

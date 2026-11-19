@@ -2335,6 +2335,21 @@ ${transactions}
     const owned = dialog.getByTestId('import-review-ruled');
     await expect(owned).toBeVisible();
 
+    // The label counts the rules, the way the mockup writes "Ownership —
+    // two rules touched this row". A bare "Ownership" is a label that
+    // names its group; the count says why the group has content.
+    await expect(owned).toContainText('1 rule touched this row');
+
+    // The field name sits in the SAME column the Evidence zone uses.
+    // Compare the two measured widths rather than asserting a pixel.
+    const nameWidth = await owned
+      .getByTestId('import-review-ruled-field-name')
+      .evaluate(node => node.getBoundingClientRect().width);
+    const evidenceWidth = await dialog
+      .getByTestId('import-review-vendor-label')
+      .evaluate(node => node.getBoundingClientRect().width);
+    expect(nameWidth).toBe(evidenceWidth);
+
     // It says WHICH field the rule owns, and quotes the rule itself: the
     // field is the rule's identity on this row, and the quoted match → set
     // pair says what the rule does.
@@ -2436,8 +2451,16 @@ ${transactions}
       // All four zones are ALWAYS here. A row that is clean says so in
       // the reason; a row no rule touched says so in the ownership; no
       // zone vanishes and leaves a gap.
-      for (const zone of ['Evidence', 'Reason', 'Ownership', 'Actions']) {
-        await expect(details.getByText(zone, { exact: true })).toBeVisible();
+      const zones = [
+        ['Evidence', 'import-review-evidence'],
+        ['Reason', 'import-review-reason'],
+        ['Ownership', 'import-review-ruled'],
+        ['Actions', 'import-review-actions'],
+      ] as const;
+      for (const [name, testId] of zones) {
+        const zone = details.getByTestId(testId);
+        await expect(zone).toBeVisible();
+        await expect(zone).toContainText(name);
       }
     }
 
