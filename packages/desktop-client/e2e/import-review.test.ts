@@ -2836,6 +2836,30 @@ ${transactions}
     await expect(ruleItem).toContainText('category');
     await expect(ruleItem).toContainText('Food');
 
+    // The field name and the rule's description are two spans in one
+    // flex row. They used to paint flush ("categoryFood"). Compare boxes,
+    // not pixels, so this holds at any zoom and with any font.
+    const [fieldBox, descriptionBox] = await Promise.all([
+      ruleItem.getByTestId('import-review-rule-field').boundingBox(),
+      ruleItem.getByTestId('import-review-rule-description').boundingBox(),
+    ]);
+    if (!fieldBox || !descriptionBox) {
+      throw new Error('The rule field or its description was not on screen');
+    }
+    const gap = descriptionBox.x - (fieldBox.x + fieldBox.width);
+    expect(
+      gap,
+      'the rule field and description must be separated',
+    ).toBeGreaterThan(0);
+    // An inline gap, not a line break or another column: compare it to
+    // the rendered line height rather than to a hard-coded pixel count.
+    expect(gap).toBeLessThan(fieldBox.height);
+    expect(
+      descriptionBox.y < fieldBox.y + fieldBox.height &&
+        fieldBox.y < descriptionBox.y + descriptionBox.height,
+      'the rule field and description must share a line',
+    ).toBe(true);
+
     // And the rule the row could grow is offered below it.
     const newRule = picker.getByTestId('import-review-rule-new');
     await expect(newRule).toHaveCount(1);

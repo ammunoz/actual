@@ -136,15 +136,25 @@ export function RulePicker({ items, onPick }: RulePickerProps) {
             buttonRefs.current[index] = button;
           }}
           variant="bare"
+          // The field name and the rule's description are two flex items
+          // in the button; without a gap they paint flush ("categoryFood").
+          style={{ gap: 6 }}
           data-testid="import-review-rule-item"
           data-rule-id={item.ruleId}
           data-field={item.field}
           onPress={() => onPick(item)}
         >
           {item.fieldLabel ? (
-            <Text style={{ color: theme.ruleLockText }}>{item.fieldLabel}</Text>
+            <Text
+              data-testid="import-review-rule-field"
+              style={{ color: theme.ruleLockText }}
+            >
+              {item.fieldLabel}
+            </Text>
           ) : null}
-          <Text>{item.description}</Text>
+          <Text data-testid="import-review-rule-description">
+            {item.description}
+          </Text>
         </Button>
       ))}
 
