@@ -2150,9 +2150,12 @@ export function KeyboardImportModal({
                   // the cursor would make the whole layout jump — the
                   // exact failure the design rejected when it chose
                   // master-detail over an inline inspector.
-                  // The detail region is 260px tall — the design's
+                  // The detail region is 300px tall — the design's
                   // vertical budget for a region that never changes size.
-                  height: 260,
+                  // All four zones are always mounted at this height. A
+                  // row with more to say scrolls INSIDE the zones rather
+                  // than growing the region and moving the list.
+                  height: 300,
                   border: `1px solid ${theme.tableBorder}`,
                   borderRadius: 6,
                   overflow: 'hidden',

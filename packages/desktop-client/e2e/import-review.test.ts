@@ -2511,10 +2511,14 @@ ${transactions}
     await expect(rows).toHaveCount(40);
 
     // The detail section is bounded, so a row with a lot to say does
-    // not push the modal down the screen.
+    // not push the modal down the screen. Compare it to the dialog's own
+    // height — a fixed pixel here would just restate the stylesheet.
     const details = dialog.getByTestId('import-review-details');
     const detailsBox = await details.boundingBox();
-    expect(detailsBox?.height ?? 0).toBeLessThanOrEqual(260);
+    const dialogBox = await dialog.boundingBox();
+    expect(detailsBox?.height ?? 0).toBeLessThan(
+      (dialogBox?.height ?? 0) * 0.6,
+    );
 
     // And the zones box is a real box that SCROLLS — not one that
     // collapsed to nothing, which would also report `overflow-y: auto`.
