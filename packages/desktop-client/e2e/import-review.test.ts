@@ -373,9 +373,22 @@ ${transactions}
     await expect(dialog.getByText('Review import')).toBeVisible();
     // The heading says where the rows are going: the account the review
     // was opened for. It is the only place the destination is shown.
-    await expect(dialog.getByTestId('import-review-destination')).toContainText(
-      'Keyboard Review',
-    );
+    const destination = dialog.getByTestId('import-review-destination');
+    await expect(destination).toContainText('Keyboard Review');
+
+    // The caption is the table's frost band, not the white column header
+    // beneath it: the mockup gives it the row-header token so the caption
+    // reads as a caption. It also opens with the bank glyph.
+    const [captionBg, headerBg] = await Promise.all([
+      destination.evaluate(
+        element => getComputedStyle(element).backgroundColor,
+      ),
+      dialog
+        .getByTestId('import-review-header')
+        .evaluate(element => getComputedStyle(element).backgroundColor),
+    ]);
+    expect(captionBg).not.toBe(headerBg);
+    await expect(destination.locator('svg')).toHaveCount(1);
   });
 
   test('falls back to Actual own import modal when the feature is off', async () => {

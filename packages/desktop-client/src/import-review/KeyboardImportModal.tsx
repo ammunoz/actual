@@ -13,7 +13,6 @@ import {
   SvgFlag,
   SvgPause,
   SvgTag,
-  SvgWallet,
 } from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
@@ -48,6 +47,7 @@ import { useLocale } from '#hooks/useLocale';
 import { pushModal, removeModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 
+import { BankIcon } from './BankIcon';
 import { initialChainContext, nextChainField } from './chain-mode';
 import type { ChainContext } from './chain-mode';
 import { ConfirmPane } from './ConfirmPane';
@@ -1978,17 +1978,19 @@ export function KeyboardImportModal({
                   gap: 6,
                   flexShrink: 0,
                   padding: '6px 10px',
-                  backgroundColor: theme.tableHeaderBackground,
+                  backgroundColor: theme.tableRowHeaderBackground,
                   borderBottom: `1px solid ${theme.tableBorder}`,
                 }}
               >
-                <SvgWallet
+                <BankIcon
                   width={12}
                   height={12}
                   style={{ color: theme.tableHeaderText }}
                 />
                 <Text
                   style={{
+                    // The band is the row-header token, but its ink is the
+                    // same secondary text the mockup's caption uses.
                     color: theme.tableHeaderText,
                     fontWeight: 500,
                     fontSize: 12,
