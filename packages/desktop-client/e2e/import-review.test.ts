@@ -2351,6 +2351,56 @@ ${transactions}
     await expect(edit).toContainText('Edit this rule');
   });
 
+  test('the reason is one line, and Why? discloses the trust outcomes', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Reason',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const reason = dialog.getByTestId('import-review-reason');
+    await expect(reason).toBeVisible();
+
+    // The mockup says what the gate saw, then the outcome AT THE CURRENT
+    // LEVEL in bold, then a link. The three-level breakdown is not on the
+    // default surface.
+    await expect(reason).toContainText('At Cautious: Flagged');
+    const why = reason.getByTestId('import-review-why');
+    await expect(why).toHaveAttribute(
+      'aria-label',
+      'Why is this flagged? Why?',
+    );
+    await expect(why).toHaveAttribute('aria-expanded', 'false');
+    await expect(reason.getByTestId('import-review-why-detail')).toHaveCount(0);
+
+    await why.click();
+    await expect(why).toHaveAttribute('aria-expanded', 'true');
+    const detail = reason.getByTestId('import-review-why-detail');
+    await expect(detail).toHaveCount(1);
+    // The disclosure must have HEIGHT, not merely be in the DOM. A `View`
+    // inside this scrolling column can collapse to 0px and still hold its
+    // text; the flexShrink fix is what keeps the three levels on screen.
+    const detailBox = await detail.boundingBox();
+    expect(detailBox?.height ?? 0).toBeGreaterThan(0);
+    await expect(detail).toContainText('Paranoid');
+    await expect(detail).toContainText('Cautious');
+    await expect(detail).toContainText('Trusted');
+
+    // A disclosure about one row must not hang over the next one. `j`
+    // must work straight after the click: a keyed control in a
+    // keyboard-driven review has to hand the grid its keyboard back.
+    await page.keyboard.press('j');
+    await expect(
+      dialog.getByTestId('import-review-row').nth(1),
+    ).toHaveAttribute('data-focused', 'true');
+    await expect(reason.getByTestId('import-review-why-detail')).toHaveCount(0);
+  });
+
   test('the detail section never changes size as the rows change', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Fixed Detail',

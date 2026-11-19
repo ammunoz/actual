@@ -32,6 +32,7 @@ import type {
   PreviewRow,
   ReviewCategory,
   RowEvaluation,
+  RowGate,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { integerToAmount } from '@actual-app/core/shared/util';
 import { format as formatDate, parseISO } from 'date-fns';
@@ -221,6 +222,12 @@ export function KeyboardImportModal({
   // the help, or the confirmation.
   const [pane, setPane] = useState<PaneMode>(null);
 
+  // The `Why?` disclosure belongs to the row under the cursor. It closes
+  // when the cursor moves, so an explanation of one row is never left
+  // hanging over another.
+  const [whyOpen, setWhyOpen] = useState(false);
+  useEffect(() => setWhyOpen(false), [review.focusedIndex]);
+
   // A pane owns the keyboard while it is up. When it closes, the focus
   // has to come back to the grid or the user is typing into a button
   // that is no longer there.
@@ -258,6 +265,20 @@ export function KeyboardImportModal({
     return formatDate(parsed, dateFormat);
   };
 
+  /** The gate's outcome, in the user's words. */
+  const gateLabel = (gate: RowGate): string => {
+    switch (gate) {
+      case 'block':
+        return t('Blocked');
+      case 'skip':
+        return t('Skipped');
+      case 'warn':
+        return t('Flagged');
+      default:
+        return t('Allowed');
+    }
+  };
+
   // The badge says what the gate is doing with the row. A row the gate
   // holds back is badged with the reason it is held back, not with a
   // generic "problem", because the two need different things from the
@@ -287,13 +308,25 @@ export function KeyboardImportModal({
       return { label: t('Overridden'), tone: 'warning', Icon: SvgFlag };
     }
     if (evaluation.gate === 'block') {
-      return { label: t('Blocked'), tone: 'error', Icon: SvgBlock };
+      return {
+        label: gateLabel(evaluation.gate),
+        tone: 'error',
+        Icon: SvgBlock,
+      };
     }
     if (evaluation.gate === 'skip') {
-      return { label: t('Skipped'), tone: 'error', Icon: SvgPause };
+      return {
+        label: gateLabel(evaluation.gate),
+        tone: 'error',
+        Icon: SvgPause,
+      };
     }
     if (evaluation.gate === 'warn') {
-      return { label: t('Flagged'), tone: 'warning', Icon: SvgFlag };
+      return {
+        label: gateLabel(evaluation.gate),
+        tone: 'warning',
+        Icon: SvgFlag,
+      };
     }
     // The user's own decision, on a row the gate has nothing to say about.
     if (row.decision === 'accept') {
@@ -1099,6 +1132,12 @@ export function KeyboardImportModal({
     () => new Set(review.payees.map(p => normalizePayeeName(p.name))),
     [review.payees],
   );
+
+  // What the gate does to the focused row at the CURRENT trust level. The
+  // detail says this in words; the header says it as a control.
+  const currentGate = focused
+    ? gateRow(focused, review.trustLevel, { livePayeeNames })
+    : undefined;
 
   /**
    * Close the review for good, throwing away whatever is in it.
@@ -2211,7 +2250,7 @@ export function KeyboardImportModal({
                       through at every level. */}
                   <View
                     style={{
-                      gap: 4,
+                      gap: 6,
                       borderTop: `1px solid ${theme.tableBorder}`,
                       paddingTop: 10,
                     }}
@@ -2220,17 +2259,102 @@ export function KeyboardImportModal({
                     <ZoneLabel>
                       <Trans>Reason</Trans>
                     </ZoneLabel>
-                    {focusedEvaluation?.flags.length ? (
-                      <Text>
-                        {focusedEvaluation.flags
-                          .map(flag => flagReason(flag.kind))
-                          .join(' · ')}
+
+                    {/* The mockup's reason is ONE line: what the gate saw,
+                        what it will do at THIS trust level, and a link to
+                        the rest. The three-level breakdown used to sit
+                        here permanently; `Why?` now discloses it on
+                        demand, so the default surface is the small one. */}
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'baseline',
+                        gap: 8,
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <Text
+                        style={
+                          focusedEvaluation?.flags.length
+                            ? undefined
+                            : { color: theme.pageTextSubdued }
+                        }
+                      >
+                        {focusedEvaluation?.flags.length
+                          ? focusedEvaluation.flags
+                              .map(flag => flagReason(flag.kind))
+                              .join(' · ')
+                          : t('Nothing to flag on this row.')}
                       </Text>
-                    ) : (
-                      <Text style={{ color: theme.pageTextSubdued }}>
-                        <Trans>Nothing to flag on this row.</Trans>
-                      </Text>
-                    )}
+                      {currentGate ? (
+                        <Text style={{ fontWeight: 'bold' }}>
+                          {t('At {{level}}: {{outcome}}', {
+                            level: trustLevelLabel(t, review.trustLevel),
+                            outcome: gateLabel(currentGate),
+                          })}
+                        </Text>
+                      ) : null}
+                      {focusedEvaluation?.flags.length ? (
+                        <Button
+                          variant="bare"
+                          // The visible word stays in the accessible
+                          // name, so a voice-control user saying "click
+                          // Why?" still matches the control.
+                          aria-label={t('Why is this flagged? Why?')}
+                          aria-expanded={whyOpen}
+                          aria-controls="import-review-why-detail"
+                          data-testid="import-review-why"
+                          onPress={() => {
+                            setWhyOpen(open => !open);
+                            // This is a keyboard-driven review. Acting on
+                            // a button must hand `j`/`k` back to the grid
+                            // or the user is stuck on the link.
+                            focusGrid();
+                          }}
+                          style={{
+                            padding: 0,
+                            color: theme.ruleLockText,
+                            textDecoration: 'underline',
+                          }}
+                        >
+                          <Trans>Why?</Trans>
+                        </Button>
+                      ) : null}
+                    </View>
+
+                    {whyOpen ? (
+                      <View
+                        id="import-review-why-detail"
+                        data-testid="import-review-why-detail"
+                        style={{
+                          // `View` carries a `min-height: 0`, so a flex
+                          // child that can shrink collapses to nothing
+                          // here even though its text has height. The
+                          // other siblings in this zone say the same.
+                          flexShrink: 0,
+                          flexDirection: 'row',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        {TRUST_LEVELS.map(level => (
+                          <Text
+                            key={level}
+                            style={
+                              level === review.trustLevel
+                                ? { fontWeight: 'bold' }
+                                : undefined
+                            }
+                          >
+                            {trustLevelLabel(t, level)}:{' '}
+                            {gateLabel(
+                              gateRow(focused, level, { livePayeeNames }),
+                            )}
+                          </Text>
+                        ))}
+                      </View>
+                    ) : null}
+
                     {focusedEvaluation?.held ? (
                       <Text style={{ color: theme.errorText }}>
                         {focusedEvaluation.overridable
@@ -2242,32 +2366,6 @@ export function KeyboardImportModal({
                             )}
                       </Text>
                     ) : null}
-                    <View style={{ flexDirection: 'row', gap: 12 }}>
-                      {TRUST_LEVELS.map(level => {
-                        const gate = gateRow(focused, level, {
-                          livePayeeNames,
-                        });
-                        const label =
-                          gate === 'block'
-                            ? t('Blocked')
-                            : gate === 'skip'
-                              ? t('Skipped')
-                              : gate === 'warn'
-                                ? t('Flagged')
-                                : t('Allowed');
-                        const isCurrent = level === review.trustLevel;
-                        return (
-                          <Text
-                            key={level}
-                            style={
-                              isCurrent ? { fontWeight: 'bold' } : undefined
-                            }
-                          >
-                            {trustLevelLabel(t, level)}: {label}
-                          </Text>
-                        );
-                      })}
-                    </View>
                     {focusedEvaluation?.flags.length ? (
                       <Text
                         data-testid="import-review-flag-codes"
