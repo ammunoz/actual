@@ -55,6 +55,7 @@ export function HintStrip({ actions }: HintStripProps) {
         data-testid="import-review-hint-text"
         style={{
           color: theme.tableHeaderText,
+          fontSize: 12,
           flex: 1,
           textAlign: 'right',
         }}

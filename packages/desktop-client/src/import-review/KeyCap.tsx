@@ -45,8 +45,9 @@ export function KeyCap({ children }: KeyCapProps) {
         marginLeft: 4,
         borderRadius: 3,
         // The edge is what makes the cap a cap, so it is NOT faded: a
-        // faded border is not a border.
-        border: `1px solid ${theme.pageTextSubdued}`,
+        // faded border is not a border. It takes the same ink token as
+        // the zone labels, so the edge stays a real edge in every theme.
+        border: `1px solid ${theme.tableHeaderText}`,
         backgroundColor: theme.tableHeaderBackground,
         color: theme.pageText,
       }}

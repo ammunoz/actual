@@ -2554,6 +2554,7 @@ export function KeyboardImportModal({
                             }}
                             style={{
                               padding: 0,
+                              fontSize: 12,
                               color: theme.ruleLockText,
                               textDecoration: 'underline',
                             }}
@@ -2673,6 +2674,7 @@ export function KeyboardImportModal({
                               }}
                               style={{
                                 padding: 0,
+                                fontSize: 12,
                                 color: theme.ruleLockText,
                                 textDecoration: 'underline',
                               }}

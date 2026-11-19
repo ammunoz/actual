@@ -3126,6 +3126,7 @@ ${transactions}
           return {
             text: cap.textContent,
             color: style.color,
+            border: style.borderTopColor,
             background: `rgb(${Math.round(behind.r)}, ${Math.round(behind.g)}, ${Math.round(behind.b)})`,
             visible: rect.width > 0 && rect.height > 0,
           };
@@ -3141,6 +3142,11 @@ ${transactions}
         expect(contrastRatio(cap.color, cap.background)).toBeGreaterThanOrEqual(
           4.5,
         );
+        // The edge is part of the affordance: WCAG 1.4.11 asks 3:1 for
+        // non-text UI boundaries against the surface behind them.
+        expect(
+          contrastRatio(cap.border, cap.background),
+        ).toBeGreaterThanOrEqual(3);
       }
     }
 
