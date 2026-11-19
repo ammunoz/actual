@@ -2424,6 +2424,71 @@ ${transactions}
     await expect(field).toContainText('set by');
   });
 
+  test('the Rules zone caps its lines and hands the keyboard back', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Show More',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    // Rules that own three fields of the imported row. The zone shows two
+    // lines and hides the third behind a disclosure.
+    const rulesPage = await navigation.goToRulesPage();
+    for (const [field, value] of [
+      ['category', 'Food'],
+      ['notes', 'weekly shop'],
+      ['payee', 'Kroger'],
+    ]) {
+      const editRuleModal = await rulesPage.createNewRule();
+      await editRuleModal.fill({
+        conditions: [
+          { field: 'imported payee', op: 'is', value: 'Demo Grocery Store' },
+        ],
+        actions: [{ field, op: 'set', value }],
+      });
+      await editRuleModal.save();
+    }
+    await navigation.goToAccountPage('Keyboard Review Show More');
+
+    await enableKeyboardReview();
+    await importSameVendorOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rules = dialog.getByTestId('import-review-rules-zone');
+    await expect(rules).toBeVisible();
+    const lines = rules.getByTestId('import-review-ruled-field');
+    await expect(lines).toHaveCount(2);
+
+    const more = rules.getByTestId('import-review-rules-more');
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await expect(more).toContainText('Show 1 more');
+    await expect(
+      rules.getByTestId('import-review-rules-more-detail'),
+    ).toHaveCount(0);
+
+    await more.click();
+    await expect(more).toHaveAttribute('aria-expanded', 'true');
+    await expect(lines).toHaveCount(3);
+    await expect(more).toContainText('Show less');
+
+    // Clicking a disclosure must give `j`/`k` back to the grid: a keyboard
+    // review that strands the cursor on a button is stuck.
+    await page.keyboard.press('j');
+    await expect(
+      dialog.getByTestId('import-review-row').nth(1),
+    ).toHaveAttribute('data-focused', 'true');
+    // The same vendor string shares the rules, so the button is still here
+    // on the next row — but the disclosure belongs to the row under the
+    // cursor and has collapsed again.
+    await expect(more).toHaveAttribute('aria-expanded', 'false');
+    await expect(more).toContainText('Show 1 more');
+    await expect(lines).toHaveCount(2);
+    await expect(
+      dialog.getByTestId('import-review-row').nth(0),
+    ).not.toHaveAttribute('data-focused', 'true');
+  });
+
   test('the reason is one line, and Why? discloses the trust outcomes', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Reason',
@@ -2472,6 +2537,89 @@ ${transactions}
       dialog.getByTestId('import-review-row').nth(1),
     ).toHaveAttribute('data-focused', 'true');
     await expect(reason.getByTestId('import-review-why-detail')).toHaveCount(0);
+  });
+
+  test('the v13 detail reads as two columns inside one bounded region', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review V13 Detail',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const details = dialog.getByTestId('import-review-details');
+    await expect(details).toBeVisible();
+
+    // The four zones are grouped into two columns: the row's own facts on
+    // the left, its review status and rules on the right. Both columns are
+    // measurable boxes — a collapsed one would report zero height.
+    const left = dialog.getByTestId('import-review-zone-left');
+    const right = dialog.getByTestId('import-review-zone-right');
+    for (const column of [left, right]) {
+      const box = await column.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThan(100);
+    }
+    const leftBox = await left.boundingBox();
+    const rightBox = await right.boundingBox();
+    expect(leftBox).not.toBeNull();
+    expect(rightBox).not.toBeNull();
+    expect(rightBox!.x).toBeGreaterThan(leftBox!.x);
+    expect(leftBox!.y).toBeCloseTo(rightBox!.y, 0);
+
+    // The Actions stay outside both columns, pinned below them. Compare
+    // against the BOTTOM of each column: comparing tops would also pass if
+    // Actions were rendered inside the left one.
+    const actions = dialog.getByTestId('import-review-actions');
+    const actionsBox = await actions.boundingBox();
+    expect(actionsBox).not.toBeNull();
+    const columnsBottom = Math.max(
+      leftBox!.y + leftBox!.height,
+      rightBox!.y + rightBox!.height,
+    );
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(columnsBottom);
+
+    // The zone names are the ones a person uses now, and the Transaction
+    // zone is split by where its facts came from.
+    await expect(dialog.getByTestId('import-review-transaction')).toContainText(
+      'From the bank',
+    );
+    await expect(dialog.getByTestId('import-review-transaction')).toContainText(
+      'In your budget',
+    );
+    await expect(dialog.getByTestId('import-review-verdict')).toContainText(
+      'Review status',
+    );
+    await expect(dialog.getByTestId('import-review-rules-zone')).toContainText(
+      'Rules',
+    );
+
+    // The detail spells the month out where the list stays compact.
+    await expect(dialog.getByTestId('import-review-date')).toContainText(
+      /[A-Z][a-z]+ \d{2}, \d{4}/,
+    );
+    // The list keeps the budget's default short format; the detail above
+    // uses the locale's long one.
+    await expect(
+      dialog.getByTestId('import-review-row-date').first(),
+    ).toContainText(/^\d{2}\/\d{2}\/\d{4}$/);
+
+    // The destination is the table's caption: it is INSIDE the panel that
+    // holds the grid, above the sticky column header.
+    const insidePanel = await dialog.evaluate(root => {
+      const caption = root.querySelector(
+        '[data-testid="import-review-destination"]',
+      );
+      const grid = root.querySelector('[data-testid="import-review-grid"]');
+      // The caption is the panel's first child and the grid follows it;
+      // merely sharing a parent with the grid would not make it the
+      // table's caption.
+      return !!caption && !!grid && caption.nextElementSibling === grid;
+    });
+    expect(insidePanel).toBe(true);
   });
 
   test('the detail section never changes size as the rows change', async () => {
@@ -3103,7 +3251,14 @@ ${transactions}
     await importOfx();
 
     const dialog = page.getByRole('dialog');
-    const status = dialog.getByTestId('import-review-status');
+    const sumIn = dialog.getByTestId('import-review-sum-in');
+    const sumOut = dialog.getByTestId('import-review-sum-out');
+    const label = dialog.getByTestId('import-review-amount-label');
+    await expect(sumIn).toBeVisible();
+    await expect(sumOut).toBeVisible();
+    await expect(label).toBeVisible();
+    await expect(sumIn).not.toHaveText('');
+    await expect(sumOut).not.toHaveText('');
 
     for (const theme of ['light', 'dark', 'midnight']) {
       await page.evaluate(name => window.Actual.setTheme(name), theme);
@@ -3112,46 +3267,34 @@ ${transactions}
         theme,
       );
 
-      // The sums are money, so each wears its own semantic token. Read the
-      // COMPUTED colour, so a custom theme that overrides the token is
-      // checked too, not just the three shipped palettes.
-      const colors = await status.evaluate(root => {
-        const pick = (id: string) => {
-          const node = root.querySelector(`[data-testid="${id}"]`);
-          if (!node) throw new Error(`missing ${id}`);
-          return getComputedStyle(node).color;
-        };
-        return {
-          in: pick('import-review-sum-in'),
-          out: pick('import-review-sum-out'),
-        };
-      });
+      // Locators auto-wait for any remount a theme switch causes. Reading
+      // the COMPUTED colour also covers custom themes that override the
+      // token, not just the three shipped palettes.
+      const inColor = await sumIn.evaluate(
+        node => getComputedStyle(node).color,
+      );
+      const outColor = await sumOut.evaluate(
+        node => getComputedStyle(node).color,
+      );
+      const labelColor = await label.evaluate(
+        node => getComputedStyle(node).color,
+      );
 
       // The `role="dialog"` node is an unstyled wrapper; the painted
       // surface is its child, the modal content container. Reading the
       // wrapper would report transparent black and quietly compare every
       // colour against black instead of against the modal.
-      const modalBackground = await dialog.evaluate(
-        node => getComputedStyle(node.firstElementChild!).backgroundColor,
-      );
-      for (const color of Object.values(colors)) {
+      const modalBackground = await dialog.evaluate(node => {
+        const surface = node.firstElementChild;
+        if (!surface) throw new Error('the dialog has no content container');
+        return getComputedStyle(surface).backgroundColor;
+      });
+
+      for (const color of [inColor, outColor, labelColor]) {
         expect(contrastRatio(color, modalBackground)).toBeGreaterThanOrEqual(
           4.5,
         );
       }
-
-      // The detail label is secondary text; it must not fade into the
-      // same surface either.
-      const labelColor = await dialog.evaluate(root => {
-        const node = root.querySelector(
-          '[data-testid="import-review-amount-label"]',
-        );
-        if (!node) throw new Error('missing detail amount label');
-        return getComputedStyle(node).color;
-      });
-      expect(contrastRatio(labelColor, modalBackground)).toBeGreaterThanOrEqual(
-        4.5,
-      );
     }
 
     await page.evaluate(() => window.Actual.setTheme('auto'));
