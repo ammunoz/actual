@@ -209,6 +209,8 @@ export const EMPTY_SUMMARY: PreviewSummary = Object.freeze({
   willImport: 0,
   inflowCount: 0,
   outflowCount: 0,
+  inflowCents: 0,
+  outflowCents: 0,
 });
 
 /**

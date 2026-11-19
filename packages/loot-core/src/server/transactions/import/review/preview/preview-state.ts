@@ -344,6 +344,17 @@ export type PreviewSummary = {
    */
   inflowCount: number;
   outflowCount: number;
+  /**
+   * The gross totals of the money moving in and out, in integer cents.
+   *
+   * These describe the same rows as `inflowCount` / `outflowCount` — the
+   * ones that will actually reach the budget — but answer the question
+   * "how much?" rather than "how many?". A zero amount contributes nothing
+   * to either total. Kept as raw cents so the UI can format them with the
+   * budget's own currency and sign rules.
+   */
+  inflowCents: number;
+  outflowCents: number;
 };
 
 /**
@@ -684,6 +695,8 @@ export function summarize(
   let warned = 0;
   let inflowCount = 0;
   let outflowCount = 0;
+  let inflowCents = 0;
+  let outflowCents = 0;
   let willImport = 0;
 
   for (const row of state.rows) {
@@ -727,8 +740,15 @@ export function summarize(
     if (evaluation.willImport) {
       willImport += 1;
       const cents = effectiveAmountCents(row);
-      if (cents > 0) inflowCount += 1;
-      else if (cents < 0) outflowCount += 1;
+      if (cents > 0) {
+        inflowCount += 1;
+        inflowCents += cents;
+      } else if (cents < 0) {
+        outflowCount += 1;
+        // Kept negative so the sign carries the direction. The UI formats
+        // this with the budget's own currency and sign rules.
+        outflowCents += cents;
+      }
     }
   }
 
@@ -744,6 +764,8 @@ export function summarize(
     willImport,
     inflowCount,
     outflowCount,
+    inflowCents,
+    outflowCents,
   });
 }
 

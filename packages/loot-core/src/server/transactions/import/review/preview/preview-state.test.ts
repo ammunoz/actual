@@ -381,6 +381,49 @@ describe('summarize', () => {
     const summary = summarize(state);
     expect(summary.inflowCount).toBe(0);
     expect(summary.outflowCount).toBe(0);
+    expect(summary.inflowCents).toBe(0);
+    expect(summary.outflowCents).toBe(0);
+  });
+
+  it('sums the money moving in and out over the rows that will land', () => {
+    const state = buildPreviewState(
+      [
+        mkRow({ importedId: 't-1', amountCents: 5000 }),
+        mkRow({ importedId: 't-2', amountCents: 2500 }),
+        mkRow({ importedId: 't-3', amountCents: -2500 }),
+        mkRow({ importedId: 't-4', amountCents: -810 }),
+      ],
+      'cautious',
+    );
+    const summary = summarize(state);
+    expect(summary.inflowCents).toBe(7500);
+    // The outgoing total stays negative so the sign carries direction.
+    expect(summary.outflowCents).toBe(-3310);
+  });
+
+  it('derives the totals from the effective amount, not the bank value', () => {
+    const state = buildPreviewState(
+      [mkRow({ importedId: 't-1', amountCents: -2500 })],
+      'cautious',
+    );
+    const flipped = updateEdits(state, 't-1', { amountCents: 2500 });
+    const summary = summarize(flipped);
+    expect(summary.inflowCents).toBe(2500);
+    expect(summary.outflowCents).toBe(0);
+  });
+
+  it('excludes dropped rows from the money totals', () => {
+    const state = buildPreviewState(
+      [
+        mkRow({ importedId: 't-1', amountCents: 5000 }),
+        mkRow({ importedId: 't-2', amountCents: -2500 }),
+      ],
+      'cautious',
+    );
+    const dropped = applyDecision(state, 't-1', 'drop');
+    const summary = summarize(dropped);
+    expect(summary.inflowCents).toBe(0);
+    expect(summary.outflowCents).toBe(-2500);
   });
 
   it('buckets rows by trust level', () => {

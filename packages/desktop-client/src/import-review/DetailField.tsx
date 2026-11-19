@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { styles } from '@actual-app/components/styles';
+import type { CSSProperties } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -14,6 +15,11 @@ export type DetailFieldProps = {
   testId?: string;
   /** Money gets the app's tabular figures, so it lines up with the list. */
   numeric?: boolean;
+  /**
+   * Extra style for the value — money, for instance, colours by its sign.
+   * Tabular figures are applied after this so numeric values still align.
+   */
+  valueStyle?: CSSProperties;
 };
 
 /**
@@ -32,6 +38,7 @@ export function DetailField({
   children,
   testId,
   numeric,
+  valueStyle,
 }: DetailFieldProps) {
   return (
     <View
@@ -56,7 +63,9 @@ export function DetailField({
       >
         {label}
       </Text>
-      <Text style={numeric ? styles.tnum : undefined}>{children}</Text>
+      <Text style={numeric ? { ...valueStyle, ...styles.tnum } : valueStyle}>
+        {children}
+      </Text>
     </View>
   );
 }

@@ -41,6 +41,8 @@ import { format as formatDate, parseISO } from 'date-fns';
 import { Modal } from '#components/common/Modal';
 import { FinancialText } from '#components/FinancialText';
 import { useDateFormat } from '#hooks/useDateFormat';
+import { useFormat } from '#hooks/useFormat';
+import { useLocale } from '#hooks/useLocale';
 import { pushModal, removeModal } from '#modals/modalsSlice';
 import { useDispatch, useSelector } from '#redux';
 
@@ -182,6 +184,8 @@ export function KeyboardImportModal({
   onImported,
 }: KeyboardImportModalProps) {
   const { t } = useTranslation();
+  const format = useFormat();
+  const locale = useLocale();
   const dispatchModal = useDispatch();
   /**
    * Close the review, by name.
@@ -265,6 +269,18 @@ export function KeyboardImportModal({
     const parsed = parseISO(date);
     if (Number.isNaN(parsed.getTime())) return date;
     return formatDate(parsed, dateFormat);
+  };
+
+  // The detail panel spells the month out ("September 04, 2026") where the
+  // list keeps the compact MM/dd/yyyy. It follows the user's locale, like
+  // the rest of Actual's long dates, while the list stays in the budget's
+  // own date format so the two read consistently with their surroundings.
+  // An impossible date is still shown as-is: the review flags it, and the
+  // user has to see WHAT is wrong rather than a silently repaired value.
+  const reviewDateLong = (date: string): string => {
+    const parsed = parseISO(date);
+    if (Number.isNaN(parsed.getTime())) return date;
+    return formatDate(parsed, 'MMMM dd, yyyy', { locale });
   };
 
   // The row's own commands are framed chips, the way the mockup draws
@@ -663,6 +679,8 @@ export function KeyboardImportModal({
     row: PreviewRow,
   ): {
     amount: ReturnType<typeof integerToAmount>;
+    /** The raw IntegerAmount, for formatting with the budget's currency. */
+    cents: number;
     ruled: boolean;
     cleared: boolean;
   } => {
@@ -674,6 +692,7 @@ export function KeyboardImportModal({
       if (typeof effect.value === 'number') {
         return {
           amount: integerToAmount(effect.value),
+          cents: effect.value,
           ruled: true,
           cleared: false,
         };
@@ -683,12 +702,15 @@ export function KeyboardImportModal({
       // would be a lie: the rule owns the field.
       return {
         amount: integerToAmount(0),
+        cents: 0,
         ruled: true,
         cleared: true,
       };
     }
+    const cents = row.edits.amountCents ?? row.amountCents;
     return {
-      amount: integerToAmount(row.edits.amountCents ?? row.amountCents),
+      amount: integerToAmount(cents),
+      cents,
       ruled: false,
       cleared: false,
     };
@@ -702,12 +724,19 @@ export function KeyboardImportModal({
    */
   const dateCell = (
     row: PreviewRow,
-  ): { date: string; ruled: boolean; cleared: boolean } => {
+  ): {
+    date: string;
+    /** The effective raw `yyyy-MM-dd`, for the detail's long format. */
+    raw: string;
+    ruled: boolean;
+    cleared: boolean;
+  } => {
     const effect = visibleEffectFor(review.ruleEffects, row, 'date');
     if (effect) {
       if (typeof effect.value === 'string') {
         return {
           date: reviewDate(effect.value),
+          raw: effect.value,
           ruled: true,
           cleared: false,
         };
@@ -715,10 +744,12 @@ export function KeyboardImportModal({
       // The rule CONTROLLED the date and left it empty. The cell says so
       // rather than falling through to the row's own date, which would be
       // a lie: the rule owns the field.
-      return { date: '', ruled: true, cleared: true };
+      return { date: '', raw: '', ruled: true, cleared: true };
     }
+    const raw = row.edits.date ?? row.date;
     return {
-      date: reviewDate(row.edits.date ?? row.date),
+      date: reviewDate(raw),
+      raw,
       ruled: false,
       cleared: false,
     };
@@ -764,16 +795,33 @@ export function KeyboardImportModal({
   // way.
   const focusedAmount = focused ? amountCell(focused) : undefined;
   const clearedByRule = useClearedByRuleLabel();
+  // The detail spells the money the way the rest of Actual does: with the
+  // budget's symbol and sign rules, rather than the list's bare number.
   const focusedAmountLabel = focusedAmount
     ? focusedAmount.cleared
       ? clearedByRule
-      : focusedAmount.amount.toFixed(2)
+      : format(focusedAmount.cents, 'financial')
     : undefined;
+  const focusedAmountColor = focusedAmount?.cleared
+    ? undefined
+    : focusedAmount
+      ? focusedAmount.cents > 0
+        ? theme.numberPositive
+        : focusedAmount.cents < 0
+          ? theme.numberNegative
+          : theme.pageTextSubdued
+      : undefined;
   // The rest of the Evidence zone: the facts the LIST has already shown,
   // collected here so the row can be read in one place. The group is not
   // its own fact — it belongs to the category, the way the mockup writes
   // "Food · Usual Expenses" — so it is folded into that field's value.
-  const focusedDateLabel = focused ? dateCell(focused).date : '';
+  const focusedDateCell = focused ? dateCell(focused) : undefined;
+  // The detail's date spells the month out where the list stays compact.
+  const focusedDateLabel = focusedDateCell
+    ? focusedDateCell.cleared
+      ? clearedByRule
+      : reviewDateLong(focusedDateCell.raw)
+    : '';
   const focusedPayeeCellValue = focused ? payeeCell(focused) : undefined;
   const focusedCategoryValue = focused ? categoryCell(focused) : undefined;
   // A category that a rule CLEARED says so; otherwise its name shows. The
@@ -1917,7 +1965,11 @@ export function KeyboardImportModal({
                             textAlign: 'right',
                           }}
                         >
-                          <Trans>Amount</Trans>
+                          {format.currency.symbol
+                            ? t('Amount ({{symbol}})', {
+                                symbol: format.currency.symbol,
+                              })
+                            : t('Amount')}
                         </Text>
                       ),
                     }}
@@ -2204,6 +2256,11 @@ export function KeyboardImportModal({
                       label={<Trans>Amount</Trans>}
                       testId="import-review-amount"
                       numeric
+                      valueStyle={
+                        focusedAmountColor
+                          ? { color: focusedAmountColor }
+                          : undefined
+                      }
                     >
                       {focusedAmountLabel}
                     </DetailField>
