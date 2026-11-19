@@ -1739,11 +1739,12 @@ export function KeyboardImportModal({
                 along the user is, what needs attention, and what will
                 land.
 
-                The gate's counts are ALWAYS there, zero included: "0
-                flagged" is a signal — nothing needs a look. The counts
-                that are quiet in most imports — the overrides, the rows a
-                rule touched — only appear when they are not zero,
-                because a count of nothing is noise there.
+                The line carries the mockup's six items: progress,
+                reviewed, flagged, will import, set by rules and the
+                in/out split. Skipped and blocked are not counters here —
+                the list's Status column badges each row with its own
+                outcome, which is where a person looks for one. A second
+                count of them here would be noise.
 
                 The trust level is not here: it is a CONTROL, and it
                 lives in the header with the other controls. */}
@@ -1775,26 +1776,6 @@ export function KeyboardImportModal({
               >
                 {t('{{count}} flagged', { count: summary.warned })}
               </StatusChip>
-              <StatusChip
-                tone="error"
-                icon={<SvgPause width={12} height={12} />}
-              >
-                {t('{{count}} skipped', { count: summary.skipped })}
-              </StatusChip>
-              <StatusChip
-                tone="error"
-                icon={<SvgBlock width={12} height={12} />}
-              >
-                {t('{{count}} blocked', { count: summary.blocked })}
-              </StatusChip>
-              {summary.overridden > 0 ? (
-                <StatusChip
-                  tone="warning"
-                  icon={<SvgFlag width={12} height={12} />}
-                >
-                  {t('{{count}} overridden', { count: summary.overridden })}
-                </StatusChip>
-              ) : null}
               <StatusChip
                 tone="success"
                 icon={<SvgCheckmark width={12} height={12} />}

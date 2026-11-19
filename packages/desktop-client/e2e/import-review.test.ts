@@ -730,7 +730,9 @@ ${transactions}
 
     // A row is held back — the second one has no payee name at all — so
     // the strip says the one key that releases it.
-    await expect(dialog.getByText('1 blocked')).toBeVisible();
+    await expect(
+      dialog.getByTestId('import-review-row').nth(1),
+    ).toHaveAttribute('data-gate', 'block');
     await expect(hints).toContainText('Ctrl+Shift+A');
     await expect(hints).toContainText('accept anyway');
 
@@ -809,11 +811,14 @@ ${transactions}
 
     // The second row repeats the first one's FITID: skipped, and held.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('1 skipped')).toBeVisible();
+    await expect(rows.nth(1)).toHaveAttribute('data-gate', 'skip');
 
-    // And nothing is BLOCKED — which is exactly the case the summary's
-    // blocked count would have missed.
-    await expect(dialog.getByText('0 blocked')).toBeVisible();
+    // And nothing is BLOCKED — which is exactly the case a blocked
+    // counter in the strip would have missed. Read the rows' gates.
+    const gates = await rows.evaluateAll(elements =>
+      elements.map(element => element.getAttribute('data-gate')),
+    );
+    expect(gates).not.toContain('block');
 
     const hints = dialog.getByTestId('import-review-hints');
     await expect(hints).toContainText('Ctrl+Shift+A');
@@ -1461,8 +1466,6 @@ ${transactions}
     // skipped at the default trust level.
     await expect(rows.nth(2)).toHaveAttribute('data-gate', 'skip');
     await expect(rows.nth(2)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('1 blocked')).toBeVisible();
-    await expect(dialog.getByText('1 skipped')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
@@ -1497,7 +1500,6 @@ ${transactions}
     await page.keyboard.press('a');
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('1 blocked')).toBeVisible();
   });
 
   test('ctrl+shift+a overrides the trust level', async () => {
@@ -1524,8 +1526,11 @@ ${transactions}
       'accept-override',
     );
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('0 blocked')).toBeVisible();
-    await expect(dialog.getByText('1 overridden')).toBeVisible();
+    // The summary no longer counts overrides, so the row's badge is the
+    // only place that says what happened to it.
+    await expect(
+      rows.nth(1).getByTestId('import-review-row-status'),
+    ).toContainText('Overridden');
 
     // The overridden row lands. The duplicate is still skipped.
     await dialog.getByRole('button', { name: 'Import' }).click();
@@ -1553,7 +1558,6 @@ ${transactions}
     // The second row has no payee at all, so the trust level holds it
     // back.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'true');
-    await expect(dialog.getByText('1 blocked')).toBeVisible();
 
     await page.keyboard.press('j');
     await page.keyboard.press('p');
@@ -1577,7 +1581,6 @@ ${transactions}
     // And the fix RELEASED the row: the gate has nothing to hold back
     // now, so the row lands.
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('0 blocked')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
@@ -3025,13 +3028,19 @@ ${transactions}
         ).toBeGreaterThanOrEqual(4.5);
       }
 
-      // The gate's counts are always there, zero included: "0 flagged"
-      // says that nothing needs a look.
+      // The line is the mockup's six items. Skipped and blocked are not
+      // counters here: each row's Status column badges its own outcome.
       const words = backgrounds.map(chip => chip.text).join(' ');
       expect(words).toContain('flagged');
-      expect(words).toContain('skipped');
-      expect(words).toContain('blocked');
       expect(words).toContain('will import');
+      expect(words).not.toContain('skipped');
+      expect(words).not.toContain('blocked');
+
+      // The in/out split is the line's last item, and a plain Text
+      // rather than a chip — so the chip loop above never sees it.
+      await expect(dialog.getByTestId('import-review-status')).toContainText(
+        /\d+ in · \d+ out/,
+      );
     }
 
     await page.evaluate(() => window.Actual.setTheme('auto'));
@@ -4537,8 +4546,6 @@ ${transactions}
     await expect(rows.nth(1)).toHaveAttribute('data-held', 'false');
     await expect(rows.nth(2)).toHaveAttribute('data-gate', 'warn');
     await expect(rows.nth(2)).toHaveAttribute('data-held', 'false');
-    await expect(dialog.getByText('0 blocked')).toBeVisible();
-    await expect(dialog.getByText('0 skipped')).toBeVisible();
 
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();

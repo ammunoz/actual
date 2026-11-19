@@ -24,10 +24,6 @@ export const STATUS_TONES = {
     color: theme.warningTextDark,
     background: theme.warningBackground,
   },
-  error: {
-    color: theme.errorTextDarker,
-    background: theme.errorBackground,
-  },
   success: {
     color: theme.noticeText,
     background: theme.noticeBackgroundLight,
@@ -52,9 +48,9 @@ export type StatusChipProps = {
 /**
  * One number in the status line.
  *
- * A count that matters says so by being BOXED. Eleven bare numbers in two
- * lines of text were what the review used to show; the boxes give the
- * numbers hierarchy and say which ones to look at.
+ * A count that matters says so by being BOXED. The review used to show
+ * its numbers bare; the boxes give them hierarchy and say which ones to
+ * look at.
  *
  * The icon is the same one the status column wears for the same state, so
  * the line and the column read as one vocabulary.
