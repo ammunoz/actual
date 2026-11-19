@@ -4828,6 +4828,138 @@ ${transactions}
     ).toHaveCSS('font-weight', '600');
   });
 
+  test('the detail reads as four distinct typographic tiers', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Typography',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-details')).toBeVisible();
+
+    const transaction = dialog.getByTestId('import-review-transaction');
+    const zoneLabel = transaction.getByText('Transaction', { exact: true });
+    const subhead = transaction.getByText('From the bank', { exact: true });
+
+    // The overline is a CSS transform, not a rewritten string: the DOM
+    // text is still the translated sentence-case key.
+    expect(await zoneLabel.textContent()).toBe('Transaction');
+    await expect(zoneLabel).toHaveCSS('text-transform', 'uppercase');
+    await expect(zoneLabel).toHaveCSS('font-weight', '700');
+    await expect(subhead).toHaveCSS('text-transform', 'none');
+    await expect(subhead).toHaveCSS('font-weight', '600');
+
+    // Tracking is declared in em, so compare the ratio rather than a
+    // frozen pixel value that would break if the font size changed.
+    const emTracking = await zoneLabel.evaluate(element => {
+      const style = getComputedStyle(element);
+      return parseFloat(style.letterSpacing) / parseFloat(style.fontSize);
+    });
+    expect(emTracking).toBeCloseTo(0.09, 2);
+
+    // The label/value weight jump is what separates a fact from its name.
+    const label = dialog.getByTestId('import-review-vendor-label');
+    const value = dialog
+      .getByTestId('import-review-vendor')
+      .locator(':scope > span')
+      .last();
+    await expect(label).toHaveCSS('font-weight', '400');
+    await expect(value).toHaveCSS('font-weight', '500');
+
+    // A base weight must not replace the money token with primary ink.
+    const amount = dialog
+      .getByTestId('import-review-amount')
+      .locator(':scope > span')
+      .last();
+    // The guard only means something on a signed row; an uncleared or
+    // zero amount has no token colour to preserve.
+    expect(await amount.textContent()).toContain('-');
+    const [plainColor, moneyColor] = await Promise.all([
+      value.evaluate(element => getComputedStyle(element).color),
+      amount.evaluate(element => getComputedStyle(element).color),
+    ]);
+    expect(moneyColor).not.toBe(plainColor);
+  });
+
+  test('the extra zone spacing does not clip the detail fields', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Detail Fit',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-details')).toBeVisible();
+
+    // At desktop widths each column owns its scroll. On the default rows
+    // the last line must sit inside its column: a clipped final row looks
+    // identical to a visible one, because `toBeVisible` ignores overflow.
+    // Geometry is the signal — `scrollHeight` over-reports on these flex
+    // columns because child margins inflate it.
+    const notes = await dialog.getByTestId('import-review-notes').boundingBox();
+    const left = await dialog
+      .getByTestId('import-review-zone-left')
+      .boundingBox();
+    expect(
+      notes && left && notes.y + notes.height <= left.y + left.height,
+      'the last Transaction field must not be clipped',
+    ).toBe(true);
+
+    const right = await dialog
+      .getByTestId('import-review-zone-right')
+      .boundingBox();
+    const lastRight = await dialog
+      .getByText('No rule touched this row.')
+      .boundingBox();
+    expect(
+      lastRight &&
+        right &&
+        lastRight.y + lastRight.height <= right.y + right.height,
+      'the last Rules line must not be clipped',
+    ).toBe(true);
+
+    // Narrow stacks the zones and the shared container takes the single
+    // scrollbar — scrolling is the design there, not a failure. What must
+    // remain true is that the overflow is REACHABLE. The Actions row is a
+    // sibling outside the scroll box, so checking it would prove nothing.
+    await page.setViewportSize({ width: 600, height: 900 });
+    const zones = dialog.getByTestId('import-review-zones');
+    await expect
+      .poll(() =>
+        zones.evaluate(element => getComputedStyle(element).overflowY),
+      )
+      .toBe('auto');
+    const scroll = await zones.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      return {
+        top: element.scrollTop,
+        max: element.scrollHeight - element.clientHeight,
+      };
+    });
+    expect(scroll.max).toBeGreaterThan(0);
+    expect(scroll.top).toBe(scroll.max);
+
+    const zonesBox = await zones.boundingBox();
+    const lastZone = await dialog
+      .getByTestId('import-review-zone-right')
+      .boundingBox();
+    expect(
+      zonesBox &&
+        lastZone &&
+        lastZone.y + lastZone.height <= zonesBox.y + zonesBox.height + 1,
+      'the stacked zones must be scrollable into view',
+    ).toBe(true);
+  });
+
   test('the refined review surface in every theme', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review VRT',

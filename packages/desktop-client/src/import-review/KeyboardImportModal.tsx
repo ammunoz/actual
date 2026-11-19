@@ -101,7 +101,7 @@ import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
  * would make the whole layout jump. A row with more to say scrolls inside
  * one of the two columns instead.
  */
-const DETAIL_HEIGHT = 300;
+const DETAIL_HEIGHT = 312;
 
 /** The hairline that separates the status line's number pairs. */
 function StatusSeparator() {
