@@ -55,7 +55,7 @@ export function DetailField({
       <Text
         data-testid={testId ? `${testId}-label` : undefined}
         style={{
-          color: theme.pageTextSubdued,
+          color: theme.tableHeaderText,
           fontWeight: 400,
           flex: '0 0 72px',
           minWidth: 72,

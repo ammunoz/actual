@@ -1942,11 +1942,17 @@ export function KeyboardImportModal({
                   flexShrink: 0,
                 }}
               >
-                <FinancialText style={{ color: theme.numberPositive }}>
+                <FinancialText
+                  data-testid="import-review-sum-in"
+                  style={{ color: theme.numberPositive }}
+                >
                   {format(summary.inflowCents, 'financial-with-sign')}
                 </FinancialText>
                 <Text style={{ color: theme.tableHeaderText }}>·</Text>
-                <FinancialText style={{ color: theme.numberNegative }}>
+                <FinancialText
+                  data-testid="import-review-sum-out"
+                  style={{ color: theme.numberNegative }}
+                >
                   {format(summary.outflowCents, 'financial-with-sign')}
                 </FinancialText>
               </View>
@@ -2044,7 +2050,7 @@ export function KeyboardImportModal({
                       children: (
                         <Text
                           style={{
-                            color: theme.pageTextSubdued,
+                            color: theme.tableHeaderText,
                             fontWeight: 500,
                           }}
                         >
@@ -2058,7 +2064,7 @@ export function KeyboardImportModal({
                       children: (
                         <Text
                           style={{
-                            color: theme.pageTextSubdued,
+                            color: theme.tableHeaderText,
                             fontWeight: 500,
                           }}
                         >
@@ -2072,7 +2078,7 @@ export function KeyboardImportModal({
                       children: (
                         <Text
                           style={{
-                            color: theme.pageTextSubdued,
+                            color: theme.tableHeaderText,
                             fontWeight: 500,
                           }}
                         >
@@ -2086,7 +2092,7 @@ export function KeyboardImportModal({
                       children: (
                         <Text
                           style={{
-                            color: theme.pageTextSubdued,
+                            color: theme.tableHeaderText,
                             fontWeight: 500,
                             textAlign: 'right',
                           }}
@@ -2105,7 +2111,7 @@ export function KeyboardImportModal({
                       children: (
                         <Text
                           style={{
-                            color: theme.pageTextSubdued,
+                            color: theme.tableHeaderText,
                             fontWeight: 500,
                             textAlign: 'right',
                           }}
@@ -2233,7 +2239,7 @@ export function KeyboardImportModal({
                               style={{
                                 fontStyle: payee.muted ? 'italic' : undefined,
                                 color: payee.muted
-                                  ? theme.pageTextSubdued
+                                  ? theme.tableHeaderText
                                   : undefined,
                               }}
                             >
@@ -2262,7 +2268,7 @@ export function KeyboardImportModal({
                                   ? 'italic'
                                   : undefined,
                                 color: category.muted
-                                  ? theme.pageTextSubdued
+                                  ? theme.tableHeaderText
                                   : undefined,
                               }}
                             >
@@ -2431,7 +2437,7 @@ export function KeyboardImportModal({
                       {review.isAlreadyImported(rowKey(focused)) ? (
                         <Text
                           data-testid="import-review-already-imported"
-                          style={{ color: theme.pageTextSubdued }}
+                          style={{ color: theme.tableHeaderText }}
                         >
                           <Trans>
                             This transaction is already in the budget
@@ -2556,7 +2562,7 @@ export function KeyboardImportModal({
                             style={{
                               fontSize: 11,
                               fontFamily: 'monospace',
-                              color: theme.pageTextSubdued,
+                              color: theme.tableHeaderText,
                               border: `1px solid ${theme.tableBorder}`,
                               borderRadius: 3,
                               padding: '0 4px',

@@ -18,7 +18,7 @@ export function ZoneLabel({ children }: ZoneLabelProps) {
   return (
     <Text
       style={{
-        color: theme.pageTextSubdued,
+        color: theme.tableHeaderText,
         fontWeight: 500,
         fontSize: 12,
       }}

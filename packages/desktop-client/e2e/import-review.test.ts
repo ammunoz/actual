@@ -3091,6 +3091,76 @@ ${transactions}
     );
   });
 
+  test('money and secondary text read in every theme', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Theme Contrast',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const status = dialog.getByTestId('import-review-status');
+
+    for (const theme of ['light', 'dark', 'midnight']) {
+      await page.evaluate(name => window.Actual.setTheme(name), theme);
+      await expect(page.locator('[data-theme]')).toHaveAttribute(
+        'data-theme',
+        theme,
+      );
+
+      // The sums are money, so each wears its own semantic token. Read the
+      // COMPUTED colour, so a custom theme that overrides the token is
+      // checked too, not just the three shipped palettes.
+      const colors = await status.evaluate(root => {
+        const pick = (id: string) => {
+          const node = root.querySelector(`[data-testid="${id}"]`);
+          if (!node) throw new Error(`missing ${id}`);
+          return getComputedStyle(node).color;
+        };
+        return {
+          in: pick('import-review-sum-in'),
+          out: pick('import-review-sum-out'),
+        };
+      });
+
+      // The `role="dialog"` node is an unstyled wrapper; the painted
+      // surface is its child, the modal content container. Reading the
+      // wrapper would report transparent black and quietly compare every
+      // colour against black instead of against the modal.
+      const modalBackground = await dialog.evaluate(
+        node => getComputedStyle(node.firstElementChild!).backgroundColor,
+      );
+      for (const color of Object.values(colors)) {
+        expect(contrastRatio(color, modalBackground)).toBeGreaterThanOrEqual(
+          4.5,
+        );
+      }
+
+      // The detail label is secondary text; it must not fade into the
+      // same surface either.
+      const labelColor = await dialog.evaluate(root => {
+        const node = root.querySelector(
+          '[data-testid="import-review-amount-label"]',
+        );
+        if (!node) throw new Error('missing detail amount label');
+        return getComputedStyle(node).color;
+      });
+      expect(contrastRatio(labelColor, modalBackground)).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+
+    await page.evaluate(() => window.Actual.setTheme('auto'));
+    await expect(page.locator('[data-theme]')).toHaveAttribute(
+      'data-theme',
+      'auto',
+    );
+  });
+
   test('the progress bar says how far through the file the user is', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Progress',

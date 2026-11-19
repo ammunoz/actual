@@ -157,7 +157,7 @@ export function ReviewHeader({
         style={{
           fontSize: 15,
           fontWeight: 500,
-          color: theme.pageTextSubdued,
+          color: theme.tableHeaderText,
           whiteSpace: 'nowrap',
         }}
       >
@@ -193,11 +193,11 @@ export function ReviewHeader({
                 '&:first-of-type': { boxShadow: 'none' },
                 ...(isCurrent
                   ? {
-                      backgroundColor: theme.formInputBackground,
-                      color: theme.ruleLockText,
-                      fontWeight: 'bold',
+                      backgroundColor: theme.upcomingBackground,
+                      color: theme.upcomingText,
+                      fontWeight: 600,
                     }
-                  : { color: theme.pageTextSubdued }),
+                  : { color: theme.tableHeaderText }),
                 // The colours are in a CLASS and not in an inline style,
                 // so the button's own hover and pressed rules still
                 // apply — an inline style beats them — and a disabled
