@@ -2220,6 +2220,41 @@ ${transactions}
     expect(new Set(labelWidths).size).toBe(1);
     expect(labelWidths[0]).toBeGreaterThan(0);
 
+    // A flex child of this column can collapse to nothing and let the
+    // next line paint over it. Each field must sit BELOW the one before
+    // it — a comparison of measured boxes, not a pixel assertion.
+    const rowBoxes = await evidence.evaluate(
+      (root, ids) =>
+        ids.map(id => {
+          const rect = root
+            .querySelector(`[data-testid="${id}"]`)!
+            .getBoundingClientRect();
+          return { top: rect.top, bottom: rect.bottom };
+        }),
+      fieldIds,
+    );
+    for (let index = 0; index < rowBoxes.length; index++) {
+      // A collapsed field has top === bottom: it would pass the ordering
+      // check while its children painted over the next row.
+      expect(rowBoxes[index].bottom - rowBoxes[index].top).toBeGreaterThan(0);
+      if (index > 0) {
+        expect(rowBoxes[index].top).toBeGreaterThanOrEqual(
+          rowBoxes[index - 1].bottom - 1,
+        );
+      }
+    }
+
+    // And none of the three scrolling zones may be clipped by the box:
+    // a zone that is in the DOM but half hidden is a zone the user
+    // cannot read. Compare the box's own scroll size to its client size
+    // rather than guessing which zone might have grown.
+    const zones = dialog.getByTestId('import-review-zones');
+    await expect(zones).toBeAttached();
+    const fits = await zones.evaluate(
+      element => element.scrollHeight <= element.clientHeight + 1,
+    );
+    expect(fits).toBe(true);
+
     // The evidence zone carries what the LIST does not: the file's own
     // vendor string, in full.
     await expect(dialog.getByTestId('import-review-vendor')).toContainText(

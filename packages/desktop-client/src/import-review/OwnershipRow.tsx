@@ -37,7 +37,12 @@ export function OwnershipRow({
 }: OwnershipRowProps) {
   return (
     <View
-      style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}
+      style={{
+        flexShrink: 0,
+        flexDirection: 'row',
+        gap: 6,
+        alignItems: 'center',
+      }}
       data-testid={fieldTestId}
       data-field={field}
     >

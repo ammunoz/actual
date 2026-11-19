@@ -35,7 +35,14 @@ export function DetailField({
 }: DetailFieldProps) {
   return (
     <View
-      style={{ flexDirection: 'row', gap: 6, alignItems: 'baseline' }}
+      style={{
+        // View carries min-height: 0, so a field inside the detail's
+        // flex column would otherwise shrink into the field below it.
+        flexShrink: 0,
+        flexDirection: 'row',
+        gap: 6,
+        alignItems: 'baseline',
+      }}
       data-testid={testId}
     >
       <Text

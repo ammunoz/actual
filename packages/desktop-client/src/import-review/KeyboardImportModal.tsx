@@ -2150,12 +2150,12 @@ export function KeyboardImportModal({
                   // the cursor would make the whole layout jump — the
                   // exact failure the design rejected when it chose
                   // master-detail over an inline inspector.
-                  // The detail region is 300px tall — the design's
+                  // The detail region has a fixed height — the design's
                   // vertical budget for a region that never changes size.
                   // All four zones are always mounted at this height. A
                   // row with more to say scrolls INSIDE the zones rather
                   // than growing the region and moving the list.
-                  height: 300,
+                  height: 362,
                   border: `1px solid ${theme.tableBorder}`,
                   borderRadius: 6,
                   overflow: 'hidden',
@@ -2165,7 +2165,7 @@ export function KeyboardImportModal({
                 {/* The zones scroll; the ACTIONS stay put, because the
                     actions are what the user came for. */}
                 <View
-                  style={{ gap: 12, flex: 1, overflowY: 'auto', padding: 14 }}
+                  style={{ gap: 6, flex: 1, overflowY: 'auto', padding: 8 }}
                   data-testid="import-review-zones"
                 >
                   {/* ZONE 1 — EVIDENCE: the facts about this row.
@@ -2181,7 +2181,10 @@ export function KeyboardImportModal({
                       it is evidence, not a thing to scan: it only
                       matters when two categories share a name, and it
                       matters for the row the user is ON. */}
-                  <View style={{ gap: 4 }} data-testid="import-review-evidence">
+                  <View
+                    style={{ gap: 2, flexShrink: 0 }}
+                    data-testid="import-review-evidence"
+                  >
                     <ZoneLabel>
                       <Trans>Evidence</Trans>
                     </ZoneLabel>
@@ -2256,9 +2259,10 @@ export function KeyboardImportModal({
                       through at every level. */}
                   <View
                     style={{
-                      gap: 6,
+                      gap: 2,
+                      flexShrink: 0,
                       borderTop: `1px solid ${theme.tableBorder}`,
-                      paddingTop: 10,
+                      paddingTop: 8,
                     }}
                     data-testid="import-review-reason"
                   >
@@ -2273,6 +2277,7 @@ export function KeyboardImportModal({
                         demand, so the default surface is the small one. */}
                     <View
                       style={{
+                        flexShrink: 0,
                         flexDirection: 'row',
                         alignItems: 'baseline',
                         gap: 8,
@@ -2402,9 +2407,10 @@ export function KeyboardImportModal({
                       row no rule touched says so instead of vanishing. */}
                   <View
                     style={{
-                      gap: 4,
+                      gap: 2,
+                      flexShrink: 0,
                       borderTop: `1px solid ${theme.tableBorder}`,
-                      paddingTop: 10,
+                      paddingTop: 8,
                     }}
                     data-testid="import-review-ruled"
                   >
@@ -2453,7 +2459,7 @@ export function KeyboardImportModal({
                             />
                           );
                         })}
-                        <View style={{ gap: 6, marginTop: 4 }}>
+                        <View style={{ gap: 6, marginTop: 4, flexShrink: 0 }}>
                           {/* One button per rule. Two rules can control
                               two fields of the same row, and the button
                               has to say WHICH one it opens: the fields
