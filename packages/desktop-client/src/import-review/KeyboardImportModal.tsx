@@ -101,7 +101,7 @@ import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
  * would make the whole layout jump. A row with more to say scrolls inside
  * one of the two columns instead.
  */
-const DETAIL_HEIGHT = 362;
+const DETAIL_HEIGHT = 300;
 
 /** The hairline that separates the status line's number pairs. */
 function StatusSeparator() {
@@ -221,10 +221,11 @@ export function KeyboardImportModal({
         minHeight: 0,
         overflowY: 'auto' as const,
         scrollbarGutter: 'stable' as const,
-        gap: 6,
-        padding: 8,
+        gap: 4,
+        paddingTop: 12,
+        paddingBottom: 12,
       }
-    : { flexShrink: 0, gap: 6, padding: 8 };
+    : { flexShrink: 0, gap: 4, paddingTop: 12, paddingBottom: 12 };
   const format = useFormat();
   const locale = useLocale();
   const dispatchModal = useDispatch();
@@ -2343,7 +2344,9 @@ export function KeyboardImportModal({
                     flex: 1,
                     minHeight: 0,
                     flexDirection: atLeastMediumWidth ? 'row' : 'column',
-                    gap: atLeastMediumWidth ? 12 : 6,
+                    gap: atLeastMediumWidth ? 24 : 6,
+                    paddingLeft: 14,
+                    paddingRight: 14,
                     ...(atLeastMediumWidth
                       ? {}
                       : { overflowY: 'auto' as const }),
@@ -2465,7 +2468,7 @@ export function KeyboardImportModal({
                         gap: 2,
                         flexShrink: 0,
                         borderTop: `1px solid ${theme.tableBorder}`,
-                        paddingTop: 8,
+                        paddingTop: 10,
                       }}
                       data-testid="import-review-verdict"
                     >
@@ -2622,7 +2625,7 @@ export function KeyboardImportModal({
                         gap: 2,
                         flexShrink: 0,
                         borderTop: `1px solid ${theme.tableBorder}`,
-                        paddingTop: 8,
+                        paddingTop: 10,
                       }}
                       data-testid="import-review-rules-zone"
                     >
@@ -2693,7 +2696,13 @@ export function KeyboardImportModal({
                   </View>
                 </View>
 
-                <View style={{ flexShrink: 0 }}>
+                <View
+                  style={{
+                    flexShrink: 0,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                  }}
+                >
                   {/* The rule offer is a contextual ACTION: it rides
                     along with a correction and never interrupts the
                     accept rhythm. It stays beside the actions, out of
@@ -2766,12 +2775,16 @@ export function KeyboardImportModal({
                     driveable without reading the key list. */}
                 <View
                   style={{
-                    gap: 6,
+                    gap: 8,
                     // The zones above are the scroll; these siblings must
                     // never be the ones that get squeezed.
                     flexShrink: 0,
+                    marginTop: 8,
                     borderTop: `1px solid ${theme.tableBorder}`,
                     paddingTop: 10,
+                    paddingBottom: 8,
+                    paddingLeft: 14,
+                    paddingRight: 14,
                   }}
                   data-testid="import-review-actions"
                 >

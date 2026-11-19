@@ -4821,4 +4821,30 @@ ${transactions}
       landed.first().getByText('Demo Grocery Store', { exact: true }).first(),
     ).toHaveCSS('font-weight', '600');
   });
+
+  test('the refined review surface in every theme', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review VRT',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-details')).toBeVisible();
+
+    // Two tight targets, not the whole page: the detail region carries the
+    // refined zones and the status line carries the styled money. Each
+    // call captures the three themes, so any token that drifts in one
+    // palette but not the others is caught.
+    await expect(
+      dialog.getByTestId('import-review-status'),
+    ).toMatchThemeScreenshots();
+    await expect(
+      dialog.getByTestId('import-review-details'),
+    ).toMatchThemeScreenshots();
+  });
 });

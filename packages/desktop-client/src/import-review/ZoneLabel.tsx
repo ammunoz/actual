@@ -47,6 +47,10 @@ export function ZoneSubhead({ children }: ZoneSubheadProps) {
         color: theme.tableHeaderText,
         fontWeight: 500,
         fontSize: 11,
+        // The mockup gives a grouping line room above the fields it
+        // introduces, and only a little below it before the first one.
+        marginTop: 6,
+        marginBottom: 2,
       }}
     >
       {children}
