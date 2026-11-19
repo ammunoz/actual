@@ -25,7 +25,7 @@ To turn it on, open the command bar with <Key mod="ctrl" fixed k="k" /> (or <Key
 
 When it is on, importing an OFX or QFX file opens the review instead of the usual import dialog. The review shows every row the file contains, and what Actual would do with it.
 
-The list shows each row's date, payee, category, amount and status. The detail section below it is about the row you are on: it shows the vendor string from the file, why the review is holding the row back, which rules touched it, and what you can do with it. The detail section does not change size as you move between rows.
+The list shows each row's date, payee, category, amount and status. The detail section below it is about the row you are on. Its Evidence zone lines up the vendor string from the file with the date, amount, payee, category and notes. Reason says what the gate saw and what it will do at the trust level you chose; when the row is flagged, a **Why?** link shows what each trust level would do. Ownership names the fields any rules set, and Actions holds the row's commands, each with its key. The detail section does not change size as you move between rows.
 
 <img width="800" loading="lazy" alt="The keyboard import review: the file's rows with their status, a row being edited field by field, a rule being created, and the imported transactions landing in the budget" src="/img/transactions/importing-keyboard-review.gif" />
 
