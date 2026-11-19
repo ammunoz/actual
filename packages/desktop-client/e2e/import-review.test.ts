@@ -3767,6 +3767,62 @@ ${transactions}
     }
   });
 
+  test('the help overlay never overlaps its close hint with Limitations', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Help Hint',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-hints')).toBeVisible();
+
+    await page.keyboard.press('Shift+Slash');
+    const help = dialog.getByTestId('import-review-help');
+    await expect(help).toBeVisible();
+
+    const heading = help.getByTestId('import-review-help-limitations-heading');
+    const hint = help.getByTestId('import-review-help-close-hint');
+    // The heading may be scrolled out of view inside the body; it must
+    // still exist. The hint is pinned and must always be visible.
+    await expect(heading).toBeAttached();
+    await expect(hint).toBeVisible();
+
+    const [headingBox, hintBox] = await Promise.all([
+      heading.boundingBox(),
+      hint.boundingBox(),
+    ]);
+    if (!headingBox || !hintBox) {
+      throw new Error('The Limitations heading or the close hint was missing');
+    }
+
+    // Separate vertical bands, not pixels: this fails exactly when a
+    // collapsed block lets the border paint across the heading and the
+    // hint spill into the same few rows.
+    const separateBands =
+      hintBox.y + hintBox.height <= headingBox.y ||
+      headingBox.y + headingBox.height <= hintBox.y;
+    expect(separateBands, 'the close hint must not overlap Limitations').toBe(
+      true,
+    );
+
+    // The hint is pinned OUTSIDE the body: scrolling the body to the very
+    // bottom must leave the hint's box exactly where it was. Reading the
+    // scrollback also proves the body really is the scroll region, without
+    // depending on how many keys the keymap happens to have.
+    const body = help.getByTestId('import-review-help-body');
+    const scrolledTo = await body.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    });
+    expect(scrolledTo).toBeGreaterThan(0);
+    expect(await hint.boundingBox()).toEqual(hintBox);
+  });
+
   test('d edits the date', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Edit Date',
