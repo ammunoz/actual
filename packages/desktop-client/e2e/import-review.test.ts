@@ -2250,6 +2250,28 @@ ${transactions}
     );
     await expect(actions.getByTestId('import-review-drop')).toContainText('r');
 
+    // The mockup's actions are framed chips, not bare text. Read the
+    // buttons' own computed borders and surfaces: a border that exists
+    // and a surface that is not transparent, with no pixel asserted.
+    const surfaces = await actions
+      .locator('button[data-testid]')
+      .evaluateAll(elements =>
+        elements.map(element => {
+          const style = getComputedStyle(element);
+          return {
+            borderWidth: parseFloat(style.borderTopWidth),
+            background: style.backgroundColor,
+          };
+        }),
+      );
+    // This file has no held row, so the four always-present commands are
+    // the whole set: the override is the only conditional one.
+    expect(surfaces).toHaveLength(4);
+    for (const button of surfaces) {
+      expect(button.borderWidth).toBeGreaterThan(0);
+      expect(button.background).not.toBe('rgba(0, 0, 0, 0)');
+    }
+
     // And they do what they say.
     await actions.getByTestId('import-review-accept').click();
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');

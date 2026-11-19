@@ -35,6 +35,7 @@ import type {
   RowGate,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { integerToAmount } from '@actual-app/core/shared/util';
+import { css } from '@emotion/css';
 import { format as formatDate, parseISO } from 'date-fns';
 
 import { Modal } from '#components/common/Modal';
@@ -265,6 +266,26 @@ export function KeyboardImportModal({
     if (Number.isNaN(parsed.getTime())) return date;
     return formatDate(parsed, dateFormat);
   };
+
+  // The row's own commands are framed chips, the way the mockup draws
+  // them: a border, the table's header surface and the page's ink. They
+  // are secondary to the Import button, so they wear the table's tokens
+  // rather than the button's default surface.
+  //
+  // These go in a CLASS, not an inline style: an inline style would also
+  // beat the button's hover and disabled rules, leaving the chips with
+  // no hover colour and a disabled chip that looked enabled.
+  const actionButtonClass = css({
+    backgroundColor: theme.tableHeaderBackground,
+    borderColor: theme.tableBorder,
+    color: theme.pageText,
+    '&[data-hovered]': { backgroundColor: theme.buttonNormalBackgroundHover },
+    '&[data-disabled]': {
+      backgroundColor: theme.buttonNormalDisabledBackground,
+      borderColor: theme.buttonNormalDisabledBorder,
+      color: theme.buttonNormalDisabledText,
+    },
+  });
 
   /** The gate's outcome, in the user's words. */
   const gateLabel = (gate: RowGate): string => {
@@ -2499,6 +2520,7 @@ export function KeyboardImportModal({
                         {focusedRules.vendorToPayee &&
                         !focusedRuledFields.has('payee') ? (
                           <Button
+                            className={actionButtonClass}
                             data-testid="import-review-rule-vendor-to-payee"
                             isDisabled={creatingRule}
                             onPress={() => {
@@ -2518,6 +2540,7 @@ export function KeyboardImportModal({
                         {focusedRules.payeeToCategory &&
                         !focusedRuledFields.has('category') ? (
                           <Button
+                            className={actionButtonClass}
                             data-testid="import-review-rule-payee-to-category"
                             isDisabled={creatingRule}
                             onPress={() => {
@@ -2584,7 +2607,8 @@ export function KeyboardImportModal({
                     }}
                   >
                     <Button
-                      variant="bare"
+                      variant="normal"
+                      className={actionButtonClass}
                       data-testid="import-review-edit-row"
                       onPress={event => pressOnce(event, 'edit-chain')}
                     >
@@ -2596,7 +2620,8 @@ export function KeyboardImportModal({
                       <KeyCap>e</KeyCap>
                     </Button>
                     <Button
-                      variant="bare"
+                      variant="normal"
+                      className={actionButtonClass}
                       data-testid="import-review-accept"
                       onPress={event => pressOnce(event, 'accept')}
                     >
@@ -2604,7 +2629,8 @@ export function KeyboardImportModal({
                       <KeyCap>a</KeyCap>
                     </Button>
                     <Button
-                      variant="bare"
+                      variant="normal"
+                      className={actionButtonClass}
                       data-testid="import-review-drop"
                       onPress={event => pressOnce(event, 'drop')}
                     >
@@ -2619,7 +2645,8 @@ export function KeyboardImportModal({
                     {focusedEvaluation &&
                     isOverridableHeld(focusedEvaluation) ? (
                       <Button
-                        variant="bare"
+                        variant="normal"
+                        className={actionButtonClass}
                         data-testid="import-review-accept-anyway"
                         onPress={event => pressOnce(event, 'accept-override')}
                       >
@@ -2628,7 +2655,8 @@ export function KeyboardImportModal({
                       </Button>
                     ) : null}
                     <Button
-                      variant="bare"
+                      variant="normal"
+                      className={actionButtonClass}
                       data-testid="import-review-edit-rules"
                       onPress={event => pressOnce(event, 'edit-rules')}
                     >
