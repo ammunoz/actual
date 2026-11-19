@@ -2479,18 +2479,37 @@ export function KeyboardImportModal({
                       {/* The verdict leads: what the gate will do with this
                         row at THIS trust level, coloured by outcome. */}
                       {currentGate ? (
-                        <Text
+                        <View
                           style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
                             flexShrink: 0,
-                            fontWeight: 600,
-                            color: verdictColor(currentGate),
                           }}
+                          data-testid="import-review-verdict-line"
                         >
-                          {t('{{outcome}} at {{level}}', {
-                            outcome: gateLabel(currentGate),
-                            level: trustLevelLabel(t, review.trustLevel),
-                          })}
-                        </Text>
+                          <SvgFlag
+                            width={13}
+                            height={13}
+                            aria-hidden="true"
+                            style={{
+                              flexShrink: 0,
+                              color: verdictColor(currentGate),
+                            }}
+                          />
+                          <Text
+                            style={{
+                              minWidth: 0,
+                              fontWeight: 600,
+                              color: verdictColor(currentGate),
+                            }}
+                          >
+                            {t('{{outcome}} at {{level}}', {
+                              outcome: gateLabel(currentGate),
+                              level: trustLevelLabel(t, review.trustLevel),
+                            })}
+                          </Text>
+                        </View>
                       ) : null}
 
                       {/* The explanation: what the gate actually saw. A row

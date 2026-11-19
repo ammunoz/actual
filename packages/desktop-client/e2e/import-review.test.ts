@@ -2508,6 +2508,26 @@ ${transactions}
     // what the gate saw. The three-level breakdown is not on the default
     // surface.
     await expect(reason).toContainText('Flagged at Cautious');
+
+    // The flag is part of the verdict, not decoration: the mockup leads
+    // with it and it carries the same outcome colour as the words.
+    const verdictLine = reason.getByTestId('import-review-verdict-line');
+    const flag = verdictLine.locator('svg');
+    await expect(flag).toHaveCount(1);
+    const [flagInk, verdictInk, labelInk] = await Promise.all([
+      flag.evaluate(element => getComputedStyle(element).color),
+      verdictLine
+        .getByText('Flagged at Cautious', { exact: true })
+        .evaluate(element => getComputedStyle(element).color),
+      reason
+        .getByText('Review status', { exact: true })
+        .evaluate(element => getComputedStyle(element).color),
+    ]);
+    expect(flagInk).toBe(verdictInk);
+    // Not merely matching by inheritance: the flag must actually be
+    // tinted by the outcome, not left at the zone's default ink.
+    expect(flagInk).not.toBe(labelInk);
+
     const why = reason.getByTestId('import-review-why');
     await expect(why).toHaveAttribute(
       'aria-label',
