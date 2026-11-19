@@ -54,7 +54,7 @@ import { ConfirmPane } from './ConfirmPane';
 import { DetailField } from './DetailField';
 import { EDITOR_FOR_ACTION } from './editor-mode';
 import type { EditorMode } from './editor-mode';
-import { hasOverridableHeldRow, isOverridableHeld } from './held-rows';
+import { isOverridableHeld } from './held-rows';
 import { HelpOverlay } from './HelpOverlay';
 import { HintStrip } from './HintStrip';
 import { KeyCap } from './KeyCap';
@@ -900,11 +900,6 @@ export function KeyboardImportModal({
       focusedEvaluation?.flags.some(flag => flag.kind === 'amount-mismatch') ??
       false,
     [focusedEvaluation],
-  );
-
-  const anyHeldRowOverridable = useMemo(
-    () => hasOverridableHeldRow(review.evaluations),
-    [review.evaluations],
   );
 
   // The notes the row would be imported with. An empty string means the
@@ -3086,7 +3081,6 @@ export function KeyboardImportModal({
                 matter, so the strip keeps quiet while one is. */}
             {pane === null ? (
               <HintStrip
-                hasOverridableHeldRow={anyHeldRowOverridable}
                 actions={
                   <View
                     style={{

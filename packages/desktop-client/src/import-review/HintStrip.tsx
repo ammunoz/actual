@@ -4,17 +4,9 @@ import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
 
-import { HELD_HINT, LIST_HINT } from './hint-labels';
+import { HINT } from './hint-labels';
 
 type HintStripProps = {
-  /**
-   * Whether a row is held back that the user can override.
-   *
-   * Not "a row is blocked": a hard-blocked row cannot be overridden, and
-   * a skipped one can be even though it is not counted as blocked. The
-   * caller asks the evaluation, not the summary.
-   */
-  hasOverridableHeldRow: boolean;
   /**
    * The strip's actions.
    *
@@ -25,12 +17,12 @@ type HintStripProps = {
 };
 
 /**
- * The footer: the bulk actions, and the keys that matter right now.
+ * The footer: the bulk actions, and the keys that are not on any button.
  *
  * The help overlay has every key the review understands, but it is only
  * reachable with `?` and it is a flat list — it does not know what the
- * user is doing. The strip does: while the list has the keyboard, it
- * says the keys that drive it.
+ * user is doing. The strip does: it names the two keys a person needs
+ * that the Actions zone cannot show for them.
  *
  * **It says nothing when a pane is open**, because every pane already
  * says its own keys where they matter: the field editor says "Enter to
@@ -38,12 +30,8 @@ type HintStripProps = {
  * to save · Escape to cancel", and the confirmation says "Arrow keys to
  * move · Enter to choose · Escape to go back". Saying them twice would
  * be noise.
- *
- * It is rendered only while the list has the keyboard, so it cannot
- * claim a fixed height: the two variants have different lengths, and a
- * row becoming held changes which one is shown.
  */
-export function HintStrip({ hasOverridableHeldRow, actions }: HintStripProps) {
+export function HintStrip({ actions }: HintStripProps) {
   return (
     <View
       data-testid="import-review-hints"
@@ -71,7 +59,7 @@ export function HintStrip({ hasOverridableHeldRow, actions }: HintStripProps) {
           textAlign: 'right',
         }}
       >
-        {hasOverridableHeldRow ? HELD_HINT : LIST_HINT}
+        {HINT}
       </Text>
     </View>
   );

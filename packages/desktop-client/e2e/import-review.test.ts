@@ -711,7 +711,7 @@ ${transactions}
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
   });
 
-  test('the hint strip says the keys, and says the override when a row is held', async () => {
+  test('the hint strip keeps quiet while a pane is open', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Hint Strip',
       offBudget: false,
@@ -728,13 +728,13 @@ ${transactions}
     const hints = dialog.getByTestId('import-review-hints');
     await expect(hints).toBeVisible();
 
-    // A row is held back — the second one has no payee name at all — so
-    // the strip says the one key that releases it.
+    // A row is held back — the second one has no payee name at all — but
+    // the strip stays the same: the override is on the Actions button.
     await expect(
       dialog.getByTestId('import-review-row').nth(1),
     ).toHaveAttribute('data-gate', 'block');
-    await expect(hints).toContainText('Ctrl+Shift+A');
-    await expect(hints).toContainText('accept anyway');
+    await expect(hints).toContainText('j/k move');
+    await expect(hints).toContainText('? help');
 
     // The strip is the only place these keys are: the help overlay is
     // behind `?`, and nothing else on screen says them.
@@ -751,7 +751,7 @@ ${transactions}
     await expect(hints).toBeVisible();
   });
 
-  test('the hint strip says how to open the rules and the key list', async () => {
+  test('the hint strip stays on one line', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Hint Keys',
       offBudget: false,
@@ -768,7 +768,10 @@ ${transactions}
     ).toBeVisible();
 
     const hints = dialog.getByTestId('import-review-hints');
-    await expect(hints).toContainText('Shift+E rules');
+    // Row commands are on their own buttons; the strip only names the
+    // keys that are not on a button.
+    await expect(hints).not.toContainText('Shift+E rules');
+    await expect(hints).toContainText('j/k move');
     await expect(hints).toContainText('? help');
 
     // A hint that wraps onto a second line is a hint that is read less.
@@ -787,12 +790,10 @@ ${transactions}
     expect(box.height).toBeLessThan(box.lineHeight * 1.6);
   });
 
-  test('the hint strip says the override for a SKIPPED row too', async () => {
+  test('the hint strip stays the same for a SKIPPED row', async () => {
     // A duplicate FITID is SKIPPED at the cautious trust level, not
-    // blocked. It is still held back, and the override is still what
-    // releases it — so the strip has to say the override. The summary's
-    // "blocked" count does not include skipped rows, so asking the
-    // summary would miss this case entirely.
+    // blocked. It is still held back, but the strip does not change with
+    // the rows: the override lives on the Actions button.
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Hint Strip Skipped',
       offBudget: false,
@@ -821,10 +822,11 @@ ${transactions}
     expect(gates).not.toContain('block');
 
     const hints = dialog.getByTestId('import-review-hints');
-    await expect(hints).toContainText('Ctrl+Shift+A');
+    await expect(hints).toContainText('j/k move');
+    await expect(hints).toContainText('? help');
   });
 
-  test('the hint strip omits the override when nothing is held back', async () => {
+  test('the hint strip stays the same whatever the rows are doing', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Hint Strip Clean',
       offBudget: false,
@@ -841,11 +843,12 @@ ${transactions}
     const hints = dialog.getByTestId('import-review-hints');
     await expect(hints).toBeVisible();
 
-    // Nothing is held back, so the override is not mentioned: the strip
-    // says the keys, and only the keys that apply.
+    // The strip says the two keys that have no button. Row commands are
+    // on the buttons themselves, so they are not repeated here.
     await expect(hints).not.toContainText('accept anyway');
+    await expect(hints).not.toContainText('a accept');
     await expect(hints).toContainText('j/k move');
-    await expect(hints).toContainText('a accept');
+    await expect(hints).toContainText('? help');
   });
 
   test('picking a payee does NOT create a rule', async () => {
