@@ -3044,6 +3044,12 @@ export function KeyboardImportModal({
                       return;
                     }
                     openPane(null);
+                    // Finishing the chain finishes the row: it is a plain
+                    // accept, just like `a`, so the trust gate still has
+                    // the last word on whether it imports. This must come
+                    // BEFORE moveFocus — that advances focusedIndexRef,
+                    // which `decide` reads for the undo cursor.
+                    review.decide(review.focusedIndex, 'accept');
                     review.moveFocus(1);
                     return;
                   }

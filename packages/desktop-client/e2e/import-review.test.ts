@@ -1651,6 +1651,10 @@ ${transactions}
     await expect(editor).not.toBeVisible();
     await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
 
+    // Finishing the chain also accepts the row, the same way `a` does.
+    // (The cursor is already on row 1, so check the row we just left.)
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+
     // And the edits are in the row: the notes the user typed. The list
     // has no notes column, so the detail section is where they show —
     // and the cursor has moved on, so the detail is showing the NEXT
@@ -1663,6 +1667,86 @@ ${transactions}
     await expect(dialog.getByTestId('import-review-notes')).toContainText(
       'a note',
     );
+  });
+
+  test('undo after the chain puts the cursor back on the accepted row', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Undo',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+    const editor = dialog.getByTestId('import-review-editor');
+
+    await page.keyboard.press('e');
+    for (const [field, value] of [
+      ['payee', 'Kroger'],
+      ['category', 'Food'],
+      ['memo', 'a note'],
+    ] as const) {
+      await expect(editor).toHaveAttribute('data-field', field);
+      await editor.getByTestId('import-review-editor-input').fill(value);
+      await page.keyboard.press('Enter');
+    }
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+
+    // `decide` captured the cursor BEFORE `moveFocus`, so one undo takes
+    // back the accept AND returns to the row that was accepted — not the
+    // one the chain left the cursor on. The edits survive that undo, so
+    // the notes are still there.
+    await page.keyboard.press('u');
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
+    await expect(dialog.getByTestId('import-review-notes')).toContainText(
+      'a note',
+    );
+  });
+
+  test('finishing the chain on a dropped row accepts it, like a', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Chain Drop',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(3);
+    const editor = dialog.getByTestId('import-review-editor');
+
+    await page.keyboard.press('r');
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'drop');
+    // Dropping advances the cursor; go back to the row we just dropped.
+    await page.keyboard.press('k');
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+
+    // Fixing a dropped row is a reason to keep it: the terminal commit
+    // accepts it, exactly as pressing `a` on a dropped row does.
+    await page.keyboard.press('e');
+    for (const [field, value] of [
+      ['payee', 'Kroger'],
+      ['category', 'Food'],
+      ['memo', 'a note'],
+    ] as const) {
+      await expect(editor).toHaveAttribute('data-field', field);
+      await editor.getByTestId('import-review-editor-input').fill(value);
+      await page.keyboard.press('Enter');
+    }
+    await expect(editor).not.toBeVisible();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
   });
 
   test('p opens the payee alone, and its commit leaves the cursor', async () => {

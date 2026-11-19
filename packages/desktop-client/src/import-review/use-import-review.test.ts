@@ -1326,6 +1326,30 @@ describe('useImportReview', () => {
     expect(result.current.focusedIndex).toBe(0);
   });
 
+  it('one undo takes back a chain-terminal accept but keeps the edits', async () => {
+    const { result } = await renderReview();
+
+    // The edit chain commits its last field, accepts the row, then moves
+    // on. Each call snapshots, so one undo must take back only the accept:
+    // the field the user just fixed has to survive, and the cursor has to
+    // return to that row rather than the one the chain left it on.
+    act(() => {
+      result.current.edit(0, { payeeCanonical: 'Kroger' });
+      result.current.decide(0, 'accept');
+      result.current.moveFocus(1);
+    });
+    expect(result.current.state?.rows[0].decision).toBe('accept');
+    expect(result.current.focusedIndex).toBe(1);
+
+    act(() => {
+      result.current.undo();
+    });
+
+    expect(result.current.state?.rows[0].decision).toBe('pending');
+    expect(result.current.state?.rows[0].edits.payeeCanonical).toBe('Kroger');
+    expect(result.current.focusedIndex).toBe(0);
+  });
+
   it('keeps the cursor on a row', async () => {
     const { result } = await renderReview();
 
