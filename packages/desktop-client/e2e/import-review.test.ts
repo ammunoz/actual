@@ -2990,6 +2990,31 @@ ${transactions}
       trustBox.y < titleBox.y + titleBox.height;
 
     expect(overlapsHorizontally && overlapsVertically).toBe(false);
+
+    // The Import button belongs on that same row. A flat header with a
+    // 16px gap between every item pushed it onto a second line at 900px,
+    // leaving it vertically offset from the title. Compare measured boxes
+    // so the assertion holds at any zoom.
+    const importBox = await dialog
+      .getByTestId('import-review-import')
+      .boundingBox();
+    if (!titleBox || !importBox) {
+      throw new Error('The title or the Import button was not on the screen');
+    }
+    expect(
+      importBox.y < titleBox.y + titleBox.height &&
+        titleBox.y < importBox.y + importBox.height,
+      "at the dialog's 900px width, Import must share the title row",
+    ).toBe(true);
+
+    // Narrow must wrap rather than push the header sideways: the middle
+    // group holds the widest content and used to be a single unwrappable
+    // flex item.
+    await page.setViewportSize({ width: 600, height: 900 });
+    const fits = await dialog
+      .getByTestId('import-review-header-row')
+      .evaluate(element => element.scrollWidth <= element.clientWidth + 1);
+    expect(fits, 'the wrapped header must not overflow sideways').toBe(true);
   });
 
   test('the trust level says which one it is', async () => {

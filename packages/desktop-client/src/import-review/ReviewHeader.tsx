@@ -119,11 +119,17 @@ export function ReviewHeader({
         // wide, but it is capped at the viewport, and a narrow window
         // must not push the Import button off the screen.
         flexWrap: 'wrap',
+        // The mockup's header gaps are 6 (X/Escape), 16 (to the title),
+        // 12 and 12 (title/trust label/segments). Grouping the middle
+        // three reproduces that rhythm: a flat row with 16px between
+        // every item was a few pixels too wide at 900px and pushed the
+        // Import button onto a second line.
         columnGap: 16,
         rowGap: 8,
         minHeight: 60,
         flex: 'none',
       }}
+      data-testid="import-review-header-row"
     >
       {/* The X closes the review, and so does Escape. The button says
           which key does the same thing. */}
@@ -134,85 +140,98 @@ export function ReviewHeader({
         </KeyCap>
       </View>
 
-      {/* The title. It is the dialog's heading, and the modal is labelled
-          by it — see `REVIEW_TITLE_ID`. */}
-      <Text
-        id={REVIEW_TITLE_ID}
-        role="heading"
-        aria-level={1}
-        style={{
-          fontSize: 25,
-          fontWeight: 700,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <Trans>Review import</Trans>
-      </Text>
-
-      {/* The trust level is a CONTROL with three options, not a line of
-          text in the status strip. The keys are on the buttons, so a
-          mouse user and a keyboard user are doing the same thing. */}
-      <Text
-        id={TRUST_LABEL_ID}
-        style={{
-          fontSize: 15,
-          fontWeight: 500,
-          color: theme.tableHeaderText,
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <Trans>Trust level</Trans>
-      </Text>
+      {/* The title and the trust control share the mockup's `header-main`
+          group: 12px between its three items. It wraps on its own lines
+          too, so a narrow window degrades the way the flat row used to. */}
       <View
-        role="group"
-        aria-labelledby={TRUST_LABEL_ID}
         style={{
           flexDirection: 'row',
-          border: `1px solid ${theme.tableBorder}`,
-          borderRadius: 4,
-          overflow: 'hidden',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          columnGap: 12,
+          rowGap: 8,
         }}
       >
-        {TRUST_LEVELS.map(level => {
-          const isCurrent = level === trustLevel;
-          return (
-            <Button
-              key={level}
-              variant="bare"
-              aria-pressed={isCurrent}
-              data-testid={`import-review-trust-${level}`}
-              isDisabled={isTrustDisabled}
-              onPress={() => onTrustLevelChange(level)}
-              className={css({
-                padding: '5px 10px',
-                borderRadius: 0,
-                // The edge between the segments is drawn with a shadow,
-                // not a border: a border would push the label a pixel to
-                // the right of the ones above and below it.
-                boxShadow: `inset 1px 0 0 ${theme.tableBorder}`,
-                '&:first-of-type': { boxShadow: 'none' },
-                ...(isCurrent
-                  ? {
-                      backgroundColor: theme.upcomingBackground,
-                      color: theme.upcomingText,
-                      fontWeight: 600,
-                    }
-                  : { color: theme.tableHeaderText }),
-                // The colours are in a CLASS and not in an inline style,
-                // so the button's own hover and pressed rules still
-                // apply — an inline style beats them — and a disabled
-                // control looks disabled.
-                '&[data-disabled]': {
-                  backgroundColor: theme.buttonBareDisabledBackground,
-                  color: theme.buttonBareDisabledText,
-                },
-              })}
-            >
-              {trustLevelLabel(t, level)}
-              <KeyCap>{TRUST_LEVEL_KEYS[level]}</KeyCap>
-            </Button>
-          );
-        })}
+        {/* The title. It is the dialog's heading, and the modal is labelled
+            by it — see `REVIEW_TITLE_ID`. */}
+        <Text
+          id={REVIEW_TITLE_ID}
+          role="heading"
+          aria-level={1}
+          style={{
+            fontSize: 25,
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Trans>Review import</Trans>
+        </Text>
+
+        {/* The trust level is a CONTROL with three options, not a line of
+          text in the status strip. The keys are on the buttons, so a
+          mouse user and a keyboard user are doing the same thing. */}
+        <Text
+          id={TRUST_LABEL_ID}
+          style={{
+            fontSize: 15,
+            fontWeight: 500,
+            color: theme.tableHeaderText,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Trans>Trust level</Trans>
+        </Text>
+        <View
+          role="group"
+          aria-labelledby={TRUST_LABEL_ID}
+          style={{
+            flexDirection: 'row',
+            border: `1px solid ${theme.tableBorder}`,
+            borderRadius: 4,
+            overflow: 'hidden',
+          }}
+        >
+          {TRUST_LEVELS.map(level => {
+            const isCurrent = level === trustLevel;
+            return (
+              <Button
+                key={level}
+                variant="bare"
+                aria-pressed={isCurrent}
+                data-testid={`import-review-trust-${level}`}
+                isDisabled={isTrustDisabled}
+                onPress={() => onTrustLevelChange(level)}
+                className={css({
+                  padding: '5px 10px',
+                  borderRadius: 0,
+                  // The edge between the segments is drawn with a shadow,
+                  // not a border: a border would push the label a pixel to
+                  // the right of the ones above and below it.
+                  boxShadow: `inset 1px 0 0 ${theme.tableBorder}`,
+                  '&:first-of-type': { boxShadow: 'none' },
+                  ...(isCurrent
+                    ? {
+                        backgroundColor: theme.upcomingBackground,
+                        color: theme.upcomingText,
+                        fontWeight: 600,
+                      }
+                    : { color: theme.tableHeaderText }),
+                  // The colours are in a CLASS and not in an inline style,
+                  // so the button's own hover and pressed rules still
+                  // apply — an inline style beats them — and a disabled
+                  // control looks disabled.
+                  '&[data-disabled]': {
+                    backgroundColor: theme.buttonBareDisabledBackground,
+                    color: theme.buttonBareDisabledText,
+                  },
+                })}
+              >
+                {trustLevelLabel(t, level)}
+                <KeyCap>{TRUST_LEVEL_KEYS[level]}</KeyCap>
+              </Button>
+            );
+          })}
+        </View>
       </View>
 
       {/* The Import button is the review's one primary action, and it
