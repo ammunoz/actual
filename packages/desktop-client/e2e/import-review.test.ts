@@ -3074,6 +3074,11 @@ ${transactions}
       await expect(dialog.getByTestId('import-review-status')).toContainText(
         /\d+ in · \d+ out/,
       );
+      // The second pair is the money that will actually move: a signed
+      // incoming and outgoing total, each in the budget's currency.
+      await expect(dialog.getByTestId('import-review-status')).toContainText(
+        /\+\S*[\d,]+\.\d{2}\s*·\s*-\S*[\d,]+\.\d{2}/,
+      );
     }
 
     await page.evaluate(() => window.Actual.setTheme('auto'));

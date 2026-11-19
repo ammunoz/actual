@@ -13,6 +13,7 @@ import {
   SvgFlag,
   SvgPause,
   SvgTag,
+  SvgWallet,
 } from '@actual-app/components/icons/v1';
 import { styles } from '@actual-app/components/styles';
 import { Text } from '@actual-app/components/text';
@@ -101,6 +102,20 @@ import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
  * one of the two columns instead.
  */
 const DETAIL_HEIGHT = 362;
+
+/** The hairline that separates the status line's number pairs. */
+function StatusSeparator() {
+  return (
+    <View
+      style={{
+        width: 1,
+        height: 16,
+        flexShrink: 0,
+        backgroundColor: theme.tableBorder,
+      }}
+    />
+  );
+}
 
 export type KeyboardImportModalProps = {
   accountId: string;
@@ -1914,27 +1929,32 @@ export function KeyboardImportModal({
                   {t('{{count}} set by rules', { count: ruledRowCount })}
                 </StatusChip>
               ) : null}
-              <Text style={{ ...styles.tnum, color: theme.pageTextSubdued }}>
+              {/* A hairline closes the chips before the two money pairs:
+                  how many rows will land, and how much money moves. */}
+              <StatusSeparator />
+              <Text style={{ ...styles.tnum, color: theme.tableHeaderText }}>
                 {t('{{in}} in · {{out}} out', {
                   in: summary.inflowCount,
                   out: summary.outflowCount,
                 })}
               </Text>
-            </View>
-
-            {/* Where the file is going. It is the table's CAPTION, not a
-                row: it says where everything below it lands. */}
-            <View data-testid="import-review-destination">
-              <Text
+              <StatusSeparator />
+              <View
                 style={{
-                  color: theme.pageTextSubdued,
-                  fontWeight: 500,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexShrink: 0,
                 }}
               >
-                {t('Importing into {{account}}', {
-                  account: accountName(accountId),
-                })}
-              </Text>
+                <FinancialText style={{ color: theme.numberPositive }}>
+                  {format(summary.inflowCents, 'financial-with-sign')}
+                </FinancialText>
+                <Text style={{ color: theme.tableHeaderText }}>·</Text>
+                <FinancialText style={{ color: theme.numberNegative }}>
+                  {format(summary.outflowCents, 'financial-with-sign')}
+                </FinancialText>
+              </View>
             </View>
 
             <View
@@ -1944,9 +1964,44 @@ export function KeyboardImportModal({
                 overflow: 'hidden',
               }}
             >
+              {/* Where the file is going. It is the table's CAPTION, not a
+                  row: it says where everything below it lands, so it sits
+                  inside the panel above the sticky header. */}
+              <View
+                id="import-review-destination"
+                data-testid="import-review-destination"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexShrink: 0,
+                  padding: '6px 10px',
+                  backgroundColor: theme.tableHeaderBackground,
+                  borderBottom: `1px solid ${theme.tableBorder}`,
+                }}
+              >
+                <SvgWallet
+                  width={12}
+                  height={12}
+                  style={{ color: theme.tableHeaderText }}
+                />
+                <Text
+                  style={{
+                    color: theme.tableHeaderText,
+                    fontWeight: 500,
+                    fontSize: 12,
+                  }}
+                >
+                  {t('Importing into {{account}}', {
+                    account: accountName(accountId),
+                  })}
+                </Text>
+              </View>
+
               <View
                 ref={gridRef}
                 role="table"
+                aria-labelledby="import-review-destination"
                 tabIndex={0}
                 data-testid="import-review-grid"
                 style={{
