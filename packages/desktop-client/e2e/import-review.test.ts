@@ -2244,16 +2244,16 @@ ${transactions}
       }
     }
 
-    // And none of the three scrolling zones may be clipped by the box:
-    // a zone that is in the DOM but half hidden is a zone the user
-    // cannot read. Compare the box's own scroll size to its client size
-    // rather than guessing which zone might have grown.
-    const zones = dialog.getByTestId('import-review-zones');
-    await expect(zones).toBeAttached();
-    const fits = await zones.evaluate(
-      element => element.scrollHeight <= element.clientHeight + 1,
-    );
-    expect(fits).toBe(true);
+    // Both detail columns are real boxes. A column that has collapsed to
+    // nothing would still be in the DOM, so measure each one rather than
+    // trusting `toBeAttached`. A row with more to say scrolls inside its
+    // column instead of growing the region.
+    for (const id of ['import-review-zone-left', 'import-review-zone-right']) {
+      const column = dialog.getByTestId(id);
+      await expect(column).toBeAttached();
+      const box = await column.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThan(100);
+    }
 
     // The evidence zone carries what the LIST does not: the file's own
     // vendor string, in full.
@@ -2550,15 +2550,14 @@ ${transactions}
       (dialogBox?.height ?? 0) * 0.6,
     );
 
-    // And the zones box is a real box that SCROLLS — not one that
+    // And the LEFT column is a real box that SCROLLS — not one that
     // collapsed to nothing, which would also report `overflow-y: auto`.
-    const zones = dialog.getByTestId('import-review-zones');
-    const overflow = await zones.evaluate(
-      element => getComputedStyle(element).overflowY,
-    );
-    expect(overflow).toBe('auto');
-    const zonesBox = await zones.boundingBox();
-    expect(zonesBox?.height ?? 0).toBeGreaterThan(100);
+    const left = dialog.getByTestId('import-review-zone-left');
+    await expect
+      .poll(() => left.evaluate(element => getComputedStyle(element).overflowY))
+      .toBe('auto');
+    const leftBox = await left.boundingBox();
+    expect(leftBox?.height ?? 0).toBeGreaterThan(100);
 
     // And the ACTIONS are outside the scroll: they are what the user
     // came for, and they must never be the thing that scrolls away.

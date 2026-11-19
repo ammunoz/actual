@@ -5,6 +5,7 @@ import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
+import { useResponsive } from '@actual-app/components/hooks/useResponsive';
 import {
   SvgBlock,
   SvgCheckmark,
@@ -89,6 +90,17 @@ import { StatusChip } from './StatusChip';
 import { TransferPane } from './TransferPane';
 import { useImportReview } from './use-import-review';
 import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
+
+/**
+ * The detail region's height, in pixels.
+ *
+ * A fixed height, not a maxHeight: the detail is a dedicated region whose
+ * size must not depend on what the selected row happens to contain. If it
+ * shrank for a clean row and grew for a flagged one, moving the cursor
+ * would make the whole layout jump. A row with more to say scrolls inside
+ * one of the two columns instead.
+ */
+const DETAIL_HEIGHT = 362;
 
 export type KeyboardImportModalProps = {
   accountId: string;
@@ -184,6 +196,20 @@ export function KeyboardImportModal({
   onImported,
 }: KeyboardImportModalProps) {
   const { t } = useTranslation();
+  const { atLeastMediumWidth } = useResponsive();
+
+  // Each column owns its scroll at desktop widths; on a narrow window the
+  // pair stacks and the outer box takes the single scrollbar instead.
+  const detailColumnStyle = atLeastMediumWidth
+    ? {
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto' as const,
+        scrollbarGutter: 'stable' as const,
+        gap: 6,
+        padding: 8,
+      }
+    : { flexShrink: 0, gap: 6, padding: 8 };
   const format = useFormat();
   const locale = useLocale();
   const dispatchModal = useDispatch();
@@ -2245,32 +2271,34 @@ export function KeyboardImportModal({
               <View
                 style={{
                   gap: 12,
-                  // A FIXED height, not a maxHeight: the detail is a
-                  // dedicated region whose size must not depend on what
-                  // the selected row happens to contain. If it shrank
-                  // for a clean row and grew for a flagged one, moving
-                  // the cursor would make the whole layout jump — the
-                  // exact failure the design rejected when it chose
-                  // master-detail over an inline inspector.
-                  // The detail region has a fixed height — the design's
-                  // vertical budget for a region that never changes size.
-                  // All four zones are always mounted at this height. A
-                  // row with more to say scrolls INSIDE the zones rather
-                  // than growing the region and moving the list.
-                  height: 362,
+                  height: DETAIL_HEIGHT,
                   border: `1px solid ${theme.tableBorder}`,
                   borderRadius: 6,
                   overflow: 'hidden',
                 }}
                 data-testid="import-review-details"
               >
-                {/* The zones scroll; the ACTIONS stay put, because the
-                    actions are what the user came for. */}
+                {/* The two columns scroll independently; the ACTIONS stay
+                    put, because the actions are what the user came for.
+                    On a narrow window they stack and the pair scrolls as
+                    one, so neither column is squeezed into a sliver. */}
                 <View
-                  style={{ gap: 6, flex: 1, overflowY: 'auto', padding: 8 }}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    flexDirection: atLeastMediumWidth ? 'row' : 'column',
+                    gap: atLeastMediumWidth ? 12 : 6,
+                    ...(atLeastMediumWidth
+                      ? {}
+                      : { overflowY: 'auto' as const }),
+                  }}
                   data-testid="import-review-zones"
                 >
-                  {/* ZONE 1 — TRANSACTION: the facts about this row.
+                  <View
+                    style={detailColumnStyle}
+                    data-testid="import-review-zone-left"
+                  >
+                    {/* ZONE 1 — TRANSACTION: the facts about this row.
 
                       The list carries the date, the payee, the category
                       and the amount for the row the user is on. What it
@@ -2284,83 +2312,90 @@ export function KeyboardImportModal({
                       budget. The group is here rather than in the list
                       because it only matters when two categories share
                       a name, and it matters for the row the user is ON. */}
-                  <View
-                    style={{ gap: 2, flexShrink: 0 }}
-                    data-testid="import-review-transaction"
-                  >
-                    <ZoneLabel>
-                      <Trans>Transaction</Trans>
-                    </ZoneLabel>
-                    <ZoneSubhead>
-                      <Trans>From the bank</Trans>
-                    </ZoneSubhead>
-                    <DetailField
-                      label={<Trans>Description</Trans>}
-                      testId="import-review-vendor"
+                    <View
+                      style={{ gap: 2, flexShrink: 0 }}
+                      data-testid="import-review-transaction"
                     >
-                      {focused.payeeRaw?.trim() || '—'}
-                    </DetailField>
-                    <DetailField
-                      label={<Trans>Date</Trans>}
-                      testId="import-review-date"
-                    >
-                      {focusedDateLabel}
-                    </DetailField>
-                    <DetailField
-                      label={<Trans>Amount</Trans>}
-                      testId="import-review-amount"
-                      numeric
-                      valueStyle={
-                        focusedAmountColor
-                          ? { color: focusedAmountColor }
-                          : undefined
-                      }
-                    >
-                      {focusedAmountLabel}
-                    </DetailField>
-                    <ZoneSubhead>
-                      <Trans>In your budget</Trans>
-                    </ZoneSubhead>
-                    <DetailField
-                      label={<Trans>Payee</Trans>}
-                      testId="import-review-payee"
-                    >
-                      {focusedPayeeCellValue?.cleared
-                        ? clearedByRule
-                        : focusedPayeeCellValue?.label.trim() || '—'}
-                    </DetailField>
-                    <DetailField
-                      label={<Trans>Category</Trans>}
-                      testId="import-review-category"
-                    >
-                      {focusedCategoryValue?.group ? (
-                        <>
-                          {focusedCategoryValue.label} ·{' '}
-                          <Text data-testid="import-review-category-group">
-                            {focusedCategoryValue.group}
-                          </Text>
-                        </>
-                      ) : (
-                        focusedCategoryLabel
-                      )}
-                    </DetailField>
-                    <DetailField
-                      label={<Trans>Notes</Trans>}
-                      testId="import-review-notes"
-                    >
-                      {focusedMemo || '—'}
-                    </DetailField>
-                    {review.isAlreadyImported(rowKey(focused)) ? (
-                      <Text
-                        data-testid="import-review-already-imported"
-                        style={{ color: theme.pageTextSubdued }}
+                      <ZoneLabel>
+                        <Trans>Transaction</Trans>
+                      </ZoneLabel>
+                      <ZoneSubhead>
+                        <Trans>From the bank</Trans>
+                      </ZoneSubhead>
+                      <DetailField
+                        label={<Trans>Description</Trans>}
+                        testId="import-review-vendor"
                       >
-                        <Trans>This transaction is already in the budget</Trans>
-                      </Text>
-                    ) : null}
+                        {focused.payeeRaw?.trim() || '—'}
+                      </DetailField>
+                      <DetailField
+                        label={<Trans>Date</Trans>}
+                        testId="import-review-date"
+                      >
+                        {focusedDateLabel}
+                      </DetailField>
+                      <DetailField
+                        label={<Trans>Amount</Trans>}
+                        testId="import-review-amount"
+                        numeric
+                        valueStyle={
+                          focusedAmountColor
+                            ? { color: focusedAmountColor }
+                            : undefined
+                        }
+                      >
+                        {focusedAmountLabel}
+                      </DetailField>
+                      <ZoneSubhead>
+                        <Trans>In your budget</Trans>
+                      </ZoneSubhead>
+                      <DetailField
+                        label={<Trans>Payee</Trans>}
+                        testId="import-review-payee"
+                      >
+                        {focusedPayeeCellValue?.cleared
+                          ? clearedByRule
+                          : focusedPayeeCellValue?.label.trim() || '—'}
+                      </DetailField>
+                      <DetailField
+                        label={<Trans>Category</Trans>}
+                        testId="import-review-category"
+                      >
+                        {focusedCategoryValue?.group ? (
+                          <>
+                            {focusedCategoryValue.label} ·{' '}
+                            <Text data-testid="import-review-category-group">
+                              {focusedCategoryValue.group}
+                            </Text>
+                          </>
+                        ) : (
+                          focusedCategoryLabel
+                        )}
+                      </DetailField>
+                      <DetailField
+                        label={<Trans>Notes</Trans>}
+                        testId="import-review-notes"
+                      >
+                        {focusedMemo || '—'}
+                      </DetailField>
+                      {review.isAlreadyImported(rowKey(focused)) ? (
+                        <Text
+                          data-testid="import-review-already-imported"
+                          style={{ color: theme.pageTextSubdued }}
+                        >
+                          <Trans>
+                            This transaction is already in the budget
+                          </Trans>
+                        </Text>
+                      ) : null}
+                    </View>
                   </View>
 
-                  {/* ZONE 2 — REVIEW STATUS: what the gate decided about
+                  <View
+                    style={detailColumnStyle}
+                    data-testid="import-review-zone-right"
+                  >
+                    {/* ZONE 2 — REVIEW STATUS: what the gate decided about
                       this row and why. The verdict leads, the explanation
                       follows, and the code is a tertiary detail beside the
                       `Why?` link — useful when something goes wrong, but
@@ -2369,212 +2404,93 @@ export function KeyboardImportModal({
                       The zone is ALWAYS here. A clean row has a status
                       too: nothing was flagged, and the gate will let it
                       through at every level. */}
-                  <View
-                    style={{
-                      gap: 2,
-                      flexShrink: 0,
-                      borderTop: `1px solid ${theme.tableBorder}`,
-                      paddingTop: 8,
-                    }}
-                    data-testid="import-review-verdict"
-                  >
-                    <ZoneLabel>
-                      <Trans>Review status</Trans>
-                    </ZoneLabel>
+                    <View
+                      style={{
+                        gap: 2,
+                        flexShrink: 0,
+                        borderTop: `1px solid ${theme.tableBorder}`,
+                        paddingTop: 8,
+                      }}
+                      data-testid="import-review-verdict"
+                    >
+                      <ZoneLabel>
+                        <Trans>Review status</Trans>
+                      </ZoneLabel>
 
-                    {/* The verdict leads: what the gate will do with this
+                      {/* The verdict leads: what the gate will do with this
                         row at THIS trust level, coloured by outcome. */}
-                    {currentGate ? (
+                      {currentGate ? (
+                        <Text
+                          style={{
+                            flexShrink: 0,
+                            fontWeight: 600,
+                            color: verdictColor(currentGate),
+                          }}
+                        >
+                          {t('{{outcome}} at {{level}}', {
+                            outcome: gateLabel(currentGate),
+                            level: trustLevelLabel(t, review.trustLevel),
+                          })}
+                        </Text>
+                      ) : null}
+
+                      {/* The explanation: what the gate actually saw. A row
+                        with nothing to flag says so instead. */}
                       <Text
                         style={{
                           flexShrink: 0,
-                          fontWeight: 600,
-                          color: verdictColor(currentGate),
+                          color: focusedEvaluation?.flags.length
+                            ? undefined
+                            : theme.tableHeaderText,
                         }}
                       >
-                        {t('{{outcome}} at {{level}}', {
-                          outcome: gateLabel(currentGate),
-                          level: trustLevelLabel(t, review.trustLevel),
-                        })}
+                        {focusedEvaluation?.flags.length
+                          ? focusedEvaluation.flags
+                              .map(flag => flagReason(flag.kind))
+                              .join(' · ')
+                          : t('Nothing to flag on this row.')}
                       </Text>
-                    ) : null}
 
-                    {/* The explanation: what the gate actually saw. A row
-                        with nothing to flag says so instead. */}
-                    <Text
-                      style={{
-                        flexShrink: 0,
-                        color: focusedEvaluation?.flags.length
-                          ? undefined
-                          : theme.tableHeaderText,
-                      }}
-                    >
-                      {focusedEvaluation?.flags.length
-                        ? focusedEvaluation.flags
-                            .map(flag => flagReason(flag.kind))
-                            .join(' · ')
-                        : t('Nothing to flag on this row.')}
-                    </Text>
+                      {focusedEvaluation?.held ? (
+                        <Text style={{ flexShrink: 0, color: theme.errorText }}>
+                          {focusedEvaluation.overridable
+                            ? t(
+                                'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
+                              )
+                            : t(
+                                'Held back: this row cannot be imported until its date or amount is fixed.',
+                              )}
+                        </Text>
+                      ) : null}
 
-                    {focusedEvaluation?.held ? (
-                      <Text style={{ flexShrink: 0, color: theme.errorText }}>
-                        {focusedEvaluation.overridable
-                          ? t(
-                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
-                            )
-                          : t(
-                              'Held back: this row cannot be imported until its date or amount is fixed.',
-                            )}
-                      </Text>
-                    ) : null}
-
-                    {/* `Why?` and the machine code share one tertiary row:
+                      {/* `Why?` and the machine code share one tertiary row:
                         the link on the left, the greppable code on the
                         right. The three-level breakdown is disclosed on
                         demand, so the default surface stays small. */}
-                    {focusedEvaluation?.flags.length ? (
-                      <View
-                        style={{
-                          flexShrink: 0,
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 8,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <Button
-                          variant="bare"
-                          // The visible word stays in the accessible name,
-                          // so a voice-control user saying "click Why?"
-                          // still matches the control.
-                          aria-label={t('Why is this flagged? Why?')}
-                          aria-expanded={whyOpen}
-                          aria-controls="import-review-why-detail"
-                          data-testid="import-review-why"
-                          onPress={() => {
-                            setWhyOpen(open => !open);
-                            // Acting on a button must hand `j`/`k` back to
-                            // the grid or the user is stuck on the link.
-                            focusGrid();
-                          }}
+                      {focusedEvaluation?.flags.length ? (
+                        <View
                           style={{
-                            padding: 0,
-                            color: theme.ruleLockText,
-                            textDecoration: 'underline',
+                            flexShrink: 0,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 8,
+                            flexWrap: 'wrap',
                           }}
                         >
-                          <Trans>Why?</Trans>
-                        </Button>
-                        <Text
-                          data-testid="import-review-flag-codes"
-                          style={{
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                            color: theme.pageTextSubdued,
-                            border: `1px solid ${theme.tableBorder}`,
-                            borderRadius: 3,
-                            padding: '0 4px',
-                          }}
-                        >
-                          {focusedEvaluation.flags
-                            .map(flag => flag.code)
-                            .join(' · ')}
-                        </Text>
-                      </View>
-                    ) : null}
-
-                    {whyOpen ? (
-                      <View
-                        id="import-review-why-detail"
-                        data-testid="import-review-why-detail"
-                        style={{
-                          // `View` carries `min-height: 0`, so a flex child
-                          // that can shrink collapses to nothing here even
-                          // though its text has height.
-                          flexShrink: 0,
-                          flexDirection: 'row',
-                          gap: 12,
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        {TRUST_LEVELS.map(level => (
-                          <Text
-                            key={level}
-                            style={
-                              level === review.trustLevel
-                                ? { fontWeight: 600 }
-                                : undefined
-                            }
-                          >
-                            {trustLevelLabel(t, level)}:{' '}
-                            {gateLabel(
-                              gateRow(focused, level, { livePayeeNames }),
-                            )}
-                          </Text>
-                        ))}
-                      </View>
-                    ) : null}
-                  </View>
-
-                  {/* ZONE 3 — RULES: what the rules did to this row.
-
-                      The field a rule owns is the rule's identity on this
-                      row: two rules can touch one row, and each gets its
-                      own line. Opening a rule happens in the rule picker
-                      (Shift+E), so no per-rule button is repeated here.
-
-                      The zone is ALWAYS here, like the other three. A
-                      row no rule touched says so instead of vanishing. */}
-                  <View
-                    style={{
-                      gap: 2,
-                      flexShrink: 0,
-                      borderTop: `1px solid ${theme.tableBorder}`,
-                      paddingTop: 8,
-                    }}
-                    data-testid="import-review-rules-zone"
-                  >
-                    <ZoneLabel>
-                      {/* The number is `ruleCount`, not `count`: i18next
-                          treats a `count` as a plural and the generated
-                          catalogue would split each sentence into `_one`
-                          and `_other`, with the singular copy in the
-                          plural slot. Two literal keys, like the Import
-                          button's, keep both sentences correct. */}
-                      {focusedRuleIds.length === 0 ? (
-                        <Trans>Rules</Trans>
-                      ) : focusedRuleIds.length === 1 ? (
-                        t('Rules — {{ruleCount}} rule', {
-                          ruleCount: focusedRuleIds.length,
-                        })
-                      ) : (
-                        t('Rules — {{ruleCount}} rules', {
-                          ruleCount: focusedRuleIds.length,
-                        })
-                      )}
-                    </ZoneLabel>
-                    {focusedEffects.length ? (
-                      <>
-                        {focusedEffects.slice(0, 2).map(renderRuleLine)}
-                        {rulesOpen ? (
-                          <View
-                            id="import-review-rules-more-detail"
-                            data-testid="import-review-rules-more-detail"
-                            style={{ gap: 2, flexShrink: 0 }}
-                          >
-                            {focusedEffects.slice(2).map(renderRuleLine)}
-                          </View>
-                        ) : null}
-                        {focusedEffects.length > 2 ? (
                           <Button
                             variant="bare"
-                            aria-expanded={rulesOpen}
-                            aria-controls="import-review-rules-more-detail"
-                            data-testid="import-review-rules-more"
+                            // The visible word stays in the accessible name,
+                            // so a voice-control user saying "click Why?"
+                            // still matches the control.
+                            aria-label={t('Why is this flagged? Why?')}
+                            aria-expanded={whyOpen}
+                            aria-controls="import-review-why-detail"
+                            data-testid="import-review-why"
                             onPress={() => {
-                              setRulesOpen(open => !open);
-                              // Keep `j`/`k` working after the click.
+                              setWhyOpen(open => !open);
+                              // Acting on a button must hand `j`/`k` back to
+                              // the grid or the user is stuck on the link.
                               focusGrid();
                             }}
                             style={{
@@ -2583,21 +2499,141 @@ export function KeyboardImportModal({
                               textDecoration: 'underline',
                             }}
                           >
-                            {rulesOpen ? (
-                              <Trans>Show less</Trans>
-                            ) : (
-                              t('Show {{moreCount}} more', {
-                                moreCount: focusedEffects.length - 2,
-                              })
-                            )}
+                            <Trans>Why?</Trans>
                           </Button>
-                        ) : null}
-                      </>
-                    ) : (
-                      <Text style={{ color: theme.tableHeaderText }}>
-                        <Trans>No rule touched this row.</Trans>
-                      </Text>
-                    )}
+                          <Text
+                            data-testid="import-review-flag-codes"
+                            style={{
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                              color: theme.pageTextSubdued,
+                              border: `1px solid ${theme.tableBorder}`,
+                              borderRadius: 3,
+                              padding: '0 4px',
+                            }}
+                          >
+                            {focusedEvaluation.flags
+                              .map(flag => flag.code)
+                              .join(' · ')}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {whyOpen ? (
+                        <View
+                          id="import-review-why-detail"
+                          data-testid="import-review-why-detail"
+                          style={{
+                            // `View` carries `min-height: 0`, so a flex child
+                            // that can shrink collapses to nothing here even
+                            // though its text has height.
+                            flexShrink: 0,
+                            flexDirection: 'row',
+                            gap: 12,
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          {TRUST_LEVELS.map(level => (
+                            <Text
+                              key={level}
+                              style={
+                                level === review.trustLevel
+                                  ? { fontWeight: 600 }
+                                  : undefined
+                              }
+                            >
+                              {trustLevelLabel(t, level)}:{' '}
+                              {gateLabel(
+                                gateRow(focused, level, { livePayeeNames }),
+                              )}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {/* ZONE 3 — RULES: what the rules did to this row.
+
+                      The field a rule owns is the rule's identity on this
+                      row: two rules can touch one row, and each gets its
+                      own line. Opening a rule happens in the rule picker
+                      (Shift+E), so no per-rule button is repeated here.
+
+                      The zone is ALWAYS here, like the other three. A
+                      row no rule touched says so instead of vanishing. */}
+                    <View
+                      style={{
+                        gap: 2,
+                        flexShrink: 0,
+                        borderTop: `1px solid ${theme.tableBorder}`,
+                        paddingTop: 8,
+                      }}
+                      data-testid="import-review-rules-zone"
+                    >
+                      <ZoneLabel>
+                        {/* The number is `ruleCount`, not `count`: i18next
+                          treats a `count` as a plural and the generated
+                          catalogue would split each sentence into `_one`
+                          and `_other`, with the singular copy in the
+                          plural slot. Two literal keys, like the Import
+                          button's, keep both sentences correct. */}
+                        {focusedRuleIds.length === 0 ? (
+                          <Trans>Rules</Trans>
+                        ) : focusedRuleIds.length === 1 ? (
+                          t('Rules — {{ruleCount}} rule', {
+                            ruleCount: focusedRuleIds.length,
+                          })
+                        ) : (
+                          t('Rules — {{ruleCount}} rules', {
+                            ruleCount: focusedRuleIds.length,
+                          })
+                        )}
+                      </ZoneLabel>
+                      {focusedEffects.length ? (
+                        <>
+                          {focusedEffects.slice(0, 2).map(renderRuleLine)}
+                          {rulesOpen ? (
+                            <View
+                              id="import-review-rules-more-detail"
+                              data-testid="import-review-rules-more-detail"
+                              style={{ gap: 2, flexShrink: 0 }}
+                            >
+                              {focusedEffects.slice(2).map(renderRuleLine)}
+                            </View>
+                          ) : null}
+                          {focusedEffects.length > 2 ? (
+                            <Button
+                              variant="bare"
+                              aria-expanded={rulesOpen}
+                              aria-controls="import-review-rules-more-detail"
+                              data-testid="import-review-rules-more"
+                              onPress={() => {
+                                setRulesOpen(open => !open);
+                                // Keep `j`/`k` working after the click.
+                                focusGrid();
+                              }}
+                              style={{
+                                padding: 0,
+                                color: theme.ruleLockText,
+                                textDecoration: 'underline',
+                              }}
+                            >
+                              {rulesOpen ? (
+                                <Trans>Show less</Trans>
+                              ) : (
+                                t('Show {{moreCount}} more', {
+                                  moreCount: focusedEffects.length - 2,
+                                })
+                              )}
+                            </Button>
+                          ) : null}
+                        </>
+                      ) : (
+                        <Text style={{ color: theme.tableHeaderText }}>
+                          <Trans>No rule touched this row.</Trans>
+                        </Text>
+                      )}
+                    </View>
                   </View>
                 </View>
 
