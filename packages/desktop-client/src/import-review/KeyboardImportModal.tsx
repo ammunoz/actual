@@ -1209,6 +1209,24 @@ export function KeyboardImportModal({
     ? gateRow(focused, review.trustLevel, { livePayeeNames })
     : undefined;
 
+  // The verdict wears the TEXT token for its outcome — a coloured word,
+  // not a coloured surface. Red means "will not import", amber "look at
+  // this", green "goes through". The word itself always says the same
+  // thing, so colour is reinforcement rather than the only signal.
+  const verdictColor = (gate: RowGate | undefined) => {
+    switch (gate) {
+      case 'block':
+        return theme.errorText;
+      case 'skip':
+      case 'warn':
+        return theme.warningTextDark;
+      case 'allow':
+        return theme.numberPositive;
+      default:
+        return undefined;
+    }
+  };
+
   /**
    * Close the review for good, throwing away whatever is in it.
    *
@@ -2310,15 +2328,13 @@ export function KeyboardImportModal({
                     ) : null}
                   </View>
 
-                  {/* ZONE 2 — REASON: why the gate is doing what it is
-                      doing with this row.
+                  {/* ZONE 2 — REVIEW STATUS: what the gate decided about
+                      this row and why. The verdict leads, the explanation
+                      follows, and the code is a tertiary detail beside the
+                      `Why?` link — useful when something goes wrong, but
+                      not a headline.
 
-                      The plain sentence first, then the outcome at each
-                      trust level, then the machine code — which is
-                      useful when something goes wrong and is not a
-                      headline.
-
-                      The zone is ALWAYS here. A clean row has a reason
+                      The zone is ALWAYS here. A clean row has a status
                       too: nothing was flagged, and the gate will let it
                       through at every level. */}
                   <View
@@ -2331,59 +2347,83 @@ export function KeyboardImportModal({
                     data-testid="import-review-verdict"
                   >
                     <ZoneLabel>
-                      <Trans>Reason</Trans>
+                      <Trans>Review status</Trans>
                     </ZoneLabel>
 
-                    {/* The mockup's reason is ONE line: what the gate saw,
-                        what it will do at THIS trust level, and a link to
-                        the rest. The three-level breakdown used to sit
-                        here permanently; `Why?` now discloses it on
-                        demand, so the default surface is the small one. */}
-                    <View
+                    {/* The verdict leads: what the gate will do with this
+                        row at THIS trust level, coloured by outcome. */}
+                    {currentGate ? (
+                      <Text
+                        style={{
+                          flexShrink: 0,
+                          fontWeight: 600,
+                          color: verdictColor(currentGate),
+                        }}
+                      >
+                        {t('{{outcome}} at {{level}}', {
+                          outcome: gateLabel(currentGate),
+                          level: trustLevelLabel(t, review.trustLevel),
+                        })}
+                      </Text>
+                    ) : null}
+
+                    {/* The explanation: what the gate actually saw. A row
+                        with nothing to flag says so instead. */}
+                    <Text
                       style={{
                         flexShrink: 0,
-                        flexDirection: 'row',
-                        alignItems: 'baseline',
-                        gap: 8,
-                        flexWrap: 'wrap',
+                        color: focusedEvaluation?.flags.length
+                          ? undefined
+                          : theme.tableHeaderText,
                       }}
                     >
-                      <Text
-                        style={
-                          focusedEvaluation?.flags.length
-                            ? undefined
-                            : { color: theme.pageTextSubdued }
-                        }
-                      >
-                        {focusedEvaluation?.flags.length
-                          ? focusedEvaluation.flags
-                              .map(flag => flagReason(flag.kind))
-                              .join(' · ')
-                          : t('Nothing to flag on this row.')}
+                      {focusedEvaluation?.flags.length
+                        ? focusedEvaluation.flags
+                            .map(flag => flagReason(flag.kind))
+                            .join(' · ')
+                        : t('Nothing to flag on this row.')}
+                    </Text>
+
+                    {focusedEvaluation?.held ? (
+                      <Text style={{ flexShrink: 0, color: theme.errorText }}>
+                        {focusedEvaluation.overridable
+                          ? t(
+                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
+                            )
+                          : t(
+                              'Held back: this row cannot be imported until its date or amount is fixed.',
+                            )}
                       </Text>
-                      {currentGate ? (
-                        <Text style={{ fontWeight: 'bold' }}>
-                          {t('At {{level}}: {{outcome}}', {
-                            level: trustLevelLabel(t, review.trustLevel),
-                            outcome: gateLabel(currentGate),
-                          })}
-                        </Text>
-                      ) : null}
-                      {focusedEvaluation?.flags.length ? (
+                    ) : null}
+
+                    {/* `Why?` and the machine code share one tertiary row:
+                        the link on the left, the greppable code on the
+                        right. The three-level breakdown is disclosed on
+                        demand, so the default surface stays small. */}
+                    {focusedEvaluation?.flags.length ? (
+                      <View
+                        style={{
+                          flexShrink: 0,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          flexWrap: 'wrap',
+                        }}
+                      >
                         <Button
                           variant="bare"
-                          // The visible word stays in the accessible
-                          // name, so a voice-control user saying "click
-                          // Why?" still matches the control.
+                          // The visible word stays in the accessible name,
+                          // so a voice-control user saying "click Why?"
+                          // still matches the control.
                           aria-label={t('Why is this flagged? Why?')}
                           aria-expanded={whyOpen}
                           aria-controls="import-review-why-detail"
                           data-testid="import-review-why"
                           onPress={() => {
                             setWhyOpen(open => !open);
-                            // This is a keyboard-driven review. Acting on
-                            // a button must hand `j`/`k` back to the grid
-                            // or the user is stuck on the link.
+                            // Acting on a button must hand `j`/`k` back to
+                            // the grid or the user is stuck on the link.
                             focusGrid();
                           }}
                           style={{
@@ -2394,18 +2434,32 @@ export function KeyboardImportModal({
                         >
                           <Trans>Why?</Trans>
                         </Button>
-                      ) : null}
-                    </View>
+                        <Text
+                          data-testid="import-review-flag-codes"
+                          style={{
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: theme.pageTextSubdued,
+                            border: `1px solid ${theme.tableBorder}`,
+                            borderRadius: 3,
+                            padding: '0 4px',
+                          }}
+                        >
+                          {focusedEvaluation.flags
+                            .map(flag => flag.code)
+                            .join(' · ')}
+                        </Text>
+                      </View>
+                    ) : null}
 
                     {whyOpen ? (
                       <View
                         id="import-review-why-detail"
                         data-testid="import-review-why-detail"
                         style={{
-                          // `View` carries a `min-height: 0`, so a flex
-                          // child that can shrink collapses to nothing
-                          // here even though its text has height. The
-                          // other siblings in this zone say the same.
+                          // `View` carries `min-height: 0`, so a flex child
+                          // that can shrink collapses to nothing here even
+                          // though its text has height.
                           flexShrink: 0,
                           flexDirection: 'row',
                           gap: 12,
@@ -2417,7 +2471,7 @@ export function KeyboardImportModal({
                             key={level}
                             style={
                               level === review.trustLevel
-                                ? { fontWeight: 'bold' }
+                                ? { fontWeight: 600 }
                                 : undefined
                             }
                           >
@@ -2428,36 +2482,6 @@ export function KeyboardImportModal({
                           </Text>
                         ))}
                       </View>
-                    ) : null}
-
-                    {focusedEvaluation?.held ? (
-                      <Text style={{ color: theme.errorText }}>
-                        {focusedEvaluation.overridable
-                          ? t(
-                              'Held back by the trust level. Press Ctrl+Shift+A to accept it anyway.',
-                            )
-                          : t(
-                              'Held back: this row cannot be imported until its date or amount is fixed.',
-                            )}
-                      </Text>
-                    ) : null}
-                    {focusedEvaluation?.flags.length ? (
-                      <Text
-                        data-testid="import-review-flag-codes"
-                        style={{
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          color: theme.pageTextSubdued,
-                          border: `1px solid ${theme.tableBorder}`,
-                          borderRadius: 3,
-                          padding: '0 4px',
-                          alignSelf: 'flex-start',
-                        }}
-                      >
-                        {focusedEvaluation.flags
-                          .map(flag => flag.code)
-                          .join(' · ')}
-                      </Text>
                     ) : null}
                   </View>
 

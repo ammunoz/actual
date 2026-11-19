@@ -2441,10 +2441,10 @@ ${transactions}
     const reason = dialog.getByTestId('import-review-verdict');
     await expect(reason).toBeVisible();
 
-    // The mockup says what the gate saw, then the outcome AT THE CURRENT
-    // LEVEL in bold, then a link. The three-level breakdown is not on the
-    // default surface.
-    await expect(reason).toContainText('At Cautious: Flagged');
+    // The mockup leads with the outcome AT THE CURRENT LEVEL, then says
+    // what the gate saw. The three-level breakdown is not on the default
+    // surface.
+    await expect(reason).toContainText('Flagged at Cautious');
     const why = reason.getByTestId('import-review-why');
     await expect(why).toHaveAttribute(
       'aria-label',
@@ -2509,11 +2509,11 @@ ${transactions}
       heights.push(box!.height);
 
       // All four zones are ALWAYS here. A row that is clean says so in
-      // the reason; a row no rule touched says so in the ownership; no
-      // zone vanishes and leaves a gap.
+      // the review status; a row no rule touched says so in the Rules zone;
+      // no zone vanishes and leaves a gap.
       const zones = [
         ['Transaction', 'import-review-transaction'],
-        ['Reason', 'import-review-verdict'],
+        ['Review status', 'import-review-verdict'],
         ['Ownership', 'import-review-rules-zone'],
         ['Actions', 'import-review-actions'],
       ] as const;
