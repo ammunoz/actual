@@ -58,7 +58,9 @@ The detail section below the list is about the row you are on, and is split into
 | <Key k="escape" />                          | Close the review and throw it away                     |
 | <Key k="?" />                               | Show the keys                                          |
 
-<Key k="e" /> edits a row's fields one after another: the payee, then the category, then the notes, and then the amount if the row is flagged about it. Each field you confirm moves on to the next, and the last one moves you to the next row. The review leaves out the fields it has no business offering: the category of a transfer or a split, the amount of a split, and any field a rule already controls. Press <Key k="p" />, <Key k="c" />, <Key k="m" /> or <Key k="d" /> to edit one field on its own instead.
+<Key k="e" /> edits a row's fields one after another: the payee, then the category, then the notes, and then the amount if the row is flagged about it. Each field you confirm moves on to the next. Confirming the last one accepts the row, just as <Key k="a" /> does, and moves you to the next row.
+
+The review leaves out the fields it has no business offering: the category of a transfer or a split, the amount of a split, and any field a rule already controls. Press <Key k="p" />, <Key k="c" />, <Key k="m" /> or <Key k="d" /> to edit one field on its own instead; those edits save the change without accepting the row, so you still accept it with <Key k="a" />.
 
 <Key k="1" />, <Key k="2" /> and <Key k="3" /> choose how careful the review is: paranoid, cautious or trusted. The header shows the level and the key that selects it.
 
