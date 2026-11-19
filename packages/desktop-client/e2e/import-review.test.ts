@@ -2395,12 +2395,10 @@ ${transactions}
     const owned = dialog.getByTestId('import-review-rules-zone');
     await expect(owned).toBeVisible();
 
-    // The label counts the rules, the way the mockup writes "Ownership —
-    // two rules touched this row". A bare "Ownership" is a label that
-    // names its group; the count says why the group has content.
-    await expect(owned).toContainText('1 rule touched this row');
+    // The label names the group and counts the rules that give it content.
+    await expect(owned).toContainText('1 rule');
 
-    // The field name sits in the SAME column the Evidence zone uses.
+    // The field name sits in the SAME column the Transaction zone uses.
     // Compare the two measured widths rather than asserting a pixel.
     const nameWidth = await owned
       .getByTestId('import-review-ruled-field-name')
@@ -2418,12 +2416,9 @@ ${transactions}
     await expect(field).toContainText('category');
     await expect(field).toContainText('rule "Demo Grocery Store → Food"');
 
-    // And the EDIT button opens that rule. Two rules can touch one row,
-    // so the button carries the field it owns; the quoted description is
-    // on the field's line above it rather than repeated in the button.
-    const edit = owned.getByTestId('import-review-edit-rule');
-    await expect(edit).toHaveAttribute('data-field', 'category');
-    await expect(edit).toContainText('Edit this rule');
+    // The line reads "set by" before the quoted rule: the quote names a
+    // rule, not a statement about the transaction.
+    await expect(field).toContainText('set by');
   });
 
   test('the reason is one line, and Why? discloses the trust outcomes', async () => {
@@ -2514,7 +2509,7 @@ ${transactions}
       const zones = [
         ['Transaction', 'import-review-transaction'],
         ['Review status', 'import-review-verdict'],
-        ['Ownership', 'import-review-rules-zone'],
+        ['Rules', 'import-review-rules-zone'],
         ['Actions', 'import-review-actions'],
       ] as const;
       for (const [name, testId] of zones) {

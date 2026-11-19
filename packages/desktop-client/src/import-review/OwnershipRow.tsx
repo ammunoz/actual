@@ -20,13 +20,13 @@ export type OwnershipRowProps = {
 };
 
 /**
- * One field owned by a rule, in the detail section's Ownership zone.
+ * One field owned by a rule, in the detail section's Rules zone.
  *
  * The field is the rule's identity on this row: two rules can touch one
  * row, and each needs its own line. The name sits in the same 72px column
- * the Evidence zone uses, in the rule's own blue, with the glyph inside
- * that column the way the mockup draws it. The description is quoted
- * because it is the rule's name, not a statement about the transaction.
+ * the Transaction zone uses, in the rule's own blue, with the glyph inside
+ * that column the way the mockup draws it. The description names the rule
+ * in a single translated sentence, so locales can order it as they need.
  */
 export function OwnershipRow({
   field,

@@ -234,6 +234,13 @@ export function KeyboardImportModal({
   const [whyOpen, setWhyOpen] = useState(false);
   useEffect(() => setWhyOpen(false), [review.focusedIndex]);
 
+  // A row can be touched by many rules. Only the first two lines show by
+  // default; the rest sit behind a disclosure so the Rules zone cannot
+  // push the actions off screen. Like `whyOpen`, it belongs to the row
+  // under the cursor and closes when the cursor moves.
+  const [rulesOpen, setRulesOpen] = useState(false);
+  useEffect(() => setRulesOpen(false), [review.focusedIndex]);
+
   // A pane owns the keyboard while it is up. When it closes, the focus
   // has to come back to the grid or the user is typing into a button
   // that is no longer there.
@@ -888,6 +895,31 @@ export function KeyboardImportModal({
     [effectsForRow, focused],
   );
 
+  // One line per field a rule controls. Shared by the two and the "more"
+  // halves of the Rules zone so both render the same sentence.
+  const renderRuleLine = (effect: RuleEffect) => {
+    const rule = review.rules.find(candidate => candidate.id === effect.ruleId);
+    const described = rule
+      ? describeRule(rule, { payeeNames, categoryNames })
+      : undefined;
+    return (
+      <OwnershipRow
+        key={effect.field}
+        field={effect.field}
+        label={ruledFieldName(effect.field)}
+        fieldTestId="import-review-ruled-field"
+        fieldNameTestId="import-review-ruled-field-name"
+        description={t('set by {{rule}}', {
+          rule: described
+            ? t('rule "{{description}}"', {
+                description: `${described.from} → ${described.to}`,
+              })
+            : t('a rule in this budget'),
+        })}
+      />
+    );
+  };
+
   /**
    * The rule that controls the field the editor is open on.
    *
@@ -930,8 +962,8 @@ export function KeyboardImportModal({
    *
    * The details pane uses this to decide which of its rule-creation
    * buttons to offer: a field a rule already controls is not offered a
-   * new rule, because the rule is already there — "Edit this rule" is
-   * the way out.
+   * new rule, because the rule is already there — Shift+E opens it in
+   * the rule picker.
    */
   const focusedRuledFields = useMemo(() => {
     const fields = new Set<RuledField>();
@@ -1392,7 +1424,7 @@ export function KeyboardImportModal({
         // the list is empty. Either way there is nothing to say.
         if (!focused) break;
         if (rulePickerItems.length === 0) {
-          // The Ownership zone still shows a rule (its id was in the
+          // The Rules zone still shows a rule (its id was in the
           // effects) that the budget's list no longer has. Say so,
           // rather than claiming there is nothing to edit.
           //
@@ -2485,11 +2517,12 @@ export function KeyboardImportModal({
                     ) : null}
                   </View>
 
-                  {/* ZONE 3 — OWNERSHIP: what the rules did to this row.
+                  {/* ZONE 3 — RULES: what the rules did to this row.
 
                       The field a rule owns is the rule's identity on this
-                      row: two rules can touch one row, and each of them
-                      has to be openable in its own right.
+                      row: two rules can touch one row, and each gets its
+                      own line. Opening a rule happens in the rule picker
+                      (Shift+E), so no per-rule button is repeated here.
 
                       The zone is ALWAYS here, like the other three. A
                       row no rule touched says so instead of vanishing. */}
@@ -2510,70 +2543,58 @@ export function KeyboardImportModal({
                           plural slot. Two literal keys, like the Import
                           button's, keep both sentences correct. */}
                       {focusedRuleIds.length === 0 ? (
-                        <Trans>Ownership</Trans>
+                        <Trans>Rules</Trans>
                       ) : focusedRuleIds.length === 1 ? (
-                        t('Ownership — {{ruleCount}} rule touched this row', {
+                        t('Rules — {{ruleCount}} rule', {
                           ruleCount: focusedRuleIds.length,
                         })
                       ) : (
-                        t('Ownership — {{ruleCount}} rules touched this row', {
+                        t('Rules — {{ruleCount}} rules', {
                           ruleCount: focusedRuleIds.length,
                         })
                       )}
                     </ZoneLabel>
                     {focusedEffects.length ? (
                       <>
-                        {focusedEffects.map(effect => {
-                          const rule = review.rules.find(
-                            candidate => candidate.id === effect.ruleId,
-                          );
-                          const described = rule
-                            ? describeRule(rule, { payeeNames, categoryNames })
-                            : undefined;
-                          return (
-                            <OwnershipRow
-                              key={effect.field}
-                              field={effect.field}
-                              label={ruledFieldName(effect.field)}
-                              fieldTestId="import-review-ruled-field"
-                              fieldNameTestId="import-review-ruled-field-name"
-                              description={
-                                described
-                                  ? t('rule "{{description}}"', {
-                                      description: `${described.from} → ${described.to}`,
-                                    })
-                                  : t('a rule in this budget')
-                              }
-                            />
-                          );
-                        })}
-                        <View style={{ gap: 6, marginTop: 4, flexShrink: 0 }}>
-                          {/* One button per rule. Two rules can control
-                              two fields of the same row, and the button
-                              has to say WHICH one it opens: the fields
-                              above name the rule's identity on this row.
-                              The description is on the field's line, so
-                              the button just says what it does. */}
-                          {focusedRuleIds.map(ruleId => {
-                            const effect = focusedEffects.find(
-                              candidate => candidate.ruleId === ruleId,
-                            );
-                            return (
-                              <Button
-                                key={ruleId}
-                                variant="bare"
-                                data-testid="import-review-edit-rule"
-                                data-field={effect?.field}
-                                onPress={() => openRuleEditor(ruleId)}
-                              >
-                                <Trans>Edit this rule</Trans>
-                              </Button>
-                            );
-                          })}
-                        </View>
+                        {focusedEffects.slice(0, 2).map(renderRuleLine)}
+                        {rulesOpen ? (
+                          <View
+                            id="import-review-rules-more-detail"
+                            data-testid="import-review-rules-more-detail"
+                            style={{ gap: 2, flexShrink: 0 }}
+                          >
+                            {focusedEffects.slice(2).map(renderRuleLine)}
+                          </View>
+                        ) : null}
+                        {focusedEffects.length > 2 ? (
+                          <Button
+                            variant="bare"
+                            aria-expanded={rulesOpen}
+                            aria-controls="import-review-rules-more-detail"
+                            data-testid="import-review-rules-more"
+                            onPress={() => {
+                              setRulesOpen(open => !open);
+                              // Keep `j`/`k` working after the click.
+                              focusGrid();
+                            }}
+                            style={{
+                              padding: 0,
+                              color: theme.ruleLockText,
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            {rulesOpen ? (
+                              <Trans>Show less</Trans>
+                            ) : (
+                              t('Show {{moreCount}} more', {
+                                moreCount: focusedEffects.length - 2,
+                              })
+                            )}
+                          </Button>
+                        ) : null}
                       </>
                     ) : (
-                      <Text style={{ color: theme.pageTextSubdued }}>
+                      <Text style={{ color: theme.tableHeaderText }}>
                         <Trans>No rule touched this row.</Trans>
                       </Text>
                     )}
