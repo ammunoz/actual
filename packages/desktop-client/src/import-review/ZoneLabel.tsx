@@ -19,8 +19,18 @@ export function ZoneLabel({ children }: ZoneLabelProps) {
     <Text
       style={{
         color: theme.tableHeaderText,
-        fontWeight: 500,
+        fontWeight: 700,
         fontSize: 12,
+        // Case and tracking do the separating that colour alone could not:
+        // an overline can never be mistaken for a field label or a value.
+        // The strings stay sentence case in <Trans> — CSS renders them
+        // uppercase, so DOM text and translated keys are unchanged.
+        textTransform: 'uppercase',
+        letterSpacing: '0.09em',
+        // A little air below the overline. Six pixels per zone keeps all
+        // four zones inside the detail region's fixed height when the
+        // narrow layout stacks them.
+        marginBottom: 6,
       }}
     >
       {children}

@@ -64,7 +64,9 @@ export function OwnershipRow({
         />
         <Text style={{ color: theme.ruleLockText }}>{label}</Text>
       </View>
-      <Text style={{ color: theme.pageText }}>{description}</Text>
+      <Text style={{ color: theme.pageText, fontWeight: 500 }}>
+        {description}
+      </Text>
     </View>
   );
 }

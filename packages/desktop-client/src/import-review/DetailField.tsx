@@ -18,6 +18,8 @@ export type DetailFieldProps = {
   /**
    * Extra style for the value — money, for instance, colours by its sign.
    * Tabular figures are applied after this so numeric values still align.
+   * The value's weight defaults to 500; pass `fontWeight` here to override,
+   * since this style is spread over that default.
    */
   valueStyle?: CSSProperties;
 };
@@ -63,7 +65,12 @@ export function DetailField({
       >
         {label}
       </Text>
-      <Text style={numeric ? { ...valueStyle, ...styles.tnum } : valueStyle}>
+      <Text
+        style={{
+          fontWeight: 500,
+          ...(numeric ? { ...valueStyle, ...styles.tnum } : valueStyle),
+        }}
+      >
         {children}
       </Text>
     </View>
