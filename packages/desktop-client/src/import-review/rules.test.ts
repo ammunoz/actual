@@ -15,6 +15,7 @@ import type { RuleEntity } from '@actual-app/core/types/models/rule';
 
 import {
   alreadySets,
+  newRuleSeed,
   payeeToCategoryRule,
   rowPayeeTarget,
   rulesForRow,
@@ -60,6 +61,30 @@ function mkRow(edits: PreviewEdits = {}): PreviewRow {
   const next = updateEdits(state, rowKey(state.rows[0]), edits);
   return next.rows[0];
 }
+
+describe('the blank rule', () => {
+  it('starts with one empty condition and one empty action, and no id', () => {
+    const seed = newRuleSeed();
+
+    expect(seed).toEqual({
+      stage: null,
+      conditionsOp: 'and',
+      conditions: [{ field: 'payee', op: 'is', value: '', type: 'id' }],
+      actions: [{ op: 'set', field: 'category', value: '', type: 'id' }],
+    });
+    // It is a NewRuleEntity: the editor adds the id when it is saved.
+    expect('id' in seed).toBe(false);
+  });
+
+  it('matches nothing until it is filled in', () => {
+    const [condition] = newRuleSeed().conditions;
+    // `is ''` cannot match a real payee, so saving the seed untouched
+    // cannot silently rewrite rows on import.
+    expect(condition?.field).toBe('payee');
+    expect(condition?.op).toBe('is');
+    expect(condition?.value).toBe('');
+  });
+});
 
 describe('the vendor rule', () => {
   it('matches the raw vendor string, exactly', () => {

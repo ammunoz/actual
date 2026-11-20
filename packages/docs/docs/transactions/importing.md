@@ -64,7 +64,7 @@ The review leaves out the fields it has no business offering: the category of a 
 
 <Key k="1" />, <Key k="2" /> and <Key k="3" /> choose how careful the review is: paranoid, cautious or trusted. The header shows the level and the key that selects it.
 
-<Key mod="shift" k="e" /> opens the rules that touched the row, so you can see what they did and change them. A rule you create from the review applies to every future transaction with that vendor; it does not change the transactions you already have.
+<Key mod="shift" k="e" /> opens the rules that touched the row, so you can see what they did and change them. The picker also offers to write a rule for this row's vendor or payee, or to open a blank rule in the rule editor. Any rule you create applies to future transactions; it does not change the transactions you already have.
 
 <Key k="escape" /> closes the review and throws away what is in it. If you have made any decisions or edits, the review asks you first. To keep the review instead, put it aside with <Key k="w" />.
 

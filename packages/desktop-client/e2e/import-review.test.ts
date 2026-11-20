@@ -6,6 +6,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 import type { AccountPage } from './page-models/account-page';
 import { ConfigurationPage } from './page-models/configuration-page';
+import { EditRuleModal } from './page-models/edit-rule-modal';
 import { Navigation } from './page-models/navigation';
 
 /**
@@ -2875,6 +2876,54 @@ ${transactions}
     await expect(rows.nth(1)).toHaveAttribute('data-decision', 'accept');
     await expect(rows.nth(2)).toHaveAttribute('data-decision', 'pending');
     await expect(rows.nth(2)).toHaveAttribute('data-focused', 'true');
+  });
+
+  test('the picker can open a new rule in the rule editor', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Blank Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfx();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByTestId('import-review-row')).toHaveCount(3);
+
+    // No rule touched this row, and its payee is not settled, so the blank
+    // rule is the picker's only item. It still opens: this is the escape
+    // hatch for a rule the row cannot prefill.
+    await page.keyboard.press('Shift+E');
+    const picker = dialog.getByTestId('import-review-rule-picker');
+    await expect(picker).toBeVisible();
+    await expect(picker.getByTestId('import-review-rule-item')).toHaveCount(0);
+    const newRule = picker.getByTestId('import-review-rule-create-new');
+    await expect(newRule).toHaveCount(1);
+    await expect(newRule).toContainText('Add new rule');
+    await expect(newRule).toBeFocused();
+
+    // Enter opens upstream's editor on top of the review, seeded with a
+    // single condition and action rather than an empty pane.
+    await page.keyboard.press('Enter');
+    await expect(picker).toHaveCount(0);
+    const editor = new EditRuleModal(page.getByTestId('edit-rule-modal'));
+    await expect(editor.conditionList).toBeVisible();
+    await expect(await editor.getRow(editor.conditionList, 0)).toBeVisible();
+    await expect(await editor.getRow(editor.actionList, 0)).toBeVisible();
+
+    // A rule the two row-derived offers could never write.
+    await editor.fill({
+      conditions: [
+        { field: 'imported payee', op: 'is', value: 'POS PURCHASE 4251' },
+      ],
+      actions: [{ field: 'category', value: 'Food' }],
+    });
+    await editor.save();
+
+    await expect(page.getByTestId('edit-rule-modal')).toHaveCount(0);
+    await expect(dialog.getByTestId('import-review-hints')).toBeVisible();
   });
 
   test('shift+e opens the picker over the rules on the row', async () => {

@@ -31,6 +31,28 @@ import type {
 export type ReviewRule = Omit<NewRuleEntity, 'id'>;
 
 /**
+ * A blank rule, to open in upstream's own editor.
+ *
+ * The two rules below say something about the focused row, so the review
+ * can write them itself. This one says nothing: it is the escape hatch for
+ * a rule the review cannot prefill. It starts from the same shape upstream's
+ * own "Add new rule" does — one payee condition, one category action — so
+ * the editor opens with something to edit rather than an empty pane.
+ *
+ * The values are empty strings rather than `null`: the condition's value is
+ * typed as the payee's string id, and empty matches nothing until the user
+ * fills it in.
+ */
+export function newRuleSeed(): NewRuleEntity {
+  return {
+    stage: null,
+    conditionsOp: 'and',
+    conditions: [{ field: 'payee', op: 'is', value: '', type: 'id' }],
+    actions: [{ op: 'set', field: 'category', value: '', type: 'id' }],
+  };
+}
+
+/**
  * Where a rule puts the payee.
  *
  * Two shapes, because the payee may or may not exist yet:

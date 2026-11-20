@@ -41,6 +41,14 @@ export type RulePickerItem =
       rule: ReviewRule;
       /** What to say once it is written. */
       message: string;
+    }
+  | {
+      /** Open a blank rule in upstream's own editor. */
+      kind: 'new';
+      /** A stable id for the item. */
+      id: string;
+      /** What the item says, in the user's words. */
+      description: string;
     };
 
 export type RulePickerProps = {
@@ -113,6 +121,10 @@ export function RulePicker({ items, onPick }: RulePickerProps) {
     (item): item is Extract<RulePickerItem, { kind: 'create' }> =>
       item.kind === 'create',
   );
+  const news = items.filter(
+    (item): item is Extract<RulePickerItem, { kind: 'new' }> =>
+      item.kind === 'new',
+  );
 
   return (
     <View
@@ -158,7 +170,7 @@ export function RulePicker({ items, onPick }: RulePickerProps) {
         </Button>
       ))}
 
-      {creates.length > 0 ? (
+      {creates.length > 0 || news.length > 0 ? (
         <>
           <View
             style={{
@@ -177,6 +189,20 @@ export function RulePicker({ items, onPick }: RulePickerProps) {
               }}
               variant="bare"
               data-testid="import-review-rule-new"
+              onPress={() => onPick(item)}
+            >
+              <Text>{item.description}</Text>
+            </Button>
+          ))}
+          {news.map((item, index) => (
+            <Button
+              key={item.id}
+              ref={button => {
+                buttonRefs.current[edits.length + creates.length + index] =
+                  button;
+              }}
+              variant="bare"
+              data-testid="import-review-rule-create-new"
               onPress={() => onPick(item)}
             >
               <Text>{item.description}</Text>

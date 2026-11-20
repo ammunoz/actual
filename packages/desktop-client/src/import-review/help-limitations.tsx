@@ -26,8 +26,10 @@ export const HELP_LIMITATIONS = [
     choice.
   </Trans>,
   <Trans key="rules">
-    A rule you create here applies to every transaction with that vendor, from
-    now on. It does not change the transactions you already have.
+    A rule you create here applies to future transactions, from now on. The
+    suggested rules match this row&apos;s vendor or payee; one you write in the
+    rule editor can match anything. Neither changes the transactions you already
+    have.
   </Trans>,
   <Trans key="splits">
     A split that was imported before is matched to the old one by the
