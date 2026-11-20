@@ -21,9 +21,18 @@ runs:
     # GitHub-hosted runners give roughly 14 GB of free disk. The preinstalled
     # .NET, Haskell and Android toolchains are not needed by any job in this
     # repository, and the browser build plus the Docker layers need the room.
+    # A job that runs in a container has its own filesystem and its own
+    # image, and neither holds those toolchains: there is nothing to free
+    # there.
     - name: Free disk space
       run: |
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        # A container job runs as root and its image has no sudo; a host
+        # runner needs sudo to remove those directories.
+        if command -v sudo >/dev/null 2>&1; then
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        else
+          rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
+        fi
         df -h /
       shell: bash
     - name: Install node
