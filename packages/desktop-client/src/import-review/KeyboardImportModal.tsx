@@ -299,16 +299,19 @@ export function KeyboardImportModal({
   // render. Measure the BORDER box — the rows carry vertical padding, and
   // a content-box read would come up short by exactly that padding.
   const headerElRef = useRef<HTMLDivElement | null>(null);
+  const captionElRef = useRef<HTMLDivElement | null>(null);
   // Every row gets a ref: the first one is measured for the list's floor,
   // and the focused one is scrolled into view when the cursor moves.
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [captionHeight, setCaptionHeight] = useState(0);
   const [rowHeight, setRowHeight] = useState(0);
 
   // A pane owns the keyboard while it is up. When it closes, the focus
   // has to come back to the grid or the user is typing into a button
   // that is no longer there.
   const gridRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const paneWasOpenRef = useRef(false);
   const pendingGridRefocusRef = useRef(false);
 
@@ -863,9 +866,14 @@ export function KeyboardImportModal({
     const measure = () => {
       const nextHeader =
         headerElRef.current?.getBoundingClientRect().height ?? 0;
+      const nextCaption =
+        captionElRef.current?.getBoundingClientRect().height ?? 0;
       const nextRow = rowRefs.current[0]?.getBoundingClientRect().height ?? 0;
       setHeaderHeight(previous =>
         previous === nextHeader ? previous : nextHeader,
+      );
+      setCaptionHeight(previous =>
+        previous === nextCaption ? previous : nextCaption,
       );
       setRowHeight(previous => (previous === nextRow ? previous : nextRow));
     };
@@ -873,12 +881,18 @@ export function KeyboardImportModal({
     const observer = new ResizeObserver(measure);
     if (gridRef.current) observer.observe(gridRef.current);
     if (headerElRef.current) observer.observe(headerElRef.current);
+    if (captionElRef.current) observer.observe(captionElRef.current);
     if (rowRefs.current[0]) observer.observe(rowRefs.current[0]);
     return () => observer.disconnect();
   }, [rows.length]);
 
   const listMinHeight =
     headerHeight > 0 && rowHeight > 0 ? headerHeight + 3 * rowHeight : 0;
+  // The panel must not shrink below its caption plus that floor. Without
+  // this, `minHeight: 0` lets it collapse and clip the whole list on a
+  // short screen, leaving the detail painted in its place.
+  const tableMinHeight =
+    captionHeight > 0 && listMinHeight > 0 ? captionHeight + listMinHeight : 0;
 
   // The cursor can move by j/k, g/G, a decision that advances, undo, or
   // a restored session. All of them change `focusedIndex`, so one effect
@@ -908,6 +922,21 @@ export function KeyboardImportModal({
       grid.scrollTop -= visibleTop - top;
     } else if (bottom > visibleBottom) {
       grid.scrollTop += bottom - visibleBottom;
+    }
+
+    // The review body scrolls on short screens. If it was scrolled down
+    // (to reach the detail's actions, say), moving the cursor must also
+    // bring the row back into view — otherwise the selection is still
+    // invisible even though the list itself scrolled correctly.
+    const body = bodyRef.current;
+    if (body) {
+      const bodyBox = body.getBoundingClientRect();
+      const rowNow = row.getBoundingClientRect();
+      if (rowNow.top < bodyBox.top) {
+        body.scrollTop -= bodyBox.top - rowNow.top;
+      } else if (rowNow.bottom > bodyBox.bottom) {
+        body.scrollTop += rowNow.bottom - bodyBox.bottom;
+      }
     }
     // A replaced row with the same index is still a new row to reveal.
   }, [review.focusedIndex, rows.length, headerHeight, focusedRowKey]);
@@ -1916,15 +1945,19 @@ export function KeyboardImportModal({
     >
       {() => (
         <View
+          data-testid="import-review-shell"
           style={{
             // The modal caps itself at 90% of the visual viewport. Bound
             // the review to the same space so a short screen squeezes the
             // LIST first, instead of scrolling the whole dialog. The 20px
-            // is the modal's own top and bottom padding.
+            // is the modal's own top and bottom padding. Clipping here and
+            // scrolling the body below keeps the footer pinned at the
+            // bottom rather than pushing it into the modal's scrollport.
             display: 'flex',
             flexDirection: 'column',
             minHeight: 0,
             maxHeight: 'calc(var(--visual-viewport-height) * 0.9 - 20px)',
+            overflow: 'hidden',
           }}
         >
           {/*
@@ -1976,8 +2009,12 @@ export function KeyboardImportModal({
           />
 
           <View
+            data-testid="import-review-body"
             style={{
-              padding: 16,
+              // The footer is a sibling below this column now, so its
+              // own padding supplies the bottom inset. Leaving 16px here
+              // would double the gap above the strip.
+              padding: '16px 16px 0',
               gap: 12,
               // Shrink with the wrapper, but only the table panel inside
               // is allowed to give up space. Everything else keeps its
@@ -1986,7 +2023,11 @@ export function KeyboardImportModal({
               minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
+              // Once the list has shrunk to its floor, the rest of the
+              // review scrolls HERE — the header and footer stay put.
+              overflowY: 'auto',
             }}
+            innerRef={bodyRef}
           >
             {review.error ? (
               <Text style={{ color: theme.errorText }}>{review.error}</Text>
@@ -2094,13 +2135,14 @@ export function KeyboardImportModal({
                 display: 'flex',
                 flexDirection: 'column',
                 flexShrink: 1,
-                minHeight: 0,
+                minHeight: tableMinHeight || undefined,
               }}
             >
               {/* Where the file is going. It is the table's CAPTION, not a
                   row: it says where everything below it lands, so it sits
                   inside the panel above the sticky header. */}
               <View
+                innerRef={captionElRef}
                 id="import-review-destination"
                 data-testid="import-review-destination"
                 style={{
@@ -3284,67 +3326,72 @@ export function KeyboardImportModal({
 
                 A pane that is open already says its own keys where they
                 matter, so the strip keeps quiet while one is. */}
-            <View
-              style={{
-                flexShrink: 0,
-                display: pane === null ? undefined : 'none',
-              }}
-            >
-              {pane === null ? (
-                <HintStrip
-                  actions={
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        gap: 8,
-                        alignItems: 'center',
+          </View>
+          <View
+            style={{
+              flexShrink: 0,
+              // These were inherited from the content column when the
+              // strip lived inside it: the inset, and the gap above the
+              // pane or detail region it used to follow.
+              padding: '0 16px 16px',
+              marginTop: 12,
+              display: pane === null ? undefined : 'none',
+            }}
+          >
+            {pane === null ? (
+              <HintStrip
+                actions={
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      gap: 8,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-accept-all"
+                      // Nothing to decide is nothing to do.
+                      isDisabled={summary.pending === 0}
+                      onPress={() => {
+                        review.decideAll('accept');
+                        focusGrid();
                       }}
                     >
-                      <Button
-                        variant="bare"
-                        data-testid="import-review-accept-all"
-                        // Nothing to decide is nothing to do.
-                        isDisabled={summary.pending === 0}
-                        onPress={() => {
-                          review.decideAll('accept');
-                          focusGrid();
-                        }}
-                      >
-                        <Trans>Accept all</Trans>
-                        <KeyCap>Shift+A</KeyCap>
-                      </Button>
-                      <Button
-                        variant="bare"
-                        data-testid="import-review-drop-all"
-                        isDisabled={summary.pending === 0}
-                        onPress={() => {
-                          review.decideAll('drop');
-                          focusGrid();
-                        }}
-                      >
-                        <Trans>Drop all</Trans>
-                        <KeyCap>Shift+R</KeyCap>
-                      </Button>
-                      <Button
-                        variant="bare"
-                        data-testid="import-review-undo"
-                        // The undo stack is not reactive, so this is the
-                        // closest signal there is: there is nothing to undo
-                        // exactly when there is no unsaved work.
-                        isDisabled={!review.unsavedWork.hasWork}
-                        onPress={() => {
-                          review.undo();
-                          focusGrid();
-                        }}
-                      >
-                        <Trans>Undo</Trans>
-                        <KeyCap>u</KeyCap>
-                      </Button>
-                    </View>
-                  }
-                />
-              ) : null}
-            </View>
+                      <Trans>Accept all</Trans>
+                      <KeyCap>Shift+A</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-drop-all"
+                      isDisabled={summary.pending === 0}
+                      onPress={() => {
+                        review.decideAll('drop');
+                        focusGrid();
+                      }}
+                    >
+                      <Trans>Drop all</Trans>
+                      <KeyCap>Shift+R</KeyCap>
+                    </Button>
+                    <Button
+                      variant="bare"
+                      data-testid="import-review-undo"
+                      // The undo stack is not reactive, so this is the
+                      // closest signal there is: there is nothing to undo
+                      // exactly when there is no unsaved work.
+                      isDisabled={!review.unsavedWork.hasWork}
+                      onPress={() => {
+                        review.undo();
+                        focusGrid();
+                      }}
+                    >
+                      <Trans>Undo</Trans>
+                      <KeyCap>u</KeyCap>
+                    </Button>
+                  </View>
+                }
+              />
+            ) : null}
           </View>
         </View>
       )}

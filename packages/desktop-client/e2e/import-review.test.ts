@@ -3945,6 +3945,90 @@ ${transactions}
     expect(after).toBe(before);
   });
 
+  test('the actions strip stays reachable on a short screen', async () => {
+    // Short enough that a tall review would push the strip below the fold
+    // and force the user to scroll the dialog just to reach the actions.
+    await page.setViewportSize({ width: 900, height: 620 });
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Short Footer',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithRows(40);
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(40);
+    const hints = dialog.getByTestId('import-review-hints');
+    await expect(hints).toBeVisible();
+
+    // The strip is inside the dialog's visible area without any scrolling.
+    const [dialogBox, hintsBox] = await Promise.all([
+      dialog.boundingBox(),
+      hints.boundingBox(),
+    ]);
+    expect(
+      dialogBox &&
+        hintsBox &&
+        hintsBox.y + hintsBox.height <= dialogBox.y + dialogBox.height + 1,
+      'the actions strip must sit inside the dialog without scrolling',
+    ).toBe(true);
+    // The shell, not the dialog, owns the clipping — check the element
+    // that actually decides whether the dialog has to scroll.
+    const shellScroll = await dialog
+      .getByTestId('import-review-shell')
+      .evaluate(element => ({
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+      }));
+    expect(shellScroll.scrollHeight).toBeLessThanOrEqual(
+      shellScroll.clientHeight + 1,
+    );
+
+    // Pinning the footer must not cost the list: it still shows three
+    // rows, and the detail must not be painted over them.
+    const [headerHeight, rowHeight, gridBox, detailsBox] = await Promise.all([
+      dialog
+        .getByTestId('import-review-header')
+        .evaluate(element => element.getBoundingClientRect().height),
+      rows.first().evaluate(element => element.getBoundingClientRect().height),
+      dialog.getByTestId('import-review-grid').boundingBox(),
+      dialog.getByTestId('import-review-details').boundingBox(),
+    ]);
+    expect(gridBox?.height ?? 0).toBeGreaterThanOrEqual(
+      headerHeight + 3 * rowHeight - 1,
+    );
+    expect(
+      gridBox && detailsBox && gridBox.y + gridBox.height <= detailsBox.y + 1,
+      'the detail must not overlap the visible list',
+    ).toBe(true);
+
+    // Moving the cursor also reveals the row when the review body was
+    // scrolled down to reach the detail's own actions.
+    const body = dialog.getByTestId('import-review-body');
+    await body.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await page.keyboard.press('j');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+    const revealed = await body.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const focused = element.querySelector(
+        '[data-focused="true"]',
+      ) as HTMLElement;
+      const row = focused.getBoundingClientRect();
+      return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
+    });
+    expect(revealed).toBe(true);
+
+    // And the actions still work: no dialog scroll first, then a click.
+    await dialog.getByTestId('import-review-accept-all').click();
+    await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
+  });
+
   test('the list scrolls to the row the cursor moves to', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Scroll To Focus',
