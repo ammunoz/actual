@@ -2757,7 +2757,6 @@ export function KeyboardImportModal({
                             }}
                           >
                             <Trans>Always this payee for this vendor</Trans>
-                            <KeyCap>Shift+E</KeyCap>
                           </Button>
                         ) : null}
                         {focusedRules.payeeToCategory &&
@@ -2777,7 +2776,6 @@ export function KeyboardImportModal({
                             }}
                           >
                             <Trans>Always this category for this payee</Trans>
-                            <KeyCap>Shift+E</KeyCap>
                           </Button>
                         ) : null}
                       </View>
