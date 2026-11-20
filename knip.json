@@ -7,10 +7,10 @@
     "nsTypes": "off",
     "duplicates": "off"
   },
-  "ignoreBinaries": ["electron-rebuild"],
+  "ignoreBinaries": ["electron-rebuild", "ffmpeg"],
   "workspaces": {
     ".": {
-      "entry": ["bin/*.mts"],
+      "entry": ["bin/*.mts", "scripts/*.mjs"],
       "ignore": ["lage.config.js", ".claude/**", ".agents/**"]
     },
     "packages/api": {
@@ -44,7 +44,7 @@
         "src/globals.ts",
         "src/build-shims.js"
       ],
-      "ignore": ["playwright.config.d.ts"],
+      "ignore": ["playwright.config.d.ts", "playwright.demo.config.ts"],
       "ignoreDependencies": ["plugins-service"]
     },
     "packages/desktop-electron": {
