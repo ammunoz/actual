@@ -18,6 +18,13 @@ inputs:
 runs:
   using: composite
   steps:
+    # GitHub-hosted runners give roughly 14 GB of free disk. The preinstalled
+    # .NET, Haskell and Android toolchains are not needed by any job in this
+    # repository, and the browser build plus the Docker layers need the room.
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+        df -h /
     - name: Install node
       uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
       with:
