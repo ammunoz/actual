@@ -960,6 +960,9 @@ ${transactions}
     );
     const ruleButton = dialog.getByTestId('import-review-rule-vendor-to-payee');
     await expect(ruleButton).toBeVisible();
+    // It is a click-only action. `Shift+E` opens the rules PICKER; it does
+    // not write this rule, so the button must not advertise that key.
+    await expect(ruleButton.locator('[data-testid="key-cap"]')).toHaveCount(0);
     await ruleButton.click();
 
     // The notice says what was created.
@@ -1073,6 +1076,9 @@ ${transactions}
       'import-review-rule-payee-to-category',
     );
     await expect(ruleButton).toBeVisible();
+    // Like the vendor button, this writes the rule on click. Its old
+    // `Shift+E` keycap advertised the picker instead, so it is gone.
+    await expect(ruleButton.locator('[data-testid="key-cap"]')).toHaveCount(0);
     await ruleButton.click();
     await expect(dialog.getByTestId('import-review-notice')).toContainText(
       'Rule created',
@@ -1131,6 +1137,9 @@ ${transactions}
       'import-review-rule-payee-to-category',
     );
     await expect(ruleButton).toBeVisible();
+    // Like the vendor button, this writes the rule on click. Its old
+    // `Shift+E` keycap advertised the picker instead, so it is gone.
+    await expect(ruleButton.locator('[data-testid="key-cap"]')).toHaveCount(0);
     await ruleButton.click();
     await expect(dialog.getByTestId('import-review-notice')).toContainText(
       'Rule created',
