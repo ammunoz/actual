@@ -308,13 +308,16 @@ docker compose -f docker/docker-compose.yml pull
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-The tags are `:fork` for the branch head and `:fork-<short-sha>` for each
+The tags are `:latest` for the branch head and `:sha-<short-sha>` for each
 commit, so a server can be pinned to the build it is running.
 
+The image is built for `linux/amd64` only, on glibc (Debian bookworm). There
+is no Alpine flavour and no 32-bit ARM build.
+
 > **A package scoped to a personal account is private on first publish.** The
-> first successful run creates both `actual-server` and `actual` as private
-> packages; flip each one to Public under the repository's **Packages** tab
-> before anyone else can pull them.
+> first successful run creates `actual-server` as a private package; flip it to
+> Public under the repository's **Packages** tab before anyone else can pull
+> it.
 
 ## Taking upstream's changes
 

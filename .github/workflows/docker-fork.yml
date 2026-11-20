@@ -1,18 +1,22 @@
 name: Build Fork Docker Image
 
-# Publishes the sync-server images for this fork's `main` branch.
+# Publishes the sync-server image for this fork's `main` branch.
 #
 # This is fork-local rather than a patch to upstream's docker-nightly.yml:
 #   - upstream's only triggers on `master` and only runs on organization-owned
 #     repositories (it uses Depot runners, which need an org);
 #   - upstream publishes to the `actualbudget` namespace, which this fork must
 #     not push to;
-#   - keeping it separate keeps `git merge upstream/master` clean.
+#   - keeping it separate keeps merging upstream's release line clean.
 #
-# The images go to this repository's own GitHub Container Registry namespace. A
-# package scoped to a personal account is private on first publish, so both
-# packages have to be flipped to Public once, by hand, under the repository's
-# Packages tab.
+# The image goes to this repository's own GitHub Container Registry namespace. A
+# package scoped to a personal account is private on first publish, so it has to
+# be flipped to Public once, by hand, under the repository's Packages tab.
+#
+# The fork publishes one flavour, for one platform: linux/amd64 on glibc
+# (Debian bookworm). Upstream also builds an Alpine image, and uses it to
+# support 32-bit ARM; neither matters here, and the Alpine leg would double
+# the build time for a second image nobody pulls.
 #
 # Last synced against upstream's docker-nightly.yml at v26.11.0.
 
@@ -33,23 +37,17 @@ permissions:
 env:
   IMAGES: |
     ghcr.io/${{ github.repository_owner }}/actual-server
-    ghcr.io/${{ github.repository_owner }}/actual
 
   # Produces:
-  # - actual-server:fork         (moving tag for the branch head)
-  # - actual-server:fork-abc1234 (immutable tag per commit)
-  # The alpine leg gets an -alpine suffix, as upstream does.
+  # - actual-server:latest       (moving tag for the branch head)
+  # - actual-server:sha-abc1234  (immutable tag per commit)
   TAGS: |
-    type=raw,value=fork
-    type=sha,prefix=fork-
+    type=sha
 
 jobs:
   build:
     name: Build Docker image
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os: [ubuntu, alpine]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -63,7 +61,9 @@ jobs:
         uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
           images: ${{ env.IMAGES }}
-          flavor: ${{ matrix.os != 'ubuntu' && format('suffix=-{0}', matrix.os) || '' }}
+          # Every push to `main` is the newest build, so the branch head is the
+          # latest one. There is no release tag to derive a version from.
+          flavor: latest=true
           tags: ${{ env.TAGS }}
 
       - name: Login to GitHub Container Registry
@@ -88,7 +88,7 @@ jobs:
           context: .
           push: false
           load: true
-          file: packages/sync-server/docker/${{ matrix.os }}.Dockerfile
+          file: packages/sync-server/docker/ubuntu.Dockerfile
           tags: actual-server-testing
 
       - name: Test that the docker image boots
@@ -108,6 +108,6 @@ jobs:
         with:
           context: .
           push: true
-          file: packages/sync-server/docker/${{ matrix.os }}.Dockerfile
+          file: packages/sync-server/docker/ubuntu.Dockerfile
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
