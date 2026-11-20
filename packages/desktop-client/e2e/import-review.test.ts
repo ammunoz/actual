@@ -3882,6 +3882,69 @@ ${transactions}
     expect(headerHeight.header).toBeGreaterThanOrEqual(headerHeight.text);
   });
 
+  test('a short screen shrinks the list before it scrolls the dialog', async () => {
+    // Short enough that 40 rows cannot fit, but with room left for the
+    // fixed detail and at least three list rows.
+    await page.setViewportSize({ width: 900, height: 800 });
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Short Screen',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithRows(40);
+
+    const dialog = page.getByRole('dialog');
+    const grid = dialog.getByTestId('import-review-grid');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(40);
+
+    const [headerHeight, rowHeight, listHeight] = await Promise.all([
+      dialog
+        .getByTestId('import-review-header')
+        .evaluate(element => element.getBoundingClientRect().height),
+      rows.first().evaluate(element => element.getBoundingClientRect().height),
+      grid.evaluate(element => element.getBoundingClientRect().height),
+    ]);
+    // The floor is the measured header plus three measured rows — no
+    // pixel literal, so it holds at any zoom and with any font.
+    expect(listHeight).toBeGreaterThanOrEqual(headerHeight + 3 * rowHeight - 1);
+    // And it actually SHRANK: without the measured floor the list would
+    // sit at its old 50vh cap, which this viewport has room for. Compare
+    // against the viewport rather than a pixel count.
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    expect(listHeight).toBeLessThan((viewport?.height ?? 0) * 0.5);
+
+    // The list is what scrolls; the dialog itself does not have to.
+    const listScrolls = await grid.evaluate(
+      element => element.scrollHeight > element.clientHeight,
+    );
+    expect(listScrolls).toBe(true);
+    const dialogScroll = await dialog.evaluate(element => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(dialogScroll.scrollHeight).toBeLessThanOrEqual(
+      dialogScroll.clientHeight + 1,
+    );
+
+    // The detail keeps its fixed height while the cursor walks the rows.
+    const details = dialog.getByTestId('import-review-details');
+    const before = await details.evaluate(
+      element => element.getBoundingClientRect().height,
+    );
+    for (let index = 0; index < 4; index++) {
+      await page.keyboard.press('j');
+    }
+    const after = await details.evaluate(
+      element => element.getBoundingClientRect().height,
+    );
+    expect(after).toBe(before);
+  });
+
   test("the help overlay's rows are readable", async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Help Rows',
