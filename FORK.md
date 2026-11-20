@@ -257,13 +257,98 @@ yarn workspace @actual-app/web test src/import-review
 E2E_USE_BUILD=1 E2E_PORT=3002 yarn e2e e2e/import-review.test.ts --workers=40%
 ```
 
+## CI on this fork
+
+Upstream runs its CI on [Depot](https://depot.dev)'s runners, which only
+support organization-owned repositories. This fork is a personal account, so
+every Depot-targeted job would sit in the queue until GitHub cancelled it
+after 24 hours. The fork's workflows therefore run on GitHub-hosted runners
+(`ubuntu-latest`), which are free for public repositories.
+
+Upstream's 41 workflows were cut down to four, the ones that answer "did
+this change break anything":
+
+| Workflow            | What it does                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `check.yml`         | lint, typecheck, unit tests, dependency constraints, knip, the migration policy check |
+| `build.yml`         | builds the API, CRDT, web bundle, CLI and sync server                                 |
+| `e2e-test.yml`      | the Playwright functional tests                                                       |
+| `docs-spelling.yml` | spell-checks the docs                                                                 |
+
+Plus one fork-local workflow, `docker-fork.yml`, which builds and publishes
+the server image.
+
+What was dropped, and why:
+
+- **The publishers** (`docker-nightly`, `docker-release`, `publish-*`,
+  `netlify-release`, `electron-*`) all push to the `actualbudget` namespace
+  on npm, Docker Hub, Flathub and the app stores. They have no meaning here.
+- **The scheduled chores** (`count-points`, `cut-release-branch`,
+  `i18n-string-extract-master`, `nightly-theme-catalog-scan`, `stale`) are
+  upstream's own release process.
+- **The issue and PR bots** are upstream's triage process.
+- **`build.yml`'s `mobile` job** runs a full `xcodebuild archive` and a
+  Gradle build. That needs 8 vCPU, 24 GB of RAM and 400 GB of disk, which
+  GitHub's macOS runner does not have.
+- **`e2e-test.yml`'s `vrt` job** compares screenshots against upstream's
+  committed snapshots. The import review changes what those pages look
+  like, so the snapshots would have to be regenerated on every rebase.
+
+That is the same shape most forks of this repository settle on: keep the
+workflows that check your work, delete the ones that publish upstream's
+artifacts.
+
+## Running the fork's server
+
+`docker-fork.yml` publishes the sync-server image to this repository's own
+GitHub Container Registry namespace on every push to `main`:
+
+```bash
+docker compose -f docker/docker-compose.yml pull
+docker compose -f docker/docker-compose.yml up -d
+```
+
+The tags are `:fork` for the branch head and `:fork-<short-sha>` for each
+commit, so a server can be pinned to the build it is running.
+
+> **A package scoped to a personal account is private on first publish.** The
+> first successful run creates both `actual-server` and `actual` as private
+> packages; flip each one to Public under the repository's **Packages** tab
+> before anyone else can pull them.
+
+## Taking upstream's changes
+
+The fork's `main` branch is upstream's release line plus this fork's commits.
+Upstream keeps a `release` branch for its stable line and a `master` branch
+for work in progress; the fork tracks the former.
+
+> **Never click GitHub's "Sync fork" button.** It merges the parent's default
+> branch — upstream's `master` — into the fork's default branch, which is not
+> what the fork wants and does not merge cleanly.
+
+To take a new upstream release:
+
+```bash
+git fetch upstream release && git fetch origin
+OLD=$(git rev-parse origin/release)
+git rebase --onto upstream/release "$OLD" main
+git push --force-with-lease origin refs/remotes/upstream/release:refs/heads/release
+git push --force-with-lease origin main
+```
+
+`OLD` has to come from the fork's own `release` mirror. Using
+`git merge-base main upstream/master` instead gives a much older base, because
+the two upstream lines diverged in May 2026, and would replay the wrong set
+of commits.
+
 ## Status
 
 Work in progress, on a personal fork, with no release schedule. This is not
 a branch waiting to go upstream: the fork is maintained for its own sake,
-and it is three commits behind upstream's `master` because it is not
-tracking it closely. The import review is usable today and is the fork's
-focus; the rest of Actual is upstream's, at upstream's pace.
+and it tracks upstream's release line rather than its `master`, so it picks
+up upstream's tested releases instead of work in progress. The import review
+is usable today and is the fork's focus; the rest of Actual is upstream's,
+at upstream's pace.
 
 ## License
 

@@ -1,0 +1,37 @@
+# Runs this fork's sync server from its own GitHub Container Registry image.
+#
+#   docker compose up -d
+#
+# The image is published by .github/workflows/docker-fork.yml on every push to
+# `main`. Pull it first to pick up a new build:
+#
+#   docker compose pull && docker compose up -d
+#
+# Data lives in ./actual-data next to this file.
+
+services:
+  actual_server:
+    image: ghcr.io/ammunoz/actual-server:fork
+    ports:
+      # This line makes Actual available at port 5006 of the device you run the
+      # server on, i.e. http://localhost:5006. You can change the first number
+      # to change the port, if you want.
+      - '5006:5006'
+    environment:
+      # Uncomment any of the lines below to set configuration options.
+      # - ACTUAL_HTTPS_KEY=/data/selfhost.key
+      # - ACTUAL_HTTPS_CERT=/data/selfhost.crt
+      # - ACTUAL_PORT=5006
+    volumes:
+      # Change './actual-data' below to the path to the folder where you want
+      # Actual to store its data on your server. '/data' is the path Actual
+      # will look for its files in by default, so leave this as-is.
+      - ./actual-data:/data
+    healthcheck:
+      # Enable health check for the instance
+      test: ['CMD-SHELL', 'node scripts/health-check.js']
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
