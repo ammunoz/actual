@@ -299,7 +299,9 @@ export function KeyboardImportModal({
   // render. Measure the BORDER box — the rows carry vertical padding, and
   // a content-box read would come up short by exactly that padding.
   const headerElRef = useRef<HTMLDivElement | null>(null);
-  const rowElRef = useRef<HTMLDivElement | null>(null);
+  // Every row gets a ref: the first one is measured for the list's floor,
+  // and the focused one is scrolled into view when the cursor moves.
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [rowHeight, setRowHeight] = useState(0);
 
@@ -861,7 +863,7 @@ export function KeyboardImportModal({
     const measure = () => {
       const nextHeader =
         headerElRef.current?.getBoundingClientRect().height ?? 0;
-      const nextRow = rowElRef.current?.getBoundingClientRect().height ?? 0;
+      const nextRow = rowRefs.current[0]?.getBoundingClientRect().height ?? 0;
       setHeaderHeight(previous =>
         previous === nextHeader ? previous : nextHeader,
       );
@@ -871,12 +873,44 @@ export function KeyboardImportModal({
     const observer = new ResizeObserver(measure);
     if (gridRef.current) observer.observe(gridRef.current);
     if (headerElRef.current) observer.observe(headerElRef.current);
-    if (rowElRef.current) observer.observe(rowElRef.current);
+    if (rowRefs.current[0]) observer.observe(rowRefs.current[0]);
     return () => observer.disconnect();
   }, [rows.length]);
 
   const listMinHeight =
     headerHeight > 0 && rowHeight > 0 ? headerHeight + 3 * rowHeight : 0;
+
+  // The cursor can move by j/k, g/G, a decision that advances, undo, or
+  // a restored session. All of them change `focusedIndex`, so one effect
+  // here covers them all instead of each key handler scrolling by hand.
+  //
+  // Adjust the list's own scrollTop directly rather than calling
+  // scrollIntoView: that would also scroll the modal above it, and it
+  // knows nothing about the sticky header covering the top of the list.
+  // A layout effect keeps a fast j/k from flashing a clipped selection.
+  const focusedRowKey =
+    rows[review.focusedIndex]?.previewKey ??
+    rows[review.focusedIndex]?.importedId ??
+    review.focusedIndex;
+  useLayoutEffect(() => {
+    const grid = gridRef.current;
+    const row = rowRefs.current[review.focusedIndex];
+    if (!grid || !row) return;
+
+    const rowBox = row.getBoundingClientRect();
+    const top = rowBox.top - grid.getBoundingClientRect().top;
+    const bottom = top + rowBox.height;
+    // The sticky header sits over the top of the scrolling area. The
+    // grid has no border or padding, so clientHeight is its visible box.
+    const visibleTop = headerHeight;
+    const visibleBottom = grid.clientHeight;
+    if (top < visibleTop) {
+      grid.scrollTop -= visibleTop - top;
+    } else if (bottom > visibleBottom) {
+      grid.scrollTop += bottom - visibleBottom;
+    }
+    // A replaced row with the same index is still a new row to reveal.
+  }, [review.focusedIndex, rows.length, headerHeight, focusedRowKey]);
 
   const accountName = (id: string) =>
     accountNames.get(id) ?? t('Unknown account');
@@ -2118,6 +2152,9 @@ export function KeyboardImportModal({
                   // Until the measurement lands, do not shrink at all.
                   minHeight: listMinHeight || undefined,
                   flexShrink: listMinHeight > 0 ? 1 : 0,
+                  // The cursor effect owns this scroll position; browser
+                  // scroll anchoring has no say in where the row lands.
+                  overflowAnchor: 'none',
                   // ONE scroll context for the whole table, so the header
                   // and the rows move together and the columns cannot
                   // drift apart. It used to be on each row, which meant
@@ -2241,7 +2278,9 @@ export function KeyboardImportModal({
                   const dateCellValue = dateCell(row);
                   return (
                     <View
-                      innerRef={index === 0 ? rowElRef : undefined}
+                      innerRef={element => {
+                        rowRefs.current[index] = element;
+                      }}
                       role="row"
                       key={row.previewKey ?? row.importedId ?? String(index)}
                       data-testid="import-review-row"
