@@ -1,0 +1,113 @@
+name: Build Fork Docker Image
+
+# Publishes the sync-server images for this fork's `main` branch.
+#
+# This is fork-local rather than a patch to upstream's docker-nightly.yml:
+#   - upstream's only triggers on `master` and only runs on organization-owned
+#     repositories (it uses Depot runners, which need an org);
+#   - upstream publishes to the `actualbudget` namespace, which this fork must
+#     not push to;
+#   - keeping it separate keeps `git merge upstream/master` clean.
+#
+# The images go to this repository's own GitHub Container Registry namespace. A
+# package scoped to a personal account is private on first publish, so both
+# packages have to be flipped to Public once, by hand, under the repository's
+# Packages tab.
+#
+# Last synced against upstream's docker-nightly.yml at v26.11.0.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: docker-fork-build
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGES: |
+    ghcr.io/${{ github.repository_owner }}/actual-server
+    ghcr.io/${{ github.repository_owner }}/actual
+
+  # Produces:
+  # - actual-server:fork         (moving tag for the branch head)
+  # - actual-server:fork-abc1234 (immutable tag per commit)
+  # The alpine leg gets an -alpine suffix, as upstream does.
+  TAGS: |
+    type=raw,value=fork
+    type=sha,prefix=fork-
+
+jobs:
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu, alpine]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: ${{ env.IMAGES }}
+          flavor: ${{ matrix.os != 'ubuntu' && format('suffix=-{0}', matrix.os) || '' }}
+          tags: ${{ env.TAGS }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No restored caches: the runner has 14 GB of disk, not Depot's 130 GB.
+      - name: Set up environment
+        uses: ./.github/actions/setup
+        with:
+          cache: 'false'
+
+      - name: Build Web
+        run: yarn build:server
+
+      - name: Build image for testing
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          push: false
+          load: true
+          file: packages/sync-server/docker/${{ matrix.os }}.Dockerfile
+          tags: actual-server-testing
+
+      - name: Test that the docker image boots
+        timeout-minutes: 1
+        run: |
+          docker rm -f actual-server 2>/dev/null || true
+          docker run --detach --network=host --name actual-server actual-server-testing
+          HEALTHCMD=$(yq -r '.services.actual_server.healthcheck.test[1]' packages/sync-server/docker-compose.yml)
+          until docker exec actual-server sh -c "$HEALTHCMD"; do sleep 1; done
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker logs actual-server || true
+
+      - name: Build and push image
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          push: true
+          file: packages/sync-server/docker/${{ matrix.os }}.Dockerfile
+          platforms: linux/amd64
+          tags: ${{ steps.meta.outputs.tags }}
