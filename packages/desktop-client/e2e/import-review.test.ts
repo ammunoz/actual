@@ -3946,8 +3946,9 @@ ${transactions}
   });
 
   test('the actions strip stays reachable on a short screen', async () => {
-    // Short enough that a tall review would push the strip below the fold
-    // and force the user to scroll the dialog just to reach the actions.
+    // Short enough that WITHOUT a pinned footer even a three-row review
+    // pushes the strip below the fold and forces a dialog scroll. The
+    // small overflow is intentional: that is the regression being guarded.
     await page.setViewportSize({ width: 900, height: 620 });
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Short Footer',
@@ -3957,11 +3958,11 @@ ${transactions}
     await accountPage.waitFor();
 
     await enableKeyboardReview();
-    await importOfxWithRows(40);
+    await importOfx();
 
     const dialog = page.getByRole('dialog');
     const rows = dialog.getByTestId('import-review-row');
-    await expect(rows).toHaveCount(40);
+    await expect(rows).toHaveCount(3);
     const hints = dialog.getByTestId('import-review-hints');
     await expect(hints).toBeVisible();
 
@@ -4005,24 +4006,6 @@ ${transactions}
       gridBox && detailsBox && gridBox.y + gridBox.height <= detailsBox.y + 1,
       'the detail must not overlap the visible list',
     ).toBe(true);
-
-    // Moving the cursor also reveals the row when the review body was
-    // scrolled down to reach the detail's own actions.
-    const body = dialog.getByTestId('import-review-body');
-    await body.evaluate(element => {
-      element.scrollTop = element.scrollHeight;
-    });
-    await page.keyboard.press('j');
-    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
-    const revealed = await body.evaluate(element => {
-      const box = element.getBoundingClientRect();
-      const focused = element.querySelector(
-        '[data-focused="true"]',
-      ) as HTMLElement;
-      const row = focused.getBoundingClientRect();
-      return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
-    });
-    expect(revealed).toBe(true);
 
     // And the actions still work: no dialog scroll first, then a click.
     await dialog.getByTestId('import-review-accept-all').click();
@@ -4081,6 +4064,27 @@ ${transactions}
     await expect
       .poll(() => grid.evaluate(element => element.scrollTop))
       .toBe(0);
+
+    // With 40 rows the review body itself scrolls. Moving the cursor
+    // after the user scrolled it down must bring the row back into view.
+    const body = dialog.getByTestId('import-review-body');
+    const scrolledBody = await body.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    });
+    expect(scrolledBody).toBeGreaterThan(0);
+    await page.keyboard.press('j');
+    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+    const revealed = await body.evaluate(element => {
+      const box = element.getBoundingClientRect();
+      const focused = element.querySelector<HTMLElement>(
+        '[data-focused="true"]',
+      );
+      if (!focused) throw new Error('No row was focused after j');
+      const row = focused.getBoundingClientRect();
+      return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
+    });
+    expect(revealed).toBe(true);
   });
 
   test("the help overlay's rows are readable", async () => {
