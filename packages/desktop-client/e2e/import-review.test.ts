@@ -3945,6 +3945,60 @@ ${transactions}
     expect(after).toBe(before);
   });
 
+  test('the list scrolls to the row the cursor moves to', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Scroll To Focus',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithRows(40);
+
+    const dialog = page.getByRole('dialog');
+    const grid = dialog.getByTestId('import-review-grid');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(40);
+
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+    expect(await grid.evaluate(element => element.scrollTop)).toBe(0);
+
+    // Jumping to the last row has to bring it into the list's viewport,
+    // below the sticky header — not just mark it with `data-focused`.
+    await page.keyboard.press('Shift+G');
+    await expect(rows.nth(39)).toHaveAttribute('data-focused', 'true');
+    const atEnd = await grid.evaluate(element => {
+      const list = element.getBoundingClientRect();
+      const focused = element.querySelector<HTMLElement>(
+        '[data-focused="true"]',
+      );
+      const header = element.querySelector<HTMLElement>(
+        '[data-testid="import-review-header"]',
+      );
+      if (!focused || !header) {
+        throw new Error('The focused row or the sticky header was missing');
+      }
+      const row = focused.getBoundingClientRect();
+      const head = header.getBoundingClientRect();
+      return {
+        scrollTop: element.scrollTop,
+        inside:
+          row.top >= list.top + head.height - 1 &&
+          row.bottom <= list.bottom + 2,
+      };
+    });
+    expect(atEnd.scrollTop).toBeGreaterThan(0);
+    expect(atEnd.inside).toBe(true);
+
+    // And back to the top.
+    await page.keyboard.press('g');
+    await expect(rows.nth(0)).toHaveAttribute('data-focused', 'true');
+    await expect
+      .poll(() => grid.evaluate(element => element.scrollTop))
+      .toBe(0);
+  });
+
   test("the help overlay's rows are readable", async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review Help Rows',
