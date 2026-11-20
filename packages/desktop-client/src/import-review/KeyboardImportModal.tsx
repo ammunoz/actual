@@ -36,6 +36,10 @@ import type {
   RowGate,
 } from '@actual-app/core/server/transactions/import/review/index';
 import { integerToAmount } from '@actual-app/core/shared/util';
+import type {
+  NewRuleEntity,
+  RuleEntity,
+} from '@actual-app/core/types/models/rule';
 import { css } from '@emotion/css';
 import { format as formatDate, parseISO } from 'date-fns';
 
@@ -83,7 +87,7 @@ import type { RuledField, RuleEffect } from './rule-effects';
 import { RuledCell, useClearedByRuleLabel } from './RuledCell';
 import { RulePicker } from './RulePicker';
 import type { RulePickerItem } from './RulePicker';
-import { rulesForRow } from './rules';
+import { newRuleSeed, rulesForRow } from './rules';
 import type { ReviewRule } from './rules';
 import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
@@ -1164,6 +1168,14 @@ export function KeyboardImportModal({
         ),
       });
     }
+    // The escape hatch, on every focused row even when neither of the
+    // row-derived rules can be offered. It is last so the picker opens on
+    // the rules that touched the row, not on a blank editor.
+    items.push({
+      kind: 'new',
+      id: 'create-new-rule',
+      description: t('Add new rule'),
+    });
 
     return items;
   }, [
@@ -1181,17 +1193,12 @@ export function KeyboardImportModal({
   /**
    * Open a rule in upstream's own editor.
    *
-   * The rule is saved there, and when it lands the review asks the engine
-   * again, so the row shows the rule's NEW effect.
+   * Both an existing rule and a blank one go through here, so the review
+   * keeps one way of stacking the editor and one way of hearing about its
+   * save. When the rule lands, the review asks the engine again so the row
+   * shows the rule's NEW effect.
    */
-  const openRuleEditor = (ruleId: string) => {
-    const rule = review.rules.find(candidate => candidate.id === ruleId);
-    // The rule is not in the budget's list — it was made on another
-    // device, or the list is stale. There is nothing to open.
-    if (!rule) {
-      setNotice(t('That rule is not in this budget any more.'));
-      return;
-    }
+  const openRuleInModal = (rule: RuleEntity | NewRuleEntity) => {
     dispatchModal(
       pushModal({
         modal: {
@@ -1206,6 +1213,23 @@ export function KeyboardImportModal({
       }),
     );
   };
+
+  const openRuleEditor = (ruleId: string) => {
+    const rule = review.rules.find(candidate => candidate.id === ruleId);
+    // The rule is not in the budget's list — it was made on another
+    // device, or the list is stale. There is nothing to open.
+    if (!rule) {
+      setNotice(t('That rule is not in this budget any more.'));
+      return;
+    }
+    openRuleInModal(rule);
+  };
+
+  // A rule the review cannot prefill: hand the user upstream's editor with
+  // a blank seed. This deliberately does NOT go through `review.createRule`
+  // — that path amends a rule with the same conditions, which would silently
+  // rewrite an existing rule of the user's instead of making a new one.
+  const openNewRuleEditor = () => openRuleInModal(newRuleSeed());
 
   // A rule is being written. The buttons are disabled while it is, so a
   // second click cannot write the same rule twice.
@@ -1246,8 +1270,8 @@ export function KeyboardImportModal({
   /**
    * What the user chose in the rule picker.
    *
-   * A rule that is EDITED opens upstream's editor; a rule that is CREATED
-   * is written, and the review says what it did.
+   * An existing rule, or a blank one, opens upstream's editor; one of the
+   * row-derived rules is written here, and the review says what it did.
    */
   const pickRuleItem = (item: RulePickerItem) => {
     // The write is guarded in `createRule`, but closing the pane first
@@ -1258,6 +1282,10 @@ export function KeyboardImportModal({
       return;
     }
     openPane(null);
+    if (item.kind === 'new') {
+      openNewRuleEditor();
+      return;
+    }
     if (item.kind === 'create') {
       void createRule(item.rule, item.message);
       return;
@@ -1460,28 +1488,25 @@ export function KeyboardImportModal({
         // There is no row to look at — the review is still loading, or
         // the list is empty. Either way there is nothing to say.
         if (!focused) break;
-        if (rulePickerItems.length === 0) {
-          // The Rules zone still shows a rule (its id was in the
-          // effects) that the budget's list no longer has. Say so,
-          // rather than claiming there is nothing to edit.
-          //
-          // When no rule fired at all, the wording is softer still: a
-          // split parent can have a rule whose effect is hidden, so
-          // "no rules" would not always be true.
-          setNotice(
-            focusedRuleIds.length > 0
-              ? t('That rule is not in this budget any more.')
-              : t('There are no rules to edit on this row.'),
-          );
-          break;
+        // The blank-rule item is on every focused row, so the picker
+        // always has something to offer. A rule that touched the row but
+        // is no longer in the budget still deserves a word — but it must
+        // not stop the user from making a rule.
+        if (
+          focusedRuleIds.length > 0 &&
+          !rulePickerItems.some(item => item.kind === 'edit')
+        ) {
+          setNotice(t('That rule is not in this budget any more.'));
         }
         // ONE thing to choose, and it is a rule to EDIT: open it, rather
         // than showing a picker with a single item in it.
         //
-        // A rule to CREATE never opens on its own. Making a rule is a
-        // durable act, and the user asked to edit the rules — so the
-        // picker opens and the choice is made there.
-        const only = rulePickerItems.length === 1 ? rulePickerItems[0] : null;
+        // Rules to CREATE — the row-derived ones and the blank one — never
+        // open on their own. Making a rule is a durable act, and the user
+        // asked to edit the rules, so only edit items count toward this
+        // shortcut. The picker still carries the full list.
+        const actionable = rulePickerItems.filter(item => item.kind !== 'new');
+        const only = actionable.length === 1 ? actionable[0] : null;
         if (only && only.kind === 'edit') {
           pickRuleItem(only);
           break;
