@@ -1,5 +1,12 @@
 import type { ComponentType, SVGProps } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { PressEvent } from 'react-aria-components';
 import { useHotkeys, useHotkeysContext } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
@@ -286,6 +293,15 @@ export function KeyboardImportModal({
   // under the cursor and closes when the cursor moves.
   const [rulesOpen, setRulesOpen] = useState(false);
   useEffect(() => setRulesOpen(false), [review.focusedIndex]);
+
+  // The list's floor is measured, not a pixel constant: three rows plus
+  // the sticky header, at whatever size this font, zoom and locale actually
+  // render. Measure the BORDER box — the rows carry vertical padding, and
+  // a content-box read would come up short by exactly that padding.
+  const headerElRef = useRef<HTMLDivElement | null>(null);
+  const rowElRef = useRef<HTMLDivElement | null>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const [rowHeight, setRowHeight] = useState(0);
 
   // A pane owns the keyboard while it is up. When it closes, the focus
   // has to come back to the grid or the user is typing into a button
@@ -835,6 +851,32 @@ export function KeyboardImportModal({
   };
 
   const rows = review.state?.rows ?? [];
+
+  // A layout effect reads the boxes BEFORE the first paint, so a short
+  // screen never flashes an oversized list. Watching the grid catches zoom
+  // and font changes; the row-count dependency re-reads when a new first
+  // row is mounted. A row that re-resolves to a different size is observed
+  // too.
+  useLayoutEffect(() => {
+    const measure = () => {
+      const nextHeader =
+        headerElRef.current?.getBoundingClientRect().height ?? 0;
+      const nextRow = rowElRef.current?.getBoundingClientRect().height ?? 0;
+      setHeaderHeight(previous =>
+        previous === nextHeader ? previous : nextHeader,
+      );
+      setRowHeight(previous => (previous === nextRow ? previous : nextRow));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    if (gridRef.current) observer.observe(gridRef.current);
+    if (headerElRef.current) observer.observe(headerElRef.current);
+    if (rowElRef.current) observer.observe(rowElRef.current);
+    return () => observer.disconnect();
+  }, [rows.length]);
+
+  const listMinHeight =
+    headerHeight > 0 && rowHeight > 0 ? headerHeight + 3 * rowHeight : 0;
 
   const accountName = (id: string) =>
     accountNames.get(id) ?? t('Unknown account');
@@ -1839,7 +1881,18 @@ export function KeyboardImportModal({
       containerProps={{ style: { width: 900, maxWidth: '100%' } }}
     >
       {() => (
-        <>
+        <View
+          style={{
+            // The modal caps itself at 90% of the visual viewport. Bound
+            // the review to the same space so a short screen squeezes the
+            // LIST first, instead of scrolling the whole dialog. The 20px
+            // is the modal's own top and bottom padding.
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            maxHeight: 'calc(var(--visual-viewport-height) * 0.9 - 20px)',
+          }}
+        >
           {/*
               The review's own header, not the app's `ModalHeader`.
 
@@ -1888,7 +1941,19 @@ export function KeyboardImportModal({
             onClose={requestClose}
           />
 
-          <View style={{ padding: 16, gap: 12 }}>
+          <View
+            style={{
+              padding: 16,
+              gap: 12,
+              // Shrink with the wrapper, but only the table panel inside
+              // is allowed to give up space. Everything else keeps its
+              // size so the list is the first thing to compress.
+              flex: '0 1 auto',
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             {review.error ? (
               <Text style={{ color: theme.errorText }}>{review.error}</Text>
             ) : null}
@@ -1915,6 +1980,7 @@ export function KeyboardImportModal({
                 gap: 10,
                 alignItems: 'center',
                 flexWrap: 'wrap',
+                flexShrink: 0,
               }}
             >
               {/* How far through the file the user is. The bar is
@@ -1989,6 +2055,12 @@ export function KeyboardImportModal({
                 border: `1px solid ${theme.tableBorder}`,
                 borderRadius: 6,
                 overflow: 'hidden',
+                // The only region that gives up space when the viewport
+                // is short. Its grid below carries the measured floor.
+                display: 'flex',
+                flexDirection: 'column',
+                flexShrink: 1,
+                minHeight: 0,
               }}
             >
               {/* Where the file is going. It is the table's CAPTION, not a
@@ -2039,6 +2111,13 @@ export function KeyboardImportModal({
                   // the table scrolls only when there is something to
                   // scroll.
                   maxHeight: 'min(50vh, 640px)',
+                  // A short screen squeezes the list before it scrolls the
+                  // dialog, but never below three rows and the header. The
+                  // floor is measured from the rendered elements, so it
+                  // follows font size and zoom instead of a pixel guess.
+                  // Until the measurement lands, do not shrink at all.
+                  minHeight: listMinHeight || undefined,
+                  flexShrink: listMinHeight > 0 ? 1 : 0,
                   // ONE scroll context for the whole table, so the header
                   // and the rows move together and the columns cannot
                   // drift apart. It used to be on each row, which meant
@@ -2053,6 +2132,7 @@ export function KeyboardImportModal({
                     column template as they do, so it cannot drift out of
                     line with them. */}
                 <View
+                  innerRef={headerElRef}
                   role="row"
                   data-testid="import-review-header"
                   style={{
@@ -2161,6 +2241,7 @@ export function KeyboardImportModal({
                   const dateCellValue = dateCell(row);
                   return (
                     <View
+                      innerRef={index === 0 ? rowElRef : undefined}
                       role="row"
                       key={row.previewKey ?? row.importedId ?? String(index)}
                       data-testid="import-review-row"
@@ -2359,6 +2440,8 @@ export function KeyboardImportModal({
                   border: `1px solid ${theme.tableBorder}`,
                   borderRadius: 6,
                   overflow: 'hidden',
+                  // Fixed by design: the list gives up space first.
+                  flexShrink: 0,
                 }}
                 data-testid="import-review-details"
               >
@@ -2918,227 +3001,239 @@ export function KeyboardImportModal({
               </View>
             ) : null}
 
-            {pane?.kind === 'editor' && focused ? (
-              <RowEditor
-                // The chain reuses this editor for the next field, and
-                // two fields can start out showing the SAME text — an
-                // empty payee and an empty category, say. Without a key
-                // the second field would inherit the first one's
-                // refusal, its highlighted suggestion and its open list.
-                // The key makes each field a fresh editor.
-                key={pane.field}
-                row={focused}
-                mode={pane.field}
-                payees={review.payees}
-                categories={review.categories}
-                lockedByRule={focusedLockedEffect}
-                onCommit={(edits: PreviewEdits, chosenPayeeId?: string) => {
-                  // A field a rule controls is not the user's to change:
-                  // the rule's value lands whatever they type, so the
-                  // edit is REFUSED rather than accepted and dropped
-                  // later without a word.
-                  //
-                  // An edit that sets the field to the value the rule
-                  // already sets is allowed: the user is not fighting
-                  // the rule, they agree with it.
-                  if (
-                    focusedLockedEffect &&
-                    editChangesRuledField(
-                      focusedLockedEffect,
-                      edits,
-                      editedPayeeId(edits, chosenPayeeId),
-                    )
-                  ) {
-                    const message = t(
-                      "This row's {{field}} is set by a rule. Edit the rule to change it.",
-                      { field: ruledFieldName(focusedLockedEffect.field) },
-                    );
-                    // The chain does not stand on a field the user
-                    // cannot change: a rule can start owning a field
-                    // while the chain is running — the user's own payee
-                    // edit can make one fire — so the chain moves on and
-                    // says what it refused.
+            <View
+              style={{
+                flexShrink: 0,
+                // These were direct children of the gapped column before
+                // this wrapper existed, so keep their spacing.
+                gap: 12,
+                // An idle pane is not a flex item: an empty one would add
+                // a gap and make the whole layout taller for nothing.
+                display: pane === null ? 'none' : undefined,
+              }}
+            >
+              {pane?.kind === 'editor' && focused ? (
+                <RowEditor
+                  // The chain reuses this editor for the next field, and
+                  // two fields can start out showing the SAME text — an
+                  // empty payee and an empty category, say. Without a key
+                  // the second field would inherit the first one's
+                  // refusal, its highlighted suggestion and its open list.
+                  // The key makes each field a fresh editor.
+                  key={pane.field}
+                  row={focused}
+                  mode={pane.field}
+                  payees={review.payees}
+                  categories={review.categories}
+                  lockedByRule={focusedLockedEffect}
+                  onCommit={(edits: PreviewEdits, chosenPayeeId?: string) => {
+                    // A field a rule controls is not the user's to change:
+                    // the rule's value lands whatever they type, so the
+                    // edit is REFUSED rather than accepted and dropped
+                    // later without a word.
                     //
-                    // The rules' effects are refreshed asynchronously, so
-                    // a rule that fires while the editor is ALREADY open
-                    // is caught by the editor's own refusal, which says
-                    // the same thing and leaves the editor where it is.
-                    if (pane?.kind === 'editor' && pane.chain && focused) {
-                      const advanced = advanceChain(pane.field, {
+                    // An edit that sets the field to the value the rule
+                    // already sets is allowed: the user is not fighting
+                    // the rule, they agree with it.
+                    if (
+                      focusedLockedEffect &&
+                      editChangesRuledField(
+                        focusedLockedEffect,
+                        edits,
+                        editedPayeeId(edits, chosenPayeeId),
+                      )
+                    ) {
+                      const message = t(
+                        "This row's {{field}} is set by a rule. Edit the rule to change it.",
+                        { field: ruledFieldName(focusedLockedEffect.field) },
+                      );
+                      // The chain does not stand on a field the user
+                      // cannot change: a rule can start owning a field
+                      // while the chain is running — the user's own payee
+                      // edit can make one fire — so the chain moves on and
+                      // says what it refused.
+                      //
+                      // The rules' effects are refreshed asynchronously, so
+                      // a rule that fires while the editor is ALREADY open
+                      // is caught by the editor's own refusal, which says
+                      // the same thing and leaves the editor where it is.
+                      if (pane?.kind === 'editor' && pane.chain && focused) {
+                        const advanced = advanceChain(pane.field, {
+                          ...focused,
+                          edits: { ...focused.edits, ...edits },
+                        });
+                        if (advanced) {
+                          openPane({
+                            kind: 'editor',
+                            field: advanced.field,
+                            chain: advanced.chain,
+                          });
+                          setNotice(message);
+                          return;
+                        }
+                      }
+                      setNotice(message);
+                      return;
+                    }
+
+                    // A split is only valid against the row's EFFECTIVE
+                    // amount, so changing the amount would silently
+                    // unbalance it. The edit is refused rather than
+                    // accepted: the legs are not rescaled, because
+                    // inventing amounts the user never typed is worse
+                    // than refusing the edit.
+                    //
+                    // Only an edit that CHANGES the amount is refused. An
+                    // edit of the payee or the notes says nothing about
+                    // the amount, and refusing it would leave the row's
+                    // other fields uneditable while the message talked
+                    // about the amount.
+                    //
+                    // The way out is the split pane's "Remove split".
+                    if (
+                      focused &&
+                      isSplitRow(focused.edits) &&
+                      edits.amountCents !== undefined &&
+                      edits.amountCents !== effectiveAmountCents(focused)
+                    ) {
+                      setNotice(
+                        t(
+                          'This row is split, so its amount cannot be changed here. Remove the split first.',
+                        ),
+                      );
+                      return;
+                    }
+
+                    // A row with no payee NAME is not a payee row. Actual
+                    // creates a payee per account for transfers, with an
+                    // empty name, so an empty name would land the row on
+                    // one of them and turn it into a transfer to an
+                    // arbitrary account.
+                    if (
+                      edits.payeeCanonical !== undefined &&
+                      edits.payeeCanonical.trim() === ''
+                    ) {
+                      setNotice(
+                        t('A payee needs a name. Pick one from the list.'),
+                      );
+                      return;
+                    }
+
+                    // Giving a row a payee takes the transfer away: a
+                    // transfer row is not a payee row, its payee IS the
+                    // transfer. The user is told, because the row's shape
+                    // changes in a way they may not have meant.
+                    if (
+                      focused &&
+                      effectiveTransferAccountId(focused) !== undefined &&
+                      edits.payeeCanonical !== undefined
+                    ) {
+                      setNotice(
+                        t(
+                          'This row was a transfer. Giving it a payee makes it an ordinary transaction.',
+                        ),
+                      );
+                    }
+
+                    review.edit(review.focusedIndex, edits, { chosenPayeeId });
+
+                    // The chain. The editor does not close: it moves on to
+                    // the next field, and the LAST field's commit closes it
+                    // AND moves the cursor on — the row is finished.
+                    //
+                    // A single-field editor has no chain, so it closes and
+                    // leaves the cursor where it was.
+                    if (pane?.kind === 'editor' && pane.chain) {
+                      // The row AS IT WILL BE after this commit: the next
+                      // field depends on what the row is now, not on what
+                      // it was.
+                      const nextRow: PreviewRow = {
                         ...focused,
                         edits: { ...focused.edits, ...edits },
-                      });
+                      };
+                      const advanced = advanceChain(pane.field, nextRow);
                       if (advanced) {
                         openPane({
                           kind: 'editor',
                           field: advanced.field,
                           chain: advanced.chain,
                         });
-                        setNotice(message);
                         return;
                       }
-                    }
-                    setNotice(message);
-                    return;
-                  }
-
-                  // A split is only valid against the row's EFFECTIVE
-                  // amount, so changing the amount would silently
-                  // unbalance it. The edit is refused rather than
-                  // accepted: the legs are not rescaled, because
-                  // inventing amounts the user never typed is worse
-                  // than refusing the edit.
-                  //
-                  // Only an edit that CHANGES the amount is refused. An
-                  // edit of the payee or the notes says nothing about
-                  // the amount, and refusing it would leave the row's
-                  // other fields uneditable while the message talked
-                  // about the amount.
-                  //
-                  // The way out is the split pane's "Remove split".
-                  if (
-                    focused &&
-                    isSplitRow(focused.edits) &&
-                    edits.amountCents !== undefined &&
-                    edits.amountCents !== effectiveAmountCents(focused)
-                  ) {
-                    setNotice(
-                      t(
-                        'This row is split, so its amount cannot be changed here. Remove the split first.',
-                      ),
-                    );
-                    return;
-                  }
-
-                  // A row with no payee NAME is not a payee row. Actual
-                  // creates a payee per account for transfers, with an
-                  // empty name, so an empty name would land the row on
-                  // one of them and turn it into a transfer to an
-                  // arbitrary account.
-                  if (
-                    edits.payeeCanonical !== undefined &&
-                    edits.payeeCanonical.trim() === ''
-                  ) {
-                    setNotice(
-                      t('A payee needs a name. Pick one from the list.'),
-                    );
-                    return;
-                  }
-
-                  // Giving a row a payee takes the transfer away: a
-                  // transfer row is not a payee row, its payee IS the
-                  // transfer. The user is told, because the row's shape
-                  // changes in a way they may not have meant.
-                  if (
-                    focused &&
-                    effectiveTransferAccountId(focused) !== undefined &&
-                    edits.payeeCanonical !== undefined
-                  ) {
-                    setNotice(
-                      t(
-                        'This row was a transfer. Giving it a payee makes it an ordinary transaction.',
-                      ),
-                    );
-                  }
-
-                  review.edit(review.focusedIndex, edits, { chosenPayeeId });
-
-                  // The chain. The editor does not close: it moves on to
-                  // the next field, and the LAST field's commit closes it
-                  // AND moves the cursor on — the row is finished.
-                  //
-                  // A single-field editor has no chain, so it closes and
-                  // leaves the cursor where it was.
-                  if (pane?.kind === 'editor' && pane.chain) {
-                    // The row AS IT WILL BE after this commit: the next
-                    // field depends on what the row is now, not on what
-                    // it was.
-                    const nextRow: PreviewRow = {
-                      ...focused,
-                      edits: { ...focused.edits, ...edits },
-                    };
-                    const advanced = advanceChain(pane.field, nextRow);
-                    if (advanced) {
-                      openPane({
-                        kind: 'editor',
-                        field: advanced.field,
-                        chain: advanced.chain,
-                      });
+                      openPane(null);
+                      // Finishing the chain finishes the row: it is a plain
+                      // accept, just like `a`, so the trust gate still has
+                      // the last word on whether it imports. This must come
+                      // BEFORE moveFocus — that advances focusedIndexRef,
+                      // which `decide` reads for the undo cursor.
+                      review.decide(review.focusedIndex, 'accept');
+                      review.moveFocus(1);
                       return;
                     }
+
                     openPane(null);
-                    // Finishing the chain finishes the row: it is a plain
-                    // accept, just like `a`, so the trust gate still has
-                    // the last word on whether it imports. This must come
-                    // BEFORE moveFocus — that advances focusedIndexRef,
-                    // which `decide` reads for the undo cursor.
-                    review.decide(review.focusedIndex, 'accept');
-                    review.moveFocus(1);
-                    return;
-                  }
+                  }}
+                />
+              ) : null}
 
-                  openPane(null);
-                }}
-              />
-            ) : null}
+              {notice ? (
+                <Text
+                  data-testid="import-review-notice"
+                  style={{ color: theme.warningText }}
+                >
+                  {notice}
+                </Text>
+              ) : null}
 
-            {notice ? (
-              <Text
-                data-testid="import-review-notice"
-                style={{ color: theme.warningText }}
-              >
-                {notice}
-              </Text>
-            ) : null}
+              {pane?.kind === 'split' && focused ? (
+                <SplitPane
+                  row={focused}
+                  categories={review.categories}
+                  // A rule that controls the amount changes what the row
+                  // will hold, so the legs have to add up to THAT.
+                  targetAmountCents={focusedRuledAmount}
+                  onCommit={(edits: PreviewEdits) => {
+                    // A row that is already in the budget can be split:
+                    // the apply step rewrites the legs of the transaction
+                    // it matched, the same way upstream's own UI does when
+                    // a split is edited.
+                    review.edit(review.focusedIndex, edits);
+                    openPane(null);
+                  }}
+                />
+              ) : null}
 
-            {pane?.kind === 'split' && focused ? (
-              <SplitPane
-                row={focused}
-                categories={review.categories}
-                // A rule that controls the amount changes what the row
-                // will hold, so the legs have to add up to THAT.
-                targetAmountCents={focusedRuledAmount}
-                onCommit={(edits: PreviewEdits) => {
-                  // A row that is already in the budget can be split:
-                  // the apply step rewrites the legs of the transaction
-                  // it matched, the same way upstream's own UI does when
-                  // a split is edited.
-                  review.edit(review.focusedIndex, edits);
-                  openPane(null);
-                }}
-              />
-            ) : null}
+              {pane?.kind === 'transfer' && focused ? (
+                <TransferPane
+                  row={focused}
+                  accounts={review.accounts}
+                  payees={review.payees}
+                  // The transfer target cannot be the account the row is
+                  // IN: a transaction cannot transfer to the account it is
+                  // in. The row's account is the one that counts.
+                  sourceAccountId={focused.accountId}
+                  onCommit={(edits: PreviewEdits) => {
+                    review.edit(review.focusedIndex, edits);
+                    openPane(null);
+                  }}
+                />
+              ) : null}
 
-            {pane?.kind === 'transfer' && focused ? (
-              <TransferPane
-                row={focused}
-                accounts={review.accounts}
-                payees={review.payees}
-                // The transfer target cannot be the account the row is
-                // IN: a transaction cannot transfer to the account it is
-                // in. The row's account is the one that counts.
-                sourceAccountId={focused.accountId}
-                onCommit={(edits: PreviewEdits) => {
-                  review.edit(review.focusedIndex, edits);
-                  openPane(null);
-                }}
-              />
-            ) : null}
+              {pane?.kind === 'help' ? <HelpOverlay /> : null}
 
-            {pane?.kind === 'help' ? <HelpOverlay /> : null}
+              {pane?.kind === 'rules' ? (
+                <RulePicker items={pane.items} onPick={pickRuleItem} />
+              ) : null}
 
-            {pane?.kind === 'rules' ? (
-              <RulePicker items={pane.items} onPick={pickRuleItem} />
-            ) : null}
-
-            {pane?.kind === 'confirm' ? (
-              <ConfirmPane
-                decided={review.unsavedWork.decided}
-                edited={review.unsavedWork.edited}
-                onKeep={() => openPane(null)}
-                onDiscard={confirmClose}
-              />
-            ) : null}
+              {pane?.kind === 'confirm' ? (
+                <ConfirmPane
+                  decided={review.unsavedWork.decided}
+                  edited={review.unsavedWork.edited}
+                  onKeep={() => openPane(null)}
+                  onDiscard={confirmClose}
+                />
+              ) : null}
+            </View>
 
             {/* The footer: the bulk actions on the left, and the keys
                 that drive the list on the right.
@@ -3150,62 +3245,69 @@ export function KeyboardImportModal({
 
                 A pane that is open already says its own keys where they
                 matter, so the strip keeps quiet while one is. */}
-            {pane === null ? (
-              <HintStrip
-                actions={
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      gap: 8,
-                      alignItems: 'center',
-                    }}
-                  >
-                    <Button
-                      variant="bare"
-                      data-testid="import-review-accept-all"
-                      // Nothing to decide is nothing to do.
-                      isDisabled={summary.pending === 0}
-                      onPress={() => {
-                        review.decideAll('accept');
-                        focusGrid();
+            <View
+              style={{
+                flexShrink: 0,
+                display: pane === null ? undefined : 'none',
+              }}
+            >
+              {pane === null ? (
+                <HintStrip
+                  actions={
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        gap: 8,
+                        alignItems: 'center',
                       }}
                     >
-                      <Trans>Accept all</Trans>
-                      <KeyCap>Shift+A</KeyCap>
-                    </Button>
-                    <Button
-                      variant="bare"
-                      data-testid="import-review-drop-all"
-                      isDisabled={summary.pending === 0}
-                      onPress={() => {
-                        review.decideAll('drop');
-                        focusGrid();
-                      }}
-                    >
-                      <Trans>Drop all</Trans>
-                      <KeyCap>Shift+R</KeyCap>
-                    </Button>
-                    <Button
-                      variant="bare"
-                      data-testid="import-review-undo"
-                      // The undo stack is not reactive, so this is the
-                      // closest signal there is: there is nothing to undo
-                      // exactly when there is no unsaved work.
-                      isDisabled={!review.unsavedWork.hasWork}
-                      onPress={() => {
-                        review.undo();
-                        focusGrid();
-                      }}
-                    >
-                      <Trans>Undo</Trans>
-                      <KeyCap>u</KeyCap>
-                    </Button>
-                  </View>
-                }
-              />
-            ) : null}
+                      <Button
+                        variant="bare"
+                        data-testid="import-review-accept-all"
+                        // Nothing to decide is nothing to do.
+                        isDisabled={summary.pending === 0}
+                        onPress={() => {
+                          review.decideAll('accept');
+                          focusGrid();
+                        }}
+                      >
+                        <Trans>Accept all</Trans>
+                        <KeyCap>Shift+A</KeyCap>
+                      </Button>
+                      <Button
+                        variant="bare"
+                        data-testid="import-review-drop-all"
+                        isDisabled={summary.pending === 0}
+                        onPress={() => {
+                          review.decideAll('drop');
+                          focusGrid();
+                        }}
+                      >
+                        <Trans>Drop all</Trans>
+                        <KeyCap>Shift+R</KeyCap>
+                      </Button>
+                      <Button
+                        variant="bare"
+                        data-testid="import-review-undo"
+                        // The undo stack is not reactive, so this is the
+                        // closest signal there is: there is nothing to undo
+                        // exactly when there is no unsaved work.
+                        isDisabled={!review.unsavedWork.hasWork}
+                        onPress={() => {
+                          review.undo();
+                          focusGrid();
+                        }}
+                      >
+                        <Trans>Undo</Trans>
+                        <KeyCap>u</KeyCap>
+                      </Button>
+                    </View>
+                  }
+                />
+              ) : null}
+            </View>
           </View>
-        </>
+        </View>
       )}
     </Modal>
   );
