@@ -21,6 +21,7 @@ import {
   rulesForRow,
   ruleToWrite,
   sameConditions,
+  transferRule,
   vendorToPayeeRule,
 } from './rules';
 
@@ -361,6 +362,73 @@ describe('the payee a row would be imported with', () => {
     const row = mkRow({ transferAccountId: 'a-checking' });
 
     expect(rowPayeeTarget(row, PAYEES)).toBeUndefined();
+  });
+});
+
+describe('the transfer rule', () => {
+  const TRANSFER_PAYEES: readonly ReviewPayee[] = [
+    ...PAYEES,
+    { id: 'p-transfer-savings', name: '', transferAcct: 'a-savings' },
+  ];
+
+  function transferRow(): PreviewRow {
+    return mkRow({ transferAccountId: 'a-savings' });
+  }
+
+  it('is scoped to the source account and sets the hidden transfer payee', () => {
+    const rule = transferRule(transferRow(), 'p-transfer-savings');
+
+    expect(rule).toEqual({
+      stage: 'pre',
+      conditionsOp: 'and',
+      conditions: [
+        { op: 'is', field: 'account', value: 'a-1', type: 'id' },
+        {
+          op: 'is',
+          field: 'imported_payee',
+          value: 'Demo Coffee Shop Downtown',
+          type: 'string',
+        },
+      ],
+      actions: [
+        { op: 'set', field: 'payee', value: 'p-transfer-savings', type: 'id' },
+      ],
+    });
+  });
+
+  it('is offered for a transfer row whose target has a transfer payee', () => {
+    const offered = rulesForRow(transferRow(), TRANSFER_PAYEES, CATEGORIES);
+
+    expect(offered.toTransfer).toBeDefined();
+    // A transfer row still gets no ordinary vendor rule.
+    expect(offered.vendorToPayee).toBeUndefined();
+  });
+
+  it('is not offered when the target account has no transfer payee', () => {
+    const offered = rulesForRow(transferRow(), PAYEES, CATEGORIES);
+    expect(offered.toTransfer).toBeUndefined();
+  });
+
+  it('uses a canonical condition order so reordering cannot create a tie', () => {
+    const rule = transferRule(transferRow(), 'p-transfer-savings');
+    const existing = { ...rule, id: 'rule-1' };
+
+    // A rule with the SAME conditions in the same order is found and
+    // amended, not added alongside as a random-winner tie.
+    expect(ruleToWrite([existing], rule).method).toBe('none');
+  });
+
+  it('never collides with a one-condition vendor rule', () => {
+    const vendor = {
+      ...vendorToPayeeRule('Demo Coffee Shop Downtown', {
+        kind: 'id' as const,
+        id: 'p-coffee',
+      }),
+      id: 'rule-vendor',
+    };
+    const transfer = transferRule(transferRow(), 'p-transfer-savings');
+
+    expect(ruleToWrite([vendor], transfer).method).toBe('rule-add');
   });
 });
 
