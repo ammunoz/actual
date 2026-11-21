@@ -127,9 +127,11 @@ tag glyph beside it — so you can see the rule without hunting for it.
 
 <kbd>Shift</kbd>+<kbd>E</kbd> opens the rules on the row: the ones that
 touched it, and the ones it could grow. A rule is created **only when you
-ask for it**. Nothing in the review learns on its own: picking a payee does
-not quietly make a vendor rule, because a rule applies to every future
-transaction with that vendor, and that is your decision to make.
+ask for it**. No *rule* is created on its own: picking a payee does not
+quietly make a vendor rule, because a rule applies to every future
+transaction with that vendor, and that is your decision to make. (The older
+vendor map still learns silently from payee choices; it is deprecated in
+favour of explicit rules and will be removed in a follow-up.)
 
 ### Splits, transfers and the rest
 
@@ -163,7 +165,11 @@ the import, when the transactions are already in the budget.
   one account. The same vendor name in two accounts keeps only the last
   choice.
 - A rule you create here applies to every transaction with that vendor,
-  from now on. It does not change the transactions you already have.
+  from now on. It does not change the transactions you already have. A
+  transfer rule is scoped to the account it was created from; if several
+  same-amount transfers land on nearby days, the review warns when it cannot
+  tell which one a row belongs to.
+
 - A split that was imported before is matched to the old one by the bank's
   id. Its legs are matched by position, so a leg you added by hand may be
   overwritten or deleted.
