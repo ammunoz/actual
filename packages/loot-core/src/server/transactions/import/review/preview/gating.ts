@@ -220,8 +220,10 @@ export function effectiveFlags(
         return !userPickedAmount;
 
       case 'transfer-detected':
-        // The row stops being an unconfirmed transfer when the user
-        // confirms it, or replaces it with an ordinary payee.
+      case 'transfer-suspected':
+      case 'transfer-ambiguous':
+        // The row stops being flagged once the user confirms a transfer or
+        // replaces it with an ordinary payee. The warning has done its job.
         return !(row.edits.transferAccountId !== undefined || userPickedPayee);
 
       case 'date-out-of-range':

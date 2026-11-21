@@ -33,7 +33,9 @@ export type FlagKind =
   | 'date-out-of-range'
   | 'fuzzy-payee-match'
   | 'would-create-payee'
-  | 'transfer-detected';
+  | 'transfer-detected'
+  | 'transfer-suspected'
+  | 'transfer-ambiguous';
 
 /**
  * Stable, greppable codes for flags. Deliberately value-free: a code
@@ -49,7 +51,9 @@ export type FlagCode =
   | 'DATE-RANGE-002'
   | 'PAYEE-FUZZY-001'
   | 'PAYEE-NEW-001'
-  | 'PAYEE-TRANSFER-001';
+  | 'PAYEE-TRANSFER-001'
+  | 'PAYEE-TRANSFER-002'
+  | 'PAYEE-TRANSFER-003';
 
 export type Flag = {
   kind: FlagKind;
