@@ -133,6 +133,25 @@ describe('resolvePayees — transfer detection', () => {
     ]);
   });
 
+  it('raises transfer-ambiguous when the engine flagged several mirrors', () => {
+    const row = mkRow({
+      payeeRaw: 'Demo Coffee Shop Downtown',
+      ambiguousTransfer: true,
+    });
+    const [out] = resolvePayees([row], {
+      existingPayees: EXISTING,
+      accounts: ACCOUNTS,
+    });
+    expect(out?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'transfer-ambiguous',
+          code: 'PAYEE-TRANSFER-003',
+        }),
+      ]),
+    );
+  });
+
   it('only SUSPECTS a transfer when the string is not an account name', () => {
     // No prefill: a false positive would create a mirror in another account.
     const row = mkRow({ payeeRaw: 'ONLINE TRANSFER TO SOME OTHER PLACE' });

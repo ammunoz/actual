@@ -870,6 +870,58 @@ export function compareFuzzyMatchCandidates(
   return aDistance - bDistance || aHasImportedId - bHasImportedId;
 }
 
+/**
+ * Find the transfer mirrors a file row could already be the other side of.
+ *
+ * When a row in account A is marked as a transfer to B, `transfer.onInsert`
+ * creates a mirror in B with the negated amount but NO imported_id. When B's
+ * statement arrives later, its bank FITID cannot match that mirror, so the
+ * normal fuzzy tier pairs them on amount + date. That is fragile: a cent of
+ * difference or a week of drift makes it miss, and a second ordinary row is
+ * inserted beside the orphaned mirror.
+ *
+ * A mirror carries `transfer_id`, which no ordinary row does. That is the
+ * extra signal this query uses. It returns:
+ *   - exactly one candidate -> the guard can safely bind the row to it;
+ *   - two or more -> they are indistinguishable (same amount, close dates,
+ *     no imported_id), so the guard MUST abstain rather than pick one at
+ *     random. The caller raises `transfer-ambiguous` so the user can decide.
+ */
+async function findTransferMirrorCandidates({
+  targetAccountId,
+  amount,
+  date,
+  excludedIds,
+}: {
+  targetAccountId: string;
+  amount: number;
+  date: string;
+  excludedIds: ReadonlySet<string>;
+}): Promise<db.DbTransaction[]> {
+  const sevenDaysBefore = db.toDateRepr(monthUtils.subDays(date, 7));
+  const sevenDaysAfter = db.toDateRepr(monthUtils.addDays(date, 7));
+  // Both legs in the SAME account carry the same sign: the mirror created
+  // from A's debit is a credit in B, and B's statement for that transfer is
+  // also a credit. So match the amount as-is, not its negation.
+  //
+  // Only ALIVE mirrors are candidates. A mirror the user deleted is a
+  // deliberate act; binding a statement row onto it would write the import
+  // into an invisible, tombstoned row where it silently disappears. This
+  // is intentionally stricter than the FITID tier's reimportDeleted quirk.
+  const rows = await db.all<db.DbTransaction>(
+    `SELECT * FROM v_transactions_internal_alive
+     WHERE account = ?
+       AND amount = ?
+       AND date >= ? AND date <= ?
+       AND transfer_id IS NOT NULL
+       AND imported_id IS NULL`,
+    [targetAccountId, amount || 0, sevenDaysBefore, sevenDaysAfter],
+  );
+  // A mirror already claimed by another row in this same batch is not a
+  // candidate: two rows binding it would overwrite each other's updates.
+  return rows.filter(row => !excludedIds.has(row.id));
+}
+
 export async function matchTransactions(
   acctId,
   transactions,
@@ -891,7 +943,7 @@ export async function matchTransactions(
             .select('value'),
         ).then(data => String(data?.data?.[0]?.value ?? 'true') === 'true');
 
-  const hasMatched = new Set();
+  const hasMatched = new Set<string>();
   const exactMatchedParentIds = new Set<db.DbViewTransaction['id']>();
 
   const { normalized, payeesToCreate } = isBankSyncAccount
@@ -945,6 +997,31 @@ export async function matchTransactions(
 
         if (isBankSyncAccount && match.is_parent) {
           exactMatchedParentIds.add(match.id);
+        }
+      }
+    }
+
+    // A row whose (post-rule) payee is a transfer payee is the OTHER side
+    // of a transfer we already imported. Its mirror in the target account
+    // has no imported_id, so the FITID tier above cannot find it. Fall
+    // back to the mirror query — but only when there is exactly one
+    // candidate. With several identical mirrors there is no way to tell
+    // which one this row belongs to, so abstain and flag the ambiguity
+    // for the review instead of guessing.
+    if (!match && trans.payee) {
+      const payee = await db.getPayee(trans.payee);
+      if (payee?.transfer_acct) {
+        const mirrors = await findTransferMirrorCandidates({
+          targetAccountId: payee.transfer_acct,
+          amount: trans.amount,
+          date: trans.date,
+          excludedIds: new Set(hasMatched),
+        });
+        if (mirrors.length > 1) {
+          trans._ambiguousTransfer = true;
+        } else if (mirrors.length === 1) {
+          match = mirrors[0];
+          hasMatched.add(match.id);
         }
       }
     }

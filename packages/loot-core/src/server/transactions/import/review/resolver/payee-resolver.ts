@@ -218,12 +218,18 @@ function resolveOne(
     !looksLikeExactAccount(raw, accountsIndex, row.accountId) &&
     looksLikeTransfer(raw);
 
-  // Attach the suspicion flag on the way out of every path. A transfer that
-  // WAS detected (or a row with no accounts to transfer to) is not suspected.
-  const finish = (result: ResolvedRow): ResolvedRow =>
-    suspected
-      ? flagFor(result, 'transfer-suspected', 'PAYEE-TRANSFER-002')
-      : result;
+  // Attach the suspicion / ambiguity flags on the way out of every path.
+  // Both are warnings only: neither prefill a target nor change the payee.
+  const finish = (result: ResolvedRow): ResolvedRow => {
+    let out = result;
+    if (row.ambiguousTransfer) {
+      out = flagFor(out, 'transfer-ambiguous', 'PAYEE-TRANSFER-003');
+    }
+    if (suspected) {
+      out = flagFor(out, 'transfer-suspected', 'PAYEE-TRANSFER-002');
+    }
+    return out;
+  };
 
   // Layer 0: vendor map (exact key match on payeeRaw).
   if (opts.vendorMap) {

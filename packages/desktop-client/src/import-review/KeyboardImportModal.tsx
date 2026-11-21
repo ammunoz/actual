@@ -850,6 +850,12 @@ export function KeyboardImportModal({
         return t('This import will create a new payee');
       case 'transfer-detected':
         return t('This looks like a transfer');
+      case 'transfer-suspected':
+        return t('This looks like a transfer from another account');
+      case 'transfer-ambiguous':
+        return t(
+          'Several transfers of this amount recently went to this account. This row may already be here — check before importing.',
+        );
       default:
         return t('This row needs a look');
     }

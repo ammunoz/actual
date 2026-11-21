@@ -95,6 +95,13 @@ export type ReviewRowInput = {
   previewKey?: string;
   /** Flags detected during parsing (e.g. duplicate FITIDs). */
   flags?: readonly Flag[];
+  /**
+   * True when the import engine found several unlabelled transfer mirrors
+   * this row could be the other side of. The review raises
+   * `transfer-ambiguous` so the user can drop a duplicate rather than let
+   * the engine guess. Set by the server's preview, not by the file.
+   */
+  ambiguousTransfer?: boolean;
 };
 
 /**

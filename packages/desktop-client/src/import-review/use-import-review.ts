@@ -19,6 +19,7 @@ import {
   evaluateRows,
   filterStaleVendorMapEntries,
   flagDuplicateFitids,
+  flagFor,
   isSplitRow,
   isUsableDate,
   normalizePayeeName,
@@ -767,7 +768,11 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       accountId: string,
       payeeList: readonly ReviewPayee[],
       categoryList: readonly ReviewCategory[],
-    ): Promise<{ matched: Map<string, string>; effects: RuleEffects }> => {
+    ): Promise<{
+      matched: Map<string, string>;
+      effects: RuleEffects;
+      ambiguous: Set<string>;
+    }> => {
       const importedIds = rows
         .map(row => row.importedId)
         .filter((id): id is string => typeof id === 'string');
@@ -782,7 +787,9 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       );
 
       const accountRows = rows.filter(row => row.accountId === accountId);
-      if (accountRows.length === 0) return { matched, effects: EMPTY_EFFECTS };
+      if (accountRows.length === 0) {
+        return { matched, effects: EMPTY_EFFECTS, ambiguous: new Set() };
+      }
 
       // The PREVIEW payload marks nothing as skipped: Actual skips a
       // marked row before it reports the match, so a marked row would
@@ -825,7 +832,21 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         ) {
           throw err;
         }
-        return { matched, effects: EMPTY_EFFECTS };
+        return { matched, effects: EMPTY_EFFECTS, ambiguous: new Set() };
+      }
+
+      // The engine flags a transfer row whose target already has several
+      // unlabelled mirrors. It cannot tell which one this row belongs to,
+      // and neither can we — so surface it as a warning rather than guess.
+      const ambiguous = new Set<string>();
+      for (const trans of preview.ruledTransactions ?? []) {
+        const key = (trans as { _previewKey?: string })._previewKey;
+        if (
+          typeof key === 'string' &&
+          (trans as { _ambiguousTransfer?: boolean })._ambiguousTransfer
+        ) {
+          ambiguous.add(key);
+        }
       }
 
       preview.updatedPreview?.forEach(entry => {
@@ -877,7 +898,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
       }
 
-      return { matched, effects };
+      return { matched, effects, ambiguous };
     },
     [fuzzyCache],
   );
@@ -1115,7 +1136,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
-        const { matched, effects } = await lookupMatches(
+        const { matched, effects, ambiguous } = await lookupMatches(
           state.rows,
           accountId,
           payeeList,
@@ -1123,8 +1144,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
         if (cancelled) return;
 
+        // The budget may have gained mirrors since the review was saved.
+        // Attach the warning to the rows the engine flagged, without
+        // changing what the user already decided or edited. Merge it into
+        // the BASE rows too, so a later re-resolution does not drop it —
+        // the same invariant the fresh-load path keeps.
+        const flagged =
+          ambiguous.size > 0
+            ? state.rows.map(row =>
+                ambiguous.has(rowKey(row)) &&
+                !row.flags?.some(flag => flag.kind === 'transfer-ambiguous')
+                  ? flagFor(row, 'transfer-ambiguous', 'PAYEE-TRANSFER-003')
+                  : row,
+              )
+            : state.rows;
+        const finalState =
+          flagged === state.rows ? state : { ...state, rows: flagged };
+        if (ambiguous.size > 0) {
+          baseRows.current = baseRows.current.map(row =>
+            ambiguous.has(rowKey(row))
+              ? { ...row, ambiguousTransfer: true }
+              : row,
+          );
+        }
+
         setMatchedTransactionIds(matched);
         setRuleEffects(effects);
+        setState(finalState);
 
         setStatus('reviewing');
       } catch (err) {
@@ -1276,13 +1322,33 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         // Which rows are ALREADY in the budget, and what did the rules do
         // to them?
-        const { matched, effects } = await lookupMatches(
+        const { matched, effects, ambiguous } = await lookupMatches(
           next.rows,
           accountId,
           payeeList,
           categoryList,
         );
         if (cancelled) return;
+
+        // Merge the engine's transfer ambiguity back into the BASE rows and
+        // re-resolve, so the flag rides through every later re-resolution
+        // (a vendor-map change must not silently drop it).
+        const flaggedBase = baseRows.current.map(row =>
+          ambiguous.has(rowKey(row))
+            ? { ...row, ambiguousTransfer: true }
+            : row,
+        );
+        if (ambiguous.size > 0) {
+          baseRows.current = flaggedBase;
+        }
+        const final =
+          ambiguous.size > 0
+            ? rebuildPreviewState({
+                base: flaggedBase,
+                trustLevel: trustLevelRef.current,
+                resolveOpts: resolveOptsFor(payeeList, accountList),
+              })
+            : next;
 
         // **The rows are set AFTER the answers, not before.** The rows
         // and the rules' effects belong together: a row that a rule
@@ -1296,7 +1362,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // before the answers arrived.
         setMatchedTransactionIds(matched);
         setRuleEffects(effects);
-        setState(next);
+        setState(final);
         setCursor(0);
 
         setStatus('reviewing');
