@@ -605,6 +605,24 @@ describe('unsavedWork', () => {
     expect(unsavedWork(next).hasWork).toBe(false);
   });
 
+  it('does not count a matched split carried as display context', () => {
+    // `existingSplitLegs` shows a matched split's real allocation in the
+    // editor. It is not an edit, so closing an untouched review must not
+    // warn the user about work they never did.
+    const state = buildPreviewState(
+      [
+        mkRow({
+          existingSplitLegs: [
+            { amountCents: -1500, categoryId: 'c-1' },
+            { amountCents: -1000, categoryId: 'c-2' },
+          ],
+        }),
+      ],
+      'cautious',
+    );
+    expect(unsavedWork(state).hasWork).toBe(false);
+  });
+
   it('is false again once the work is undone', () => {
     // Undoing puts the row back, so there is nothing left to lose.
     const state = buildPreviewState([mkRow()], 'cautious');

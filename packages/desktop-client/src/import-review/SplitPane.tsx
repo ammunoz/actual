@@ -124,11 +124,20 @@ export function SplitPane({
   // the review must not be able to hold a half-finished split.
   //
   // An existing split opens AS-IS, so `s` is also the re-edit path. A
-  // fresh one starts as two balanced legs carrying the row's own
-  // category, so the remaining work is only "give each leg its own
-  // category".
+  // row that MATCHED a split in the budget carries its real allocation in
+  // `existingSplitLegs`: show that rather than seeding a fresh half/half
+  // split the user did not ask for. A genuinely fresh split starts as two
+  // balanced legs carrying the row's own category.
+  // Whether the pane opened on a freshly seeded split (rather than one the
+  // user authored or one this row matched in the budget). Only then is the
+  // "halves are just a starting point" hint needed.
+  const isFreshSplit =
+    row.edits.splits === undefined && row.existingSplitLegs === undefined;
   const [legs, setLegs] = useState<DraftLeg[]>(() => {
-    const source = row.edits.splits ?? seedSplit(target, row.edits.categoryId);
+    const source =
+      row.edits.splits ??
+      row.existingSplitLegs ??
+      seedSplit(target, row.edits.categoryId);
     return source.map(leg => ({ id: nextLegId(), leg }));
   });
 
@@ -305,6 +314,15 @@ export function SplitPane({
           payee: row.payeeRaw,
         })}
       </Text>
+
+      {isFreshSplit ? (
+        <Text style={{ color: theme.pageTextSubdued }}>
+          <Trans>
+            New split — the two legs start as halves; add a leg or edit the
+            amounts.
+          </Trans>
+        </Text>
+      ) : null}
 
       <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
         <Text style={{ color: theme.pageTextSubdued }}>

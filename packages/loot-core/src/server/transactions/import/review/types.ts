@@ -12,6 +12,8 @@
  * types.
  */
 
+import type { PreviewSplitLeg } from './preview/split-primitives';
+
 /**
  * Trust level, inherited from the TUI implementation. Controls how harshly
  * a flag is treated:
@@ -102,6 +104,15 @@ export type ReviewRowInput = {
    * the engine guess. Set by the server's preview, not by the file.
    */
   ambiguousTransfer?: boolean;
+  /**
+   * The legs of the split this row matched in the budget, when it has one.
+   * DISPLAY CONTEXT ONLY: it never becomes an edit, so an untouched matched
+   * row is not marked as user work and is not rewritten on apply. The split
+   * pane uses it to open the REAL allocation instead of seeding a fresh
+   * half/half split. It is attached after the match is resolved, not read
+   * from the file.
+   */
+  existingSplitLegs?: readonly PreviewSplitLeg[];
 };
 
 /**

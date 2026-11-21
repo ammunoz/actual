@@ -1281,6 +1281,92 @@ describe('useImportReview', () => {
     );
   });
 
+  it('shows a matched split as display context, not an edit', async () => {
+    // A row that matched a split already in the budget carries its legs as
+    // context so pressing `s` shows the real allocation. It must NOT become
+    // an edit: an untouched row stays unedited and is not rewritten.
+    sendMock.mockImplementation((async (name: string, payload?: unknown) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'rules-get':
+          return RULES;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query': {
+          const opts = (payload as { tableOptions?: { splits?: string } })
+            .tableOptions;
+          if (opts?.splits === 'grouped') {
+            return {
+              data: [
+                {
+                  id: 'txn-1',
+                  account: 'a-1',
+                  date: '2026-09-07',
+                  amount: -2500,
+                  payee: 'p-2',
+                  is_parent: true,
+                  imported_id: 'FITID-1',
+                  subtransactions: [
+                    {
+                      id: 'child-1',
+                      account: 'a-1',
+                      date: '2026-09-07',
+                      amount: -1500,
+                      category: 'c-1',
+                      is_child: true,
+                      parent_id: 'txn-1',
+                      sort_order: -1,
+                    },
+                    {
+                      id: 'child-2',
+                      account: 'a-1',
+                      date: '2026-09-07',
+                      amount: -1000,
+                      category: 'c-1',
+                      is_child: true,
+                      parent_id: 'txn-1',
+                      sort_order: -2,
+                    },
+                  ],
+                },
+              ],
+              dependencies: [],
+            };
+          }
+          // The FITID match for the first row.
+          return {
+            data: [{ id: 'txn-1', imported_id: 'FITID-1', account: 'a-1' }],
+            dependencies: [],
+          };
+        }
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+    const row = result.current.state?.rows[0];
+    expect(row?.existingSplitLegs).toEqual([
+      { amountCents: -1500, categoryId: 'c-1' },
+      { amountCents: -1000, categoryId: 'c-1' },
+    ]);
+    // Still not user work: the legs are context, not edits.
+    expect(row?.edits.splits).toBeUndefined();
+    expect(result.current.unsavedWork.hasWork).toBe(false);
+  });
+
   it('refuses an unbalanced split on a matched row without writing it', async () => {
     // The split guard must run on the reconciliation path too: otherwise
     // the legs' sum silently rewrites the matched parent's amount. The

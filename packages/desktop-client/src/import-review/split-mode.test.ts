@@ -109,7 +109,11 @@ describe('addBalancedLeg', () => {
     expect(result.map(leg => leg.amountCents)).toEqual([-834, -833, -833]);
     expect(result.reduce((sum, leg) => sum + leg.amountCents, 0)).toBe(-2500);
     expect(result.every(leg => leg.amountCents !== 0)).toBe(true);
-    expect(result.map(leg => leg.categoryId)).toEqual(['c-1', 'c-2', undefined]);
+    expect(result.map(leg => leg.categoryId)).toEqual([
+      'c-1',
+      'c-2',
+      undefined,
+    ]);
   });
 
   it('gives the odd cent to the earliest existing leg', () => {
