@@ -14,6 +14,8 @@ import { send } from '@actual-app/core/platform/client/connection';
 import {
   applyDecision,
   buildFuzzyCache,
+  effectiveAmountCents,
+  effectiveTransferAccountId,
   emptyVendorMap,
   evaluateRow,
   evaluateRows,
@@ -85,7 +87,11 @@ import {
 } from './session';
 import type { ImportReviewSession } from './session';
 import { splitErrorMessage } from './split-error-labels';
-import { buildSplitReconciliation, legsOf } from './split-reconcile';
+import {
+  buildSplitReconciliation,
+  legsOf,
+  validateMatchedSplit,
+} from './split-reconcile';
 import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
 import { VENDOR_MAP_PREF } from './types';
@@ -1440,10 +1446,32 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
         if (!parent) continue;
 
+        // A matched split is written straight to the budget by the
+        // reconciliation below, bypassing the payload's split check. It
+        // must pass the SAME check here: the legs have to add up to the
+        // row's effective amount. (Rules never change a matched row —
+        // `ruleEffectsFor` skips matched keys — so there is no rule amount
+        // to consider.) Otherwise `buildSplitReconciliation` would
+        // silently rewrite the parent's amount to the legs' sum. This
+        // throws BEFORE any write, so the existing apply error path
+        // reports it and the user's edits stay in the review.
+        const legs = row.edits.splits ?? [];
+        const problem = validateMatchedSplit({
+          legs,
+          targetCents: effectiveAmountCents(row),
+          isTransfer: effectiveTransferAccountId(row) !== undefined,
+        });
+        if (problem) {
+          throw new SplitValidationError(
+            problem.code,
+            `${problem.code}: a matched split does not fit its row (${problem.message})`,
+          );
+        }
+
         const reconciliation = buildSplitReconciliation({
           parent,
           children: legsOf(parent),
-          legs: row.edits.splits ?? [],
+          legs,
         });
         added.push(...reconciliation.added);
         updated.push(...reconciliation.updated);
