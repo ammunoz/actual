@@ -85,4 +85,31 @@ describe('the split pane', () => {
     const committed = onCommit.mock.calls[0][0];
     expect(committed.splits?.[0]?.categoryId).toBe('c-food-2');
   });
+
+  it('commits a typed amount when a button takes the focus', async () => {
+    // The reported bug: type -6.50 into leg 1, click "Add leg" without
+    // pressing Enter, and the new leg used the OLD draft's residual (0).
+    // Blurring the field on the button click must commit -650 first.
+    const onCommit = vi.fn<(edits: PreviewEdits) => void>();
+    render(
+      <SplitPane row={mkRow()} categories={CATEGORIES} onCommit={onCommit} />,
+    );
+
+    const firstAmount = screen.getByTestId('import-review-split-leg-amount-0');
+    await userEvent.clear(firstAmount);
+    await userEvent.type(firstAmount, '-6.50');
+    // No Enter: clicking the button is what blurs the field.
+    await userEvent.click(screen.getByTestId('import-review-split-add'));
+
+    // The third leg now takes the real remainder: -2500 - (-650 + -1250)
+    // = -600, i.e. 6.00 — not 0.00 as it was when the draft was stale.
+    const thirdAmount = screen.getByTestId('import-review-split-leg-amount-2');
+    expect(thirdAmount).toHaveValue('-6.00');
+
+    // The draft now holds the typed amount: the three legs sum to the
+    // row amount exactly, which the footer reports as balanced.
+    expect(screen.getByTestId('import-review-split-residual')).toHaveTextContent(
+      'The legs add up to the row amount',
+    );
+  });
 });
