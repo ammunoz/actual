@@ -122,3 +122,9 @@ actual.config.js
 
 # Mac App Store provisioning profiles, downloaded per machine
 packages/desktop-electron/mas/*.provisionprofile
+
+# GitHub token / OpenCode MCP config for agents (real secrets live outside the
+# repo at <parent>/.secrets/actual-github.env; opencode.json references them via
+# ${GITHUB_TOKEN} interpolation and must never contain a literal token).
+/opencode.json
+/opencode.json.local
