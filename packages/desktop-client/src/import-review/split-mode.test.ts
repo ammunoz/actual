@@ -1,6 +1,11 @@
 import type { PreviewSplitLeg } from '@actual-app/core/server/transactions/import/review/index';
 
-import { distributeResidual, legAmountText, splitResidual } from './split-mode';
+import {
+  addBalancedLeg,
+  distributeResidual,
+  legAmountText,
+  splitResidual,
+} from './split-mode';
 
 function mkLeg(amountCents: number, categoryId?: string): PreviewSplitLeg {
   return {
@@ -93,5 +98,52 @@ describe('distributeResidual', () => {
     const legs = [mkLeg(-500, 'c-1'), mkLeg(0, 'c-2')];
     const result = distributeResidual(legs, -1000);
     expect(result.map(leg => leg.categoryId)).toEqual(['c-1', 'c-2']);
+  });
+});
+
+describe('addBalancedLeg', () => {
+  it('funds a new leg from a balanced split without leaving it at zero', () => {
+    const legs = [mkLeg(-1250, 'c-1'), mkLeg(-1250, 'c-2')];
+    const result = addBalancedLeg(legs, -2500);
+    expect(result).toHaveLength(3);
+    expect(result.map(leg => leg.amountCents)).toEqual([-834, -833, -833]);
+    expect(result.reduce((sum, leg) => sum + leg.amountCents, 0)).toBe(-2500);
+    expect(result.every(leg => leg.amountCents !== 0)).toBe(true);
+    expect(result.map(leg => leg.categoryId)).toEqual(['c-1', 'c-2', undefined]);
+  });
+
+  it('gives the odd cent to the earliest existing leg', () => {
+    // -2501 / 3 floors at 833 with two cents over: the first two legs
+    // carry -834 each, the new leg keeps -833.
+    const legs = [mkLeg(-1251), mkLeg(-1250)];
+    const result = addBalancedLeg(legs, -2501);
+    expect(result.map(leg => leg.amountCents)).toEqual([-834, -834, -833]);
+    expect(result.reduce((sum, leg) => sum + leg.amountCents, 0)).toBe(-2501);
+  });
+
+  it('works for a positive row', () => {
+    const result = addBalancedLeg([mkLeg(1250), mkLeg(1250)], 2500);
+    expect(result.map(leg => leg.amountCents)).toEqual([834, 833, 833]);
+    expect(result.reduce((sum, leg) => sum + leg.amountCents, 0)).toBe(2500);
+  });
+
+  it('does nothing when the split is not balanced', () => {
+    // An unbalanced split already has a residual to fund the new leg.
+    const legs = [mkLeg(-750), mkLeg(-1250)];
+    expect(addBalancedLeg(legs, -2500)).toBe(legs);
+  });
+
+  it('does not mutate the legs it was given', () => {
+    const legs = [mkLeg(-1250), mkLeg(-1250)];
+    addBalancedLeg(legs, -2500);
+    expect(legs.map(leg => leg.amountCents)).toEqual([-1250, -1250]);
+  });
+
+  it('leaves canceling legs alone on a zero target', () => {
+    // -500 and +500 balance at zero. There is no share to take: the
+    // domain's plain append keeps both amounts and adds a zero leg.
+    const legs = [mkLeg(-500), mkLeg(500)];
+    const result = addBalancedLeg(legs, 0);
+    expect(result.map(leg => leg.amountCents)).toEqual([-500, 500, 0]);
   });
 });

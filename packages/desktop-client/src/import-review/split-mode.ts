@@ -7,6 +7,7 @@
  *
  *   - what is left of the row's amount, and which way the legs are off,
  *   - how the remainder is spread when the user asks for it,
+ *   - how a new leg is funded when the split already balances,
  *   - what a leg's amount field starts out showing.
  *
  * The leg algebra itself is NOT here: `split-primitives.ts` in the domain
@@ -15,6 +16,8 @@
  */
 
 import {
+  addLeg,
+  MAX_SPLIT_LEGS,
   replaceLeg,
   splitResidualCents,
   splitResidualDirection,
@@ -99,6 +102,69 @@ function spreadEvenly(
     });
   });
   return out;
+}
+
+/**
+ * Pure: add a leg to a split that already balances, without leaving the
+ * new leg empty.
+ *
+ * `addLeg` in the domain appends a leg at the CURRENT residual. When the
+ * split balances that residual is zero, so the new leg would carry nothing
+ * and the user would have to move money onto it by hand. Here the new leg
+ * is funded by taking an equal share from each existing leg instead: the
+ * split stays balanced and every leg keeps a meaningful amount.
+ *
+ * The share is computed on the absolute amount and the row's sign is
+ * re-applied, the way `seedSplit` does. Odd cents go to the EARLIEST
+ * existing legs, so the first leg is never smaller than the others for
+ * the wrong reason. The returned array and legs are new objects; inputs
+ * are untouched. A no-op at `MAX_SPLIT_LEGS`.
+ */
+export function addBalancedLeg(
+  legs: readonly PreviewSplitLeg[],
+  targetCents: number,
+): readonly PreviewSplitLeg[] {
+  if (legs.length === 0 || legs.length >= MAX_SPLIT_LEGS) return legs;
+  if (splitResidualCents(legs, targetCents) !== 0) return legs;
+  // A zero target means the legs cancel each other out. There is no
+  // positive share to hand around — spreading would wipe both sides and
+  // still open a zero leg. Keep the domain's plain append here.
+  if (targetCents === 0) return addLeg(legs, 0);
+
+  const count = legs.length + 1;
+  const sign = targetCents < 0 ? -1 : 1;
+  const abs = Math.abs(targetCents);
+  // Each of the final `count` legs should carry about `abs / count`.
+  // Work in absolute cents: floor the share, then hand the leftover cents
+  // to the EARLIEST legs one each (the same rule `seedSplit` uses).
+  const share = Math.floor(abs / count);
+  let leftover = abs - share * count;
+
+  const amounts = legs.map(leg => {
+    let cents = share;
+    if (leftover > 0) {
+      cents += 1;
+      leftover -= 1;
+    }
+    return sign * cents;
+  });
+  // The new leg is last: it keeps the floored share when there are odd
+  // cents, so the earliest (existing) legs carry them.
+  amounts.push(sign * share);
+
+  let out = legs;
+  amounts.forEach((cents, index) => {
+    if (index < legs.length) {
+      out = replaceLeg(out, index, { ...legs[index], amountCents: cents });
+    }
+  });
+  // Match the domain's freeze invariant so a caller cannot mutate a leg.
+  // With fewer cents than legs the new leg is unavoidably zero — integer
+  // cents cannot be split smaller than one.
+  return Object.freeze([
+    ...out,
+    Object.freeze({ amountCents: amounts[amounts.length - 1] }),
+  ]);
 }
 
 /**
