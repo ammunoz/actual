@@ -29,7 +29,12 @@ import { FinancialText } from '#components/FinancialText';
 import { parseAmountText } from './editor-mode';
 import { EditorPicker } from './EditorPicker';
 import { splitErrorMessage } from './split-error-labels';
-import { distributeResidual, legAmountText, splitResidual } from './split-mode';
+import {
+  addBalancedLeg,
+  distributeResidual,
+  legAmountText,
+  splitResidual,
+} from './split-mode';
 import { TextField } from './TextField';
 
 export type SplitPaneProps = {
@@ -184,9 +189,24 @@ export function SplitPane({
   const addAnotherLeg = () => {
     setLegs(current => {
       const source = current.map(draft => draft.leg);
-      const added = addLeg(source, splitResidual(source, target).cents);
+      const residual = splitResidual(source, target);
+      // A balanced split has no residual to give the new leg: fund it
+      // from the existing legs instead, so it never opens at zero. An
+      // unbalanced split keeps the domain's residual-sized append.
+      const added =
+        residual.direction === 'balanced'
+          ? addBalancedLeg(source, target)
+          : addLeg(source, residual.cents);
       if (added.length === source.length) return current;
-      return [...current, { id: nextLegId(), leg: added[added.length - 1] }];
+      // Rebalance changes existing legs too, so map all of them back —
+      // the same shape `distribute` uses.
+      return [
+        ...current.map((draft, index) => ({
+          ...draft,
+          leg: added[index],
+        })),
+        { id: nextLegId(), leg: added[added.length - 1] },
+      ];
     });
   };
 

@@ -112,4 +112,21 @@ describe('the split pane', () => {
       'The legs add up to the row amount',
     );
   });
+
+  it('funds a new leg from a balanced split so none opens at zero', async () => {
+    render(
+      <SplitPane row={mkRow()} categories={CATEGORIES} onCommit={vi.fn()} />,
+    );
+    // The split opens as two balanced halves (-12.50 / -12.50).
+    await userEvent.click(screen.getByTestId('import-review-split-add'));
+
+    const amounts = [0, 1, 2].map(index =>
+      screen.getByTestId(`import-review-split-leg-amount-${index}`),
+    );
+    expect(amounts.map(field => (field as HTMLInputElement).value)).toEqual([
+      '-8.34',
+      '-8.33',
+      '-8.33',
+    ]);
+  });
 });
