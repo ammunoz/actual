@@ -2397,6 +2397,9 @@ ${transactions}
       'a',
     );
     await expect(actions.getByTestId('import-review-drop')).toContainText('r');
+    await expect(
+      actions.getByTestId('import-review-edit-transfer'),
+    ).toContainText('t');
 
     // The mockup's actions are framed chips, not bare text. Read the
     // buttons' own computed borders and surfaces: a border that exists
@@ -2412,9 +2415,9 @@ ${transactions}
           };
         }),
       );
-    // This file has no held row, so the four always-present commands are
+    // This file has no held row, so the five always-present commands are
     // the whole set: the override is the only conditional one.
-    expect(surfaces).toHaveLength(4);
+    expect(surfaces).toHaveLength(5);
     for (const button of surfaces) {
       expect(button.borderWidth).toBeGreaterThan(0);
       expect(button.background).not.toBe('rgba(0, 0, 0, 0)');

@@ -1758,9 +1758,11 @@ export function KeyboardImportModal({
     // the row keys work again straight away — a user who clicked Accept
     // with the mouse can carry on with the keyboard.
     //
-    // The chain is the exception: it opens a PANE, and the pane takes
-    // the keyboard. The other three actions here — accept, drop and
-    // accept anyway — act on the row and open nothing.
+    // The payee editor and the edit chain are the exceptions that hand the
+    // keyboard straight to a pane without giving it back here: their pane
+    // autofocuses. For every other action — including the transfer, split
+    // and rules buttons — focusGrid() runs first and the pane's own
+    // autofocus takes over after it mounts.
     if (action !== 'edit-payee' && action !== 'edit-chain') focusGrid();
   };
 
@@ -3032,6 +3034,22 @@ export function KeyboardImportModal({
                         the help overlay lists them all. */}
                       <Trans>Edit transaction</Trans>
                       <KeyCap>e</KeyCap>
+                    </Button>
+                    {/*
+                      `t` is bound and explained in the help, but it had no
+                      button: a transfer whose bank string is not an account
+                      name is never auto-detected, so the only way to find
+                      the editor was to read the key list. The button is the
+                      discoverability half of transfer handling.
+                    */}
+                    <Button
+                      variant="normal"
+                      className={actionButtonClass}
+                      data-testid="import-review-edit-transfer"
+                      onPress={event => pressOnce(event, 'edit-transfer')}
+                    >
+                      <Trans>Make transfer</Trans>
+                      <KeyCap>t</KeyCap>
                     </Button>
                     <Button
                       variant="normal"
