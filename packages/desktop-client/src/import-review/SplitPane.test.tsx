@@ -108,9 +108,45 @@ describe('the split pane', () => {
 
     // The draft now holds the typed amount: the three legs sum to the
     // row amount exactly, which the footer reports as balanced.
-    expect(screen.getByTestId('import-review-split-residual')).toHaveTextContent(
-      'The legs add up to the row amount',
+    expect(
+      screen.getByTestId('import-review-split-residual'),
+    ).toHaveTextContent('The legs add up to the row amount');
+  });
+
+  it('opens a matched split with its real allocation', () => {
+    // A row that matched a split in the budget carries the legs as display
+    // context (not edits). Pressing s must show those legs, not a fresh
+    // half/half pair.
+    render(
+      <SplitPane
+        row={mkRow({
+          existingSplitLegs: [
+            { amountCents: -1500, categoryId: 'c-food' },
+            { amountCents: -600, categoryId: 'c-fun' },
+            { amountCents: -400, categoryId: 'c-food-2' },
+          ],
+        })}
+        categories={CATEGORIES}
+        onCommit={vi.fn()}
+      />,
     );
+
+    const amounts = [0, 1, 2].map(index =>
+      screen.getByTestId(`import-review-split-leg-amount-${index}`),
+    );
+    expect(amounts.map(field => (field as HTMLInputElement).value)).toEqual([
+      '-15.00',
+      '-6.00',
+      '-4.00',
+    ]);
+    expect(screen.queryByText(/New split/)).toBeNull();
+  });
+
+  it('labels a freshly seeded split as a starting point', () => {
+    render(
+      <SplitPane row={mkRow()} categories={CATEGORIES} onCommit={vi.fn()} />,
+    );
+    expect(screen.getByText(/New split/)).toBeVisible();
   });
 
   it('funds a new leg from a balanced split so none opens at zero', async () => {

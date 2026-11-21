@@ -42,6 +42,7 @@ import type {
   PreviewDecision,
   PreviewEdits,
   PreviewRow,
+  PreviewSplitLeg,
   PreviewSummary,
   ReviewAccount,
   ReviewCategory,
@@ -485,6 +486,37 @@ function payeeRefs(payees: readonly ReviewPayee[]): readonly ReviewPayeeRef[] {
 }
 
 /**
+ * Attach a matched split's legs as DISPLAY context on a row.
+ *
+ * A row that matched a split already in the budget carries its real
+ * allocation here so the split pane can show it. This is deliberately not
+ * an edit: an untouched matched row must not count as user work and must
+ * not be enrolled in reconciliation on apply. A row that already carries
+ * context from a later re-resolution keeps its value. `overwrite` is used
+ * on the resume path, where a freshly queried split must replace the legs a
+ * session persisted in case the budget changed while it was put aside.
+ */
+function withSplitContext<
+  T extends {
+    previewKey?: string;
+    importedId?: string;
+    existingSplitLegs?: readonly PreviewSplitLeg[];
+  },
+>(
+  rows: readonly T[],
+  splitLegs: ReadonlyMap<string, readonly PreviewSplitLeg[]>,
+  overwrite = false,
+): readonly T[] {
+  if (splitLegs.size === 0) return rows;
+  return rows.map(row => {
+    if (!overwrite && row.existingSplitLegs) return row;
+    const legs = splitLegs.get(rowKey(row));
+    if (!legs) return row;
+    return { ...row, existingSplitLegs: legs };
+  });
+}
+
+/**
  * The hook that drives the review.
  */
 export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
@@ -778,6 +810,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       matched: Map<string, string>;
       effects: RuleEffects;
       ambiguous: Set<string>;
+      splitLegs: Map<string, readonly PreviewSplitLeg[]>;
     }> => {
       const importedIds = rows
         .map(row => row.importedId)
@@ -794,7 +827,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
       const accountRows = rows.filter(row => row.accountId === accountId);
       if (accountRows.length === 0) {
-        return { matched, effects: EMPTY_EFFECTS, ambiguous: new Set() };
+        return {
+          matched,
+          effects: EMPTY_EFFECTS,
+          ambiguous: new Set(),
+          splitLegs: new Map(),
+        };
       }
 
       // The PREVIEW payload marks nothing as skipped: Actual skips a
@@ -838,7 +876,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         ) {
           throw err;
         }
-        return { matched, effects: EMPTY_EFFECTS, ambiguous: new Set() };
+        return {
+          matched,
+          effects: EMPTY_EFFECTS,
+          ambiguous: new Set(),
+          splitLegs: new Map(),
+        };
       }
 
       // The engine flags a transfer row whose target already has several
@@ -904,7 +947,49 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         );
       }
 
-      return { matched, effects, ambiguous };
+      // A row that matched a split already in the budget carries that
+      // split's REAL allocation as display context. It is attached to the
+      // row (not its edits), so an untouched matched row stays unedited and
+      // is not enrolled in reconciliation on apply. The split pane uses it
+      // to open the actual legs rather than seeding a fresh half/half pair.
+      const splitLegs = new Map<string, readonly PreviewSplitLeg[]>();
+      if (matched.size > 0) {
+        try {
+          const { data } = await aqlQuery(
+            q('transactions')
+              .filter({ id: { $oneof: [...matched.values()] } })
+              .select('*')
+              // Without grouping, split parents are absent from the result.
+              .options({ splits: 'grouped' }),
+          );
+          const transactions = (
+            Array.isArray(data) ? data : []
+          ) as TransactionEntity[];
+          for (const [key, id] of matched) {
+            const parent = transactions.find(
+              transaction => transaction.id === id,
+            );
+            const children = parent ? legsOf(parent) : [];
+            if (children.length === 0) continue;
+            splitLegs.set(
+              key,
+              Object.freeze(
+                children.map(leg =>
+                  Object.freeze({
+                    amountCents: leg.amount,
+                    ...(leg.category ? { categoryId: leg.category } : {}),
+                  }),
+                ),
+              ),
+            );
+          }
+        } catch {
+          // Display context only: a failed query must not stop the review.
+          // The row still imports; pressing `s` simply seeds fresh legs.
+        }
+      }
+
+      return { matched, effects, ambiguous, splitLegs };
     },
     [fuzzyCache],
   );
@@ -1142,13 +1227,28 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         // Which rows are ALREADY in the budget? Asked again, because the
         // budget may have changed since the review was put aside.
-        const { matched, effects, ambiguous } = await lookupMatches(
+        const { matched, effects, ambiguous, splitLegs } = await lookupMatches(
           state.rows,
           accountId,
           payeeList,
           categoryList,
         );
         if (cancelled) return;
+
+        // Show the real allocation of splits already in the budget. This
+        // is display context only: it never becomes an edit, so an
+        // untouched matched row stays unedited. Keep it on the BASE rows
+        // too so a later re-resolution does not drop it.
+        // Freshly queried legs replace any a saved session persisted — the
+        // budget's split may have changed while the review was put aside.
+        const contextualRows = withSplitContext(state.rows, splitLegs, true);
+        if (contextualRows !== state.rows) {
+          baseRows.current = withSplitContext(
+            baseRows.current,
+            splitLegs,
+            true,
+          );
+        }
 
         // The budget may have gained mirrors since the review was saved.
         // Attach the warning to the rows the engine flagged, without
@@ -1157,15 +1257,17 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // the same invariant the fresh-load path keeps.
         const flagged =
           ambiguous.size > 0
-            ? state.rows.map(row =>
+            ? contextualRows.map(row =>
                 ambiguous.has(rowKey(row)) &&
                 !row.flags?.some(flag => flag.kind === 'transfer-ambiguous')
                   ? flagFor(row, 'transfer-ambiguous', 'PAYEE-TRANSFER-003')
                   : row,
               )
-            : state.rows;
+            : contextualRows;
         const finalState =
-          flagged === state.rows ? state : { ...state, rows: flagged };
+          flagged === contextualRows
+            ? { ...state, rows: contextualRows }
+            : { ...state, rows: flagged };
         if (ambiguous.size > 0) {
           baseRows.current = baseRows.current.map(row =>
             ambiguous.has(rowKey(row))
@@ -1328,13 +1430,19 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
 
         // Which rows are ALREADY in the budget, and what did the rules do
         // to them?
-        const { matched, effects, ambiguous } = await lookupMatches(
+        const { matched, effects, ambiguous, splitLegs } = await lookupMatches(
           next.rows,
           accountId,
           payeeList,
           categoryList,
         );
         if (cancelled) return;
+
+        // Attach the matched split allocations as display context on the
+        // PREVIEW rows (not their edits) and on the BASE rows, so a later
+        // re-resolution cannot drop them.
+        const contextual = withSplitContext(next.rows, splitLegs);
+        baseRows.current = withSplitContext(baseRows.current, splitLegs);
 
         // Merge the engine's transfer ambiguity back into the BASE rows and
         // re-resolve, so the flag rides through every later re-resolution
@@ -1349,12 +1457,18 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         }
         const final =
           ambiguous.size > 0
-            ? rebuildPreviewState({
-                base: flaggedBase,
-                trustLevel: trustLevelRef.current,
-                resolveOpts: resolveOptsFor(payeeList, accountList),
-              })
-            : next;
+            ? (() => {
+                const rebuilt = rebuildPreviewState({
+                  base: flaggedBase,
+                  trustLevel: trustLevelRef.current,
+                  resolveOpts: resolveOptsFor(payeeList, accountList),
+                });
+                return {
+                  ...rebuilt,
+                  rows: withSplitContext(rebuilt.rows, splitLegs),
+                };
+              })()
+            : { ...next, rows: contextual };
 
         // **The rows are set AFTER the answers, not before.** The rows
         // and the rules' effects belong together: a row that a rule

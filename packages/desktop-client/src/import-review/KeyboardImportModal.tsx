@@ -692,12 +692,17 @@ export function KeyboardImportModal({
         cleared: effect.value === null,
       };
     }
-    if (isSplitRow(row.edits)) {
+    if (isSplitRow(row.edits) || row.existingSplitLegs) {
       return {
         // The count is NOT named `count`: i18next reads that as a
         // plural, and this is a number of legs, not a number of
-        // something countable.
-        label: t('Split ({{legs}})', { legs: row.edits.splits?.length ?? 0 }),
+        // something countable. A row that MATCHED a split in the budget
+        // says so too: its legs are display context, not edits, but the
+        // cell must not claim "Categorize" for a transaction that is a
+        // split.
+        label: t('Split ({{legs}})', {
+          legs: row.edits.splits?.length ?? row.existingSplitLegs?.length ?? 0,
+        }),
         muted: true,
         ruled: false,
         cleared: false,

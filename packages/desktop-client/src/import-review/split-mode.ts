@@ -140,7 +140,7 @@ export function addBalancedLeg(
   const share = Math.floor(abs / count);
   let leftover = abs - share * count;
 
-  const amounts = legs.map(leg => {
+  const amounts = legs.map(() => {
     let cents = share;
     if (leftover > 0) {
       cents += 1;
