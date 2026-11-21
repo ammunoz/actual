@@ -127,7 +127,7 @@ tag glyph beside it — so you can see the rule without hunting for it.
 
 <kbd>Shift</kbd>+<kbd>E</kbd> opens the rules on the row: the ones that
 touched it, and the ones it could grow. A rule is created **only when you
-ask for it**. No *rule* is created on its own: picking a payee does not
+ask for it**. No _rule_ is created on its own: picking a payee does not
 quietly make a vendor rule, because a rule applies to every future
 transaction with that vendor, and that is your decision to make. (The older
 vendor map still learns silently from payee choices; it is deprecated in
