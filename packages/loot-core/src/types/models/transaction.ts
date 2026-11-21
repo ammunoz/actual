@@ -74,6 +74,12 @@ export type TransactionEntity = {
    * one, so this never reaches the `transactions` table.
    */
   _appliedRules?: AppliedRule[];
+  /**
+   * Set when a transfer row could match more than one existing mirror, so
+   * the review can warn instead of letting the import guess. Like
+   * `_appliedRules`, the underscore makes `conform` skip it on insert.
+   */
+  _ambiguousTransfer?: boolean;
 };
 
 /**

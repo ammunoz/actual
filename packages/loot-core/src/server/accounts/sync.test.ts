@@ -774,6 +774,146 @@ describe('Account sync', () => {
       expect(notYetImported.imported_id).toBe('new-import-id');
     },
   );
+
+  describe('transfer mirror guard', () => {
+    async function prepareTwoAccounts() {
+      const { id: accountA } = await prepareDatabase();
+      const accountB = await db.insertAccount({
+        id: 'two',
+        name: 'Account B',
+        offbudget: 0,
+      });
+      const transferPayeeB = await db.insertPayee({
+        id: 'transfer-two',
+        name: '',
+        transfer_acct: accountB,
+      });
+      return { accountA, accountB, transferPayeeB };
+    }
+
+    test('binds a single unlabelled mirror instead of inserting a duplicate', async () => {
+      const { accountB, transferPayeeB } = await prepareTwoAccounts();
+
+      // An unlabelled mirror in B, as transfer.onInsert would create when
+      // a row in A was marked as a transfer to B: same amount/date as B's
+      // statement, no imported_id, and a transfer_id linking it to A. Its
+      // date is a week out, so the ordinary fuzzy tier (7-day window) would
+      // NOT pick it; only the guard can bind it.
+      await db.insertTransaction({
+        id: 'mirror-in-b',
+        account: accountB,
+        amount: 2000,
+        date: '2024-04-12',
+        transfer_id: 'source-in-a',
+      });
+      // A competing ordinary row with the same amount and a closer date,
+      // which the fuzzy tier WOULD pick. The guard must win over it.
+      await db.insertTransaction({
+        id: 'ordinary-in-b',
+        account: accountB,
+        amount: 2000,
+        date: '2024-04-06',
+      });
+
+      const { added, updated } = await reconcileTransactions(accountB, [
+        {
+          date: '2024-04-05',
+          amount: 2000,
+          payee: transferPayeeB,
+          imported_id: 'b-statement-fitid',
+        },
+      ]);
+
+      expect(added).toHaveLength(0);
+      // The guard bound the mirror even though the ordinary row was
+      // closer in date — proof this was not the fuzzy tier.
+      expect(updated).toContain('mirror-in-b');
+      expect(updated).not.toContain('ordinary-in-b');
+      const mirror = (await getAllTransactions()).find(
+        t => t.id === 'mirror-in-b',
+      );
+      expect(mirror.imported_id).toBe('b-statement-fitid');
+      expect(mirror.transfer_id).toBe('source-in-a');
+    });
+
+    test('never binds a deleted mirror', async () => {
+      const { accountB, transferPayeeB } = await prepareTwoAccounts();
+
+      await db.insertTransaction({
+        id: 'deleted-mirror',
+        account: accountB,
+        amount: 2000,
+        date: '2024-04-05',
+        transfer_id: 'source-in-a',
+      });
+      await db.deleteTransaction(await db.getTransaction('deleted-mirror')!);
+
+      // A deleted mirror is a deliberate act. The guard never writes a
+      // statement row onto a tombstoned transaction, where the import
+      // would silently disappear — regardless of reimportDeleted.
+      const result = await reconcileTransactions(
+        accountB,
+        [
+          {
+            date: '2024-04-05',
+            amount: 2000,
+            payee: transferPayeeB,
+            imported_id: 'b-statement-fitid',
+          },
+        ],
+        { reimportDeleted: true },
+      );
+      expect(result.updated).not.toContain('deleted-mirror');
+      const live = (await getAllTransactions()).find(
+        t => t.imported_id === 'b-statement-fitid',
+      );
+      expect(live).toBeDefined();
+    });
+
+    test('flags ambiguity and abstains when several identical mirrors exist', async () => {
+      const { accountB, transferPayeeB } = await prepareTwoAccounts();
+
+      for (const id of ['mirror-1', 'mirror-2']) {
+        await db.insertTransaction({
+          id,
+          account: accountB,
+          amount: 2000,
+          date: '2024-04-05',
+          transfer_id: 'source-in-a',
+        });
+      }
+
+      const result = await reconcileTransactions(
+        accountB,
+        [
+          {
+            date: '2024-04-05',
+            amount: 2000,
+            payee: transferPayeeB,
+            imported_id: 'b-statement-fitid',
+          },
+        ],
+        { isPreview: true },
+      );
+
+      // The guard did not pick one at random: it flagged the ambiguity.
+      // The generic fuzzy tier may still reconcile the row against one of
+      // the identical mirrors (they are indistinguishable), but no SECOND
+      // mirror is created and the user is warned via the flag.
+      expect(
+        result.ruledTransactions?.some(
+          trans =>
+            (trans as { _ambiguousTransfer?: boolean })._ambiguousTransfer ===
+            true,
+        ),
+      ).toBe(true);
+      const mirrors = (await getAllTransactions()).filter(
+        t => t.transfer_id === 'source-in-a',
+      );
+      expect(mirrors).toHaveLength(2);
+    });
+  });
+
   test('bank sync does not fuzzy-match children of an exactly matched split', async () => {
     const { id } = await prepareDatabase();
 
