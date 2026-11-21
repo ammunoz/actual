@@ -357,6 +357,65 @@ ${transactions}
     await chooseFile(file);
   }
 
+  /**
+   * Import a one-row OFX with a chosen NAME. Used by the transfer tests:
+   * detection is driven entirely by the vendor string the bank supplied.
+   */
+  async function importOfxWithPayee(name: string, fitid = 'TRANSFERFITID1') {
+    const ofx = `OFXHEADER:100
+DATA:OFXSGML
+VERSION:102
+SECURITY:NONE
+ENCODING:USASCII
+CHARSET:1252
+COMPRESSION:NONE
+OLDFILEUID:NONE
+NEWFILEUID:NONE
+
+<OFX>
+<SIGNONMSGSRSV1>
+<SONRS>
+<STATUS><CODE>0<SEVERITY>INFO</STATUS>
+<DTSERVER>20260907120000
+<LANGUAGE>ENG
+</SONRS>
+</SIGNONMSGSRSV1>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<TRNUID>1
+<STATUS><CODE>0<SEVERITY>INFO</STATUS>
+<STMTRS>
+<CURDEF>USD
+<BANKACCTFROM>
+<BANKID>DEMOBANK
+<ACCTID>DEMO-CHECKING-001
+<ACCTTYPE>CHECKING
+</BANKACCTFROM>
+<BANKTRANLIST>
+<DTSTART>20260901000000
+<DTEND>20260930000000
+<STMTTRN>
+<TRNTYPE>DEBIT
+<DTPOSTED>20260907000000
+<TRNAMT>-25.00
+<FITID>${fitid}
+<NAME>${name}
+</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>0.00
+<DTSERVER>20260930000000
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>
+`;
+    const file = test.info().outputPath('transfer.ofx');
+    writeFileSync(file, ofx);
+    await chooseFile(file);
+  }
+
   test('opens the keyboard review for an OFX file when it is enabled', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review',
@@ -5197,6 +5256,83 @@ ${transactions}
     await expect(rows.nth(0)).not.toContainText('Transfer');
     await expect(rows.nth(0)).toContainText('Categorize');
     await expect(rows.nth(0)).toContainText('PURCHASE');
+  });
+
+  test('a transfer-prefixed vendor string auto-detects an account match', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Detect',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithPayee('TRANSFER TO Ally Savings');
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(1);
+    // The prefix is stripped and the residual names an account, so the row
+    // is auto-detected as a transfer — no `t` keypress needed.
+    await expect(rows.nth(0)).toContainText('Ally Savings');
+    await expect(rows.nth(0)).toContainText('Transfer');
+  });
+
+  test('a transfer keyword with no account match is only SUSPECTED', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Suspect',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithPayee('ONLINE TRANSFER TO SOMEWHERE UNKNOWN');
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(1);
+    // The warning is shown but NOTHING is prefilled: a false positive must
+    // not create a mirror in another account.
+    // The flag is shown as a machine code, and the row stays ordinary.
+    await expect(dialog.getByTestId('import-review-flag-codes')).toContainText(
+      'PAYEE-TRANSFER-002',
+    );
+    // The row is an ordinary categorizable transaction: it says
+    // "Categorize", not "Transfer".
+    await expect(rows.nth(0)).toContainText('Categorize');
+  });
+
+  test('a transfer rule is offered and taught from the picker', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Keyboard Review Transfer Rule',
+      offBudget: false,
+      balance: 0,
+    });
+    await accountPage.waitFor();
+
+    await enableKeyboardReview();
+    await importOfxWithPayee('ONLINE TRANSFER TO Ally Savings');
+
+    const dialog = page.getByRole('dialog');
+    const rows = dialog.getByTestId('import-review-row');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0)).toContainText('Ally Savings');
+
+    await page.keyboard.press('Shift+E');
+    const picker = dialog.getByTestId('import-review-rule-picker');
+    await expect(picker).toBeVisible();
+    const transferOffer = picker
+      .getByTestId('import-review-rule-new')
+      .filter({ hasText: 'always transfer' });
+    await expect(transferOffer).toHaveCount(1);
+    // The picker auto-focuses its FIRST item, which for a transfer row is
+    // this offer (the only other item is "Add new rule"). Enter writes it.
+    await page.keyboard.press('Enter');
+    await expect(picker).not.toBeVisible();
+    await expect(dialog.getByTestId('import-review-notice')).toContainText(
+      'This vendor will be a transfer from now on',
+    );
   });
 
   test('the help overlay lists the keys', async () => {

@@ -23,13 +23,21 @@ export const HELP_LIMITATIONS = [
   <Trans key="vendor-map">
     The payee names you remember are remembered for the whole budget, not for
     one account. The same vendor name in two accounts keeps only the last
-    choice.
+    choice. This silent learning is deprecated; create a rule to choose on
+    purpose.
   </Trans>,
   <Trans key="rules">
     A rule you create here applies to future transactions, from now on. The
     suggested rules match this row&apos;s vendor or payee; one you write in the
     rule editor can match anything. Neither changes the transactions you already
     have.
+  </Trans>,
+  <Trans key="transfers">
+    A transfer rule is scoped to the account you create it from; the other
+    account&apos;s statement reconciles against the mirror by amount and date.
+    If you import several transfers of the same amount on nearby days, the
+    review warns when it cannot tell which one a row belongs to — check those
+    rows before importing, because a missed match leaves a duplicate.
   </Trans>,
   <Trans key="splits">
     A split that was imported before is matched to the old one by the
