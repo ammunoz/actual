@@ -34,7 +34,7 @@ export const HELP_LABELS: Readonly<Record<ReviewAction, ReactNode>> =
     'edit-memo': <Trans>Edit notes</Trans>,
     'edit-amount': <Trans>Edit amount</Trans>,
     'edit-date': <Trans>Edit date</Trans>,
-    'edit-transfer': <Trans>Set transfer target</Trans>,
+    'edit-transfer': <Trans>Make transfer</Trans>,
     'edit-split': <Trans>Edit split</Trans>,
     'edit-rules': <Trans>Edit the rules on this row</Trans>,
     'trust-paranoid': <Trans>Use the paranoid trust level</Trans>,
