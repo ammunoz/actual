@@ -7,6 +7,7 @@
 #
 # Usage:
 #   bin/with-actual-github.sh <command> [args...]
+#   bin/with-actual-github.sh git push github main   # HTTPS git auth is automatic
 #   bin/with-actual-github.sh --check          # verify setup without printing the token
 #   bin/with-actual-github.sh --preamble       # print the agent safety rules
 #
@@ -63,6 +64,26 @@ cmd_check() {
     printf 'Setup OK.\n'
 }
 
+# Configure non-interactive HTTPS auth for git commands. Git does not read
+# GITHUB_TOKEN from the environment, so we point it at an askpass helper and
+# inject the username via one-shot config (no config file is written). This is
+# exported only to the child process via the surrounding `exec "$@"`.
+setup_git_auth() {
+    case "${1:-}" in
+        git|*/git)
+            export GIT_ASKPASS="$SCRIPT_DIR/git-askpass-actual.sh"
+            export GIT_TERMINAL_PROMPT=0
+            export GIT_CONFIG_COUNT=2
+            export GIT_CONFIG_KEY_0='credential.https://github.com.username'
+            export GIT_CONFIG_VALUE_0='x-access-token'
+            # Clear any pre-existing credential helper so a stale cached
+            # credential cannot preempt the token path on other machines.
+            export GIT_CONFIG_KEY_1='credential.helper'
+            export GIT_CONFIG_VALUE_1=''
+            ;;
+    esac
+}
+
 cmd_preamble() {
     cat <<'EOF'
 GitHub access rules for agents on the `actual` repo:
@@ -104,6 +125,7 @@ case "${1:-}" in
         # shellcheck disable=SC1090
         . "$ENV_FILE"
         set +a
+        setup_git_auth "$@"
         exec "$@"
         ;;
 esac

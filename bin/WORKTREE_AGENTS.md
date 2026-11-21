@@ -126,6 +126,11 @@ The token is **not** stored in the repo. It lives at:
 - `bin/with-actual-github.sh <command> [args...]` sources the env file and runs
   the command with the token in its environment. Use this only when launching
   agents whose cwd is `actual` or one of its worktrees.
+- **Git HTTPS auth is automatic.** When the wrapped command is `git`, the
+  wrapper configures a `GIT_ASKPASS` helper and one-shot `x-access-token`
+  username, so `bin/with-actual-github.sh git push github main` works without
+  prompting. The token is never written to argv or git config (it remains in
+  the child process environment). SSH remotes are unaffected.
 - `bin/with-actual-github.sh --preamble` prints the token safety rules above.
 - `opencode.json` (gitignored) may reference the token as `${GITHUB_TOKEN}` for
   the GitHub MCP; it must never contain a literal token.
