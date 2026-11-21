@@ -37,6 +37,8 @@ function flag(kind: PreviewRow['flags'][number]['kind']): Flag {
     'fuzzy-payee-match': 'PAYEE-FUZZY-001',
     'would-create-payee': 'PAYEE-NEW-001',
     'transfer-detected': 'PAYEE-TRANSFER-001',
+    'transfer-suspected': 'PAYEE-TRANSFER-002',
+    'transfer-ambiguous': 'PAYEE-TRANSFER-003',
   };
   return { kind, code: codes[kind] };
 }

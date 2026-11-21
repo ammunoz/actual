@@ -4,8 +4,10 @@
  *   0. vendor map (exact key match on `payeeRaw` against the user's
  *      per-budget dictionary of explicit confirmations)
  *   t. transfer detection: exact case-insensitive match of `payeeRaw`
- *      against a budget account name — the row becomes a transfer,
- *      flagged `transfer-detected` so the review says so
+ *      (or a known transfer prefix stripped from it) against a budget
+ *      account name — the row becomes a transfer, flagged `transfer-detected`
+ *      so the review says so. A transfer keyword with no exact account match
+ *      only raises `transfer-suspected`, with no prefill.
  *   2. longest-prefix match against existing budget payees
  *      (length >= 4 OR word-boundary; transfer payees excluded)
  *   3. fuzzy LCS-ratio match against canonicalized raw (if enabled;
@@ -105,6 +107,72 @@ type IndexEntry = {
 const MIN_PREFIX_LEN_BOUNDARY_FREE = 4;
 
 /**
+ * Prefixes a bank may put in front of the destination account name on a
+ * transfer. Kept deliberately small: an exact residual match is the only
+ * thing that auto-detects a transfer, so the allowlist must not be broad
+ * enough to swallow ordinary vendor names.
+ */
+const TRANSFER_PREFIXES: readonly string[] = Object.freeze([
+  'online transfer to ',
+  'interac e-transfer to ',
+  'e-transfer to ',
+  'transfer to ',
+  'xfer to ',
+]);
+
+/**
+ * Keywords that make a row merely SUSPECTED, never auto-detected. A false
+ * positive here only costs the user a look; a false positive on auto-detect
+ * would create a mirror in another account.
+ */
+const TRANSFER_KEYWORDS: readonly string[] = Object.freeze([
+  'transfer',
+  'xfer',
+  'e-transfer',
+  'interac',
+]);
+
+/**
+ * Strip a known transfer prefix and normalize whitespace. Returns the
+ * lowercased residual, or undefined if no prefix matched.
+ */
+function stripTransferPhrase(raw: string): string | undefined {
+  const lower = raw.toLowerCase();
+  for (const prefix of TRANSFER_PREFIXES) {
+    if (lower.startsWith(prefix)) {
+      const residual = lower.slice(prefix.length).replace(/\s+/g, ' ').trim();
+      return residual.length > 0 ? residual : undefined;
+    }
+  }
+  return undefined;
+}
+
+/** Whether a raw vendor string contains a conservative transfer keyword. */
+function looksLikeTransfer(raw: string): boolean {
+  const lower = ` ${raw.toLowerCase()} `;
+  return TRANSFER_KEYWORDS.some(keyword => lower.includes(` ${keyword} `));
+}
+
+/**
+ * Whether the raw string (possibly with a transfer prefix stripped) is
+ * already an exact match for an account other than the row's own. Such a
+ * row is DETECTED, not merely suspected, so it must not get both flags.
+ */
+function looksLikeExactAccount(
+  raw: string,
+  accountsIndex: readonly IndexEntry[],
+  sourceAccountId: string,
+): boolean {
+  const candidates = [raw.toLowerCase(), stripTransferPhrase(raw)].filter(
+    (value): value is string => value !== undefined,
+  );
+  return accountsIndex.some(
+    a =>
+      a.id !== sourceAccountId && candidates.some(value => a.lower === value),
+  );
+}
+
+/**
  * Pure: resolve the payee for every row. Returns a new array; the input is
  * not mutated.
  */
@@ -140,13 +208,30 @@ function resolveOne(
 ): ResolvedRow {
   const raw = row.payeeRaw;
 
+  // A bank string that mentions a transfer but did not resolve to an exact
+  // account name is only SUSPECTED. It keeps its normal payee resolution —
+  // a vendor can mention "transfer" without being one — and the flag is
+  // attached to whatever that resolution turns out to be, without an early
+  // return that would bypass the prefix/fuzzy layers.
+  const suspected =
+    accountsIndex.length > 0 &&
+    !looksLikeExactAccount(raw, accountsIndex, row.accountId) &&
+    looksLikeTransfer(raw);
+
+  // Attach the suspicion flag on the way out of every path. A transfer that
+  // WAS detected (or a row with no accounts to transfer to) is not suspected.
+  const finish = (result: ResolvedRow): ResolvedRow =>
+    suspected
+      ? flagFor(result, 'transfer-suspected', 'PAYEE-TRANSFER-002')
+      : result;
+
   // Layer 0: vendor map (exact key match on payeeRaw).
   if (opts.vendorMap) {
     const payeeId = opts.vendorMap.entries[raw];
     if (payeeId !== undefined) {
       const hit = existingIndex.find(p => p.id === payeeId);
       if (hit) {
-        return resolved(row, hit.original, 'vendor-map', hit.id);
+        return finish(resolved(row, hit.original, 'vendor-map', hit.id));
       }
       // Stale entry: the payee id from the dictionary no longer exists in
       // the budget's payee list. Fall through to transfer detection, and
@@ -180,6 +265,28 @@ function resolveOne(
         `account=${acct.id}`,
       );
     }
+
+    // A bank often names a transfer after the destination account, prefixed
+    // with a phrase like "ONLINE TRANSFER TO ". Strip a small, explicit
+    // allowlist of such phrases and try the residual as an exact account name.
+    // Only an EXACT residual match auto-detects: a near miss is merely
+    // suspected, so a vendor can never be turned into a transfer on a guess.
+    const stripped = stripTransferPhrase(raw);
+    if (stripped !== undefined) {
+      const acct = accountsIndex.find(
+        a => a.lower === stripped && a.id !== row.accountId,
+      );
+      if (acct) {
+        const base = resolved(row, acct.original, 'transfer', undefined);
+        base.matchedTransferAccountId = acct.id;
+        return flagFor(
+          base,
+          'transfer-detected',
+          'PAYEE-TRANSFER-001',
+          `account=${acct.id}`,
+        );
+      }
+    }
   }
 
   // Layer 2: longest-prefix against existing budget payees (raw). Transfer
@@ -188,7 +295,9 @@ function resolveOne(
   const txnLower = raw.toLowerCase();
   const prefixHit = findLongestPrefix(txnLower, existingIndex);
   if (prefixHit !== null) {
-    return resolved(row, prefixHit.original, 'existing-prefix', prefixHit.id);
+    return finish(
+      resolved(row, prefixHit.original, 'existing-prefix', prefixHit.id),
+    );
   }
 
   // Layer 3: fuzzy LCS-ratio match against canonicalized raw.
@@ -218,11 +327,13 @@ function resolveOne(
     const top = matches[0];
     if (top) {
       const base = resolved(row, top.candidate.name, 'fuzzy', top.candidate.id);
-      return flagFor(
-        base,
-        'fuzzy-payee-match',
-        'PAYEE-FUZZY-001',
-        `score=${top.score.toFixed(2)}`,
+      return finish(
+        flagFor(
+          base,
+          'fuzzy-payee-match',
+          'PAYEE-FUZZY-001',
+          `score=${top.score.toFixed(2)}`,
+        ),
       );
     }
   }
@@ -236,22 +347,24 @@ function resolveOne(
     // otherwise be flagged, which is noise — the apply step creates the
     // payee naturally and the user has nothing to map.
     if (existingIndex.length > 0 || accountsIndex.length > 0) {
-      return flagFor(
-        fallback,
-        'would-create-payee',
-        'PAYEE-NEW-001',
-        `canonical=${stripped}`,
+      return finish(
+        flagFor(
+          fallback,
+          'would-create-payee',
+          'PAYEE-NEW-001',
+          `canonical=${stripped}`,
+        ),
       );
     }
-    return fallback;
+    return finish(fallback);
   }
 
   // Layer 5: unknown-payee.
   const noneRow = resolved(row, '', 'none', undefined);
   if (existingIndex.length === 0 && accountsIndex.length === 0) {
-    return noneRow;
+    return finish(noneRow);
   }
-  return flagFor(noneRow, 'unknown-payee', 'PAYEE-UNK-001');
+  return finish(flagFor(noneRow, 'unknown-payee', 'PAYEE-UNK-001'));
 }
 
 function resolved(

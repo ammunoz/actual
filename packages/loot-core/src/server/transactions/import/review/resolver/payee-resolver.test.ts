@@ -117,6 +117,44 @@ describe('resolvePayees — transfer detection', () => {
     ]);
   });
 
+  it('detects a transfer behind a known prefix', () => {
+    const row = mkRow({ payeeRaw: 'ONLINE TRANSFER TO Demo Savings' });
+    const [out] = resolvePayees([row], {
+      existingPayees: EXISTING,
+      accounts: ACCOUNTS,
+    });
+    expect(out?.payeeMatchSource).toBe('transfer');
+    expect(out?.matchedTransferAccountId).toBe('a-savings');
+    expect(out?.flags).toEqual([
+      expect.objectContaining({
+        kind: 'transfer-detected',
+        code: 'PAYEE-TRANSFER-001',
+      }),
+    ]);
+  });
+
+  it('only SUSPECTS a transfer when the string is not an account name', () => {
+    // No prefill: a false positive would create a mirror in another account.
+    const row = mkRow({ payeeRaw: 'ONLINE TRANSFER TO SOME OTHER PLACE' });
+    const [out] = resolvePayees([row], {
+      existingPayees: EXISTING,
+      accounts: ACCOUNTS,
+    });
+    expect(out?.payeeMatchSource).not.toBe('transfer');
+    expect(out?.matchedTransferAccountId).toBeUndefined();
+    // The row keeps its normal payee resolution (strip fallback), with the
+    // suspicion attached on top — no early return that loses the payee.
+    expect(out?.payeeCanonical).toBe('ONLINE TRANSFER TO SOME OTHER PLACE');
+    expect(out?.flags).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'transfer-suspected',
+          code: 'PAYEE-TRANSFER-002',
+        }),
+      ]),
+    );
+  });
+
   it("never detects a transfer to the row's own account", () => {
     // A transaction cannot transfer to the account it is in. The manual
     // picker refuses it, and the auto-detect has to refuse it too.

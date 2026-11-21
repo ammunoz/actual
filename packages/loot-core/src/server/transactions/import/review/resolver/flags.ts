@@ -13,6 +13,8 @@
  *     | fuzzy-payee-match    | block    | warn     | warn    |
  *     | would-create-payee   | warn     | warn     | warn    |
  *     | transfer-detected    | warn     | warn     | warn    |
+ *     | transfer-suspected   | warn     | warn     | warn    |
+ *     | transfer-ambiguous   | warn     | warn     | warn    |
  *
  * Multi-flag priority is `block > skip > warn`. A single block on any flag
  * puts the row in `blocked` even if another flag says `skip`. A row with no
@@ -85,6 +87,22 @@ const OUTCOME_MATRIX: Readonly<
   // the badge always surfaces, but never block — a false-positive
   // detection is reverted with one keypress, not an error.
   'transfer-detected': Object.freeze({
+    paranoid: 'warn',
+    cautious: 'warn',
+    trusted: 'warn',
+  }),
+  // A bank string that LOOKS like a transfer but does not name an account we
+  // know. Nothing is prefilled, so there is no destructive action to guard
+  // against — only a nudge for the user to look at the row. Warn always.
+  'transfer-suspected': Object.freeze({
+    paranoid: 'warn',
+    cautious: 'warn',
+    trusted: 'warn',
+  }),
+  // Several identical transfers to the same account are already in the
+  // budget. The row may be one of them; the user can drop it with `r`.
+  // Warn always, never block — a false positive only costs a look.
+  'transfer-ambiguous': Object.freeze({
     paranoid: 'warn',
     cautious: 'warn',
     trusted: 'warn',

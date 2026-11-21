@@ -102,6 +102,8 @@ describe('outcomeFor (matrix lookup)', () => {
     'fuzzy-payee-match',
     'would-create-payee',
     'transfer-detected',
+    'transfer-suspected',
+    'transfer-ambiguous',
   ];
   const LEVELS: readonly TrustLevel[] = ['paranoid', 'cautious', 'trusted'];
 
@@ -136,6 +138,16 @@ describe('outcomeFor (matrix lookup)', () => {
       cautious: 'warn',
       trusted: 'warn',
     },
+    'transfer-suspected': {
+      paranoid: 'warn',
+      cautious: 'warn',
+      trusted: 'warn',
+    },
+    'transfer-ambiguous': {
+      paranoid: 'warn',
+      cautious: 'warn',
+      trusted: 'warn',
+    },
   };
 
   for (const kind of KINDS) {
@@ -161,6 +173,8 @@ describe('isHardBlock', () => {
     expect(isHardBlock('fuzzy-payee-match')).toBe(false);
     expect(isHardBlock('would-create-payee')).toBe(false);
     expect(isHardBlock('transfer-detected')).toBe(false);
+    expect(isHardBlock('transfer-suspected')).toBe(false);
+    expect(isHardBlock('transfer-ambiguous')).toBe(false);
   });
 });
 
