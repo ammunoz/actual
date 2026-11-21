@@ -95,8 +95,8 @@ function describeAction(
  * notes" action: those are not "is → set". The caller shows the rule's
  * field instead, which is the truth the review knows for certain.
  *
- * The rules the review writes have exactly one condition and one action,
- * so they are always described.
+ * The rules the review writes use `is` conditions and `set` actions (the
+ * transfer rule has two conditions), so they are always described.
  */
 export function describeRule(
   rule: RuleEntity,

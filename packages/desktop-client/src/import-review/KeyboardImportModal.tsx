@@ -1203,6 +1203,12 @@ export function KeyboardImportModal({
     [focusedEffects, ruledFieldName],
   );
 
+  // Shared by the picker's create item and the inline button: both write
+  // the same transfer rule, so both say the same thing when it lands.
+  const transferRuleCreatedMessage = t(
+    'Rule created. This vendor will be a transfer from now on when imported into this account.',
+  );
+
   // The rules the focused row could have.
   //
   // A rule is offered only when it can be written truthfully: the
@@ -1251,6 +1257,32 @@ export function KeyboardImportModal({
       });
     }
 
+    if (focusedRules?.toTransfer) {
+      // The rule sets the target account's hidden transfer payee id. That
+      // payee's NAME is empty, so the human-readable target comes from the
+      // accounts list, looked up through the transfer account id on the
+      // matching payee.
+      const transferPayeeId = focusedRules.toTransfer.actions.find(
+        action => action.op === 'set' && action.field === 'payee',
+      )?.value;
+      const transferAccountId = review.payees.find(
+        payee => payee.id === transferPayeeId,
+      )?.transferAcct;
+      const targetName = review.accounts.find(
+        account => account.id === transferAccountId,
+      )?.name;
+      items.push({
+        kind: 'create',
+        id: 'new-transfer-rule',
+        description: targetName
+          ? t('always transfer to {{account}} in this account', {
+              account: targetName,
+            })
+          : t('always transfer this vendor in this account'),
+        rule: focusedRules.toTransfer,
+        message: transferRuleCreatedMessage,
+      });
+    }
     if (focusedRules?.vendorToPayee) {
       items.push({
         kind: 'create',
@@ -1290,9 +1322,12 @@ export function KeyboardImportModal({
     focusedRuleIds,
     focusedRules,
     payeeNames,
+    review.accounts,
+    review.payees,
     review.rules,
     ruleFieldLabel,
     t,
+    transferRuleCreatedMessage,
   ]);
 
   /**
@@ -2924,6 +2959,8 @@ export function KeyboardImportModal({
                   {focusedRules &&
                   ((focusedRules.vendorToPayee &&
                     !focusedRuledFields.has('payee')) ||
+                    (focusedRules.toTransfer &&
+                      !focusedRuledFields.has('payee')) ||
                     (focusedRules.payeeToCategory &&
                       !focusedRuledFields.has('category'))) ? (
                     <View style={{ gap: 4 }}>
@@ -2931,6 +2968,24 @@ export function KeyboardImportModal({
                         style={{ flexDirection: 'row', gap: 8 }}
                         data-testid="import-review-rules"
                       >
+                        {focusedRules.toTransfer &&
+                        !focusedRuledFields.has('payee') ? (
+                          <Button
+                            className={actionButtonClass}
+                            data-testid="import-review-rule-to-transfer"
+                            isDisabled={creatingRule}
+                            onPress={() => {
+                              const rule = focusedRules.toTransfer;
+                              if (!rule) return;
+                              void createRule(rule, transferRuleCreatedMessage);
+                              focusGrid();
+                            }}
+                          >
+                            <Trans>
+                              Always transfer this vendor in this account
+                            </Trans>
+                          </Button>
+                        ) : null}
                         {focusedRules.vendorToPayee &&
                         !focusedRuledFields.has('payee') ? (
                           <Button

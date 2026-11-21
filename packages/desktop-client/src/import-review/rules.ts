@@ -116,11 +116,13 @@ export function payeeToCategoryRule(
  * the winner is decided at random, and the review cannot tell the user
  * which one applied. That is why a rule is AMENDED rather than added.
  *
- * **The conditions are compared in order.** Every rule this module
- * writes has exactly one condition, so the order cannot matter today.
- * If the shapes ever grow a second one, a reordered duplicate would
- * slip past this check — and would reintroduce the exact tie the
- * amend exists to prevent.
+ * **The conditions are compared in order.** The rules this module writes
+ * have either one condition (vendor/category) or two in a fixed order
+ * (the transfer rule: account, then imported_payee). That order is
+ * deliberate: a reordered duplicate would slip past this check and
+ * reintroduce the exact tie the amend exists to prevent. A two-condition
+ * transfer rule can never collide with a one-condition vendor rule,
+ * because the lengths differ.
  *
  * The STAGE is not compared, and it is not part of the tie either: two
  * rules with the same conditions at different stages are ordered by
@@ -325,6 +327,55 @@ export function rowPayeeTarget(
 }
 
 /**
+ * The rule that says: when this vendor is imported into this account, it
+ * is a transfer to the target account.
+ *
+ * The `account` condition is the crux. Without it the rule would also fire
+ * on the other account's statement for the same transfer, turning that row
+ * into a transfer too and creating a SECOND pair of mirror transactions.
+ * Scoped to the source account, the other side stays an ordinary row and
+ * reconciles against the mirror by amount and date, as Actual's own docs
+ * recommend.
+ *
+ * Setting the target account's HIDDEN transfer payee id is how a transfer
+ * is expressed in the data model: core's `transfer.onInsert` sees the
+ * `transfer_acct` on that payee and creates the mirror. There is no
+ * `set-transfer` rule action, so this is the only way a rule can say it.
+ *
+ * Condition order is deliberately fixed (`account` then `imported_payee`):
+ * `ruleToWrite`'s `sameConditions` compares in index order and assumes one
+ * condition per rule, so a second condition must never be reordered.
+ */
+export function transferRule(
+  row: PreviewRow,
+  transferPayeeId: string,
+): ReviewRule {
+  return {
+    stage: 'pre',
+    conditionsOp: 'and',
+    conditions: [
+      { op: 'is', field: 'account', value: row.accountId, type: 'id' },
+      {
+        op: 'is',
+        field: 'imported_payee',
+        value: row.payeeRaw,
+        type: 'string',
+      },
+    ],
+    actions: [
+      { op: 'set', field: 'payee', value: transferPayeeId, type: 'id' },
+    ],
+  };
+}
+
+/** The rules a row can offer, each keyed by what it would teach. */
+export type RowRules = {
+  vendorToPayee?: ReviewRule;
+  payeeToCategory?: ReviewRule;
+  toTransfer?: ReviewRule;
+};
+
+/**
  * The rules a row can offer.
  *
  * A rule is offered only when it can be written truthfully:
@@ -334,13 +385,25 @@ export function rowPayeeTarget(
  *   rule names it and upstream creates it.
  * - "this payee is this category" needs a payee BY ID — that is what
  *   the condition matches on — and a category.
+ * - "always transfer this vendor in this account" needs a transfer target
+ *   whose hidden payee exists in the budget.
  */
 export function rulesForRow(
   row: PreviewRow,
   payees: readonly ReviewPayee[],
   categories: readonly ReviewCategory[],
-): { vendorToPayee?: ReviewRule; payeeToCategory?: ReviewRule } {
-  const out: { vendorToPayee?: ReviewRule; payeeToCategory?: ReviewRule } = {};
+): RowRules {
+  const out: RowRules = {};
+
+  const transferAccountId = effectiveTransferAccountId(row);
+  if (transferAccountId && row.payeeRaw.trim() !== '') {
+    const transferPayee = payees.find(
+      payee => payee.transferAcct === transferAccountId,
+    );
+    if (transferPayee) {
+      out.toTransfer = transferRule(row, transferPayee.id);
+    }
+  }
 
   const target = rowPayeeTarget(row, payees);
   if (target && row.payeeRaw.trim() !== '') {
