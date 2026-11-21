@@ -21,6 +21,10 @@
  * leg that is gone is deleted.
  */
 
+import {
+  SplitValidationError,
+  validateSplit,
+} from '@actual-app/core/server/transactions/import/review/index';
 import type { PreviewSplitLeg } from '@actual-app/core/server/transactions/import/review/index';
 import { makeChild } from '@actual-app/core/shared/transactions';
 import type { TransactionEntity } from '@actual-app/core/types/models';
@@ -68,6 +72,33 @@ function bySortOrder(
   b: Pick<TransactionEntity, 'sort_order'>,
 ): number {
   return (b.sort_order ?? 0) - (a.sort_order ?? 0);
+}
+
+/**
+ * Pure: refuse a matched split whose legs do not add up before it is
+ * written to the budget.
+ *
+ * A matched split is reconciled directly with `transactions-batch-update`,
+ * bypassing the import payload's split check — and the reconciliation
+ * REWRITES the parent's amount to the legs' sum. Without this guard an
+ * unbalanced split would silently change the amount of a transaction that
+ * was already in the budget. `targetCents` is the amount the row will hold:
+ * the rule's amount when a rule controls it, else the row's effective
+ * amount. The transfer check keeps the split/transfer exclusion that the
+ * payload enforces for new rows.
+ */
+export function validateMatchedSplit(opts: {
+  legs: readonly PreviewSplitLeg[];
+  targetCents: number;
+  isTransfer: boolean;
+}): SplitValidationError | null {
+  if (opts.isTransfer) {
+    return new SplitValidationError(
+      'SPLIT-006',
+      'SPLIT-006: a row cannot be both a transfer and a split',
+    );
+  }
+  return validateSplit(opts.legs, opts.targetCents);
 }
 
 /**

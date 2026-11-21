@@ -2073,7 +2073,12 @@ export function KeyboardImportModal({
             innerRef={bodyRef}
           >
             {review.error ? (
-              <Text style={{ color: theme.errorText }}>{review.error}</Text>
+              <Text
+                style={{ color: theme.errorText }}
+                data-testid="import-review-error"
+              >
+                {review.error}
+              </Text>
             ) : null}
 
             {/* The status line: where the review is.

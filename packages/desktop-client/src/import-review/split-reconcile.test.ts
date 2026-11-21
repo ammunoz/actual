@@ -1,7 +1,11 @@
 import type { TransactionEntity } from '@actual-app/core/types/models';
 import { describe, expect, it } from 'vitest';
 
-import { buildSplitReconciliation, legsOf } from './split-reconcile';
+import {
+  buildSplitReconciliation,
+  legsOf,
+  validateMatchedSplit,
+} from './split-reconcile';
 
 function parent(overrides: Partial<TransactionEntity> = {}): TransactionEntity {
   return {
@@ -193,5 +197,46 @@ describe('legsOf', () => {
 
   it('has nothing for a transaction that is not a split', () => {
     expect(legsOf(parent())).toEqual([]);
+  });
+});
+
+describe('validateMatchedSplit', () => {
+  const legs = [
+    { amountCents: -1500, categoryId: 'c-1' },
+    { amountCents: -1000, categoryId: 'c-2' },
+  ];
+
+  it('accepts a split whose legs add up', () => {
+    expect(
+      validateMatchedSplit({ legs, targetCents: -2500, isTransfer: false }),
+    ).toBeNull();
+  });
+
+  it('refuses legs that do not add up (SPLIT-004)', () => {
+    // This is the case that would otherwise silently rewrite the parent's
+    // amount to the legs' -2000 sum.
+    const problem = validateMatchedSplit({
+      legs,
+      targetCents: -3000,
+      isTransfer: false,
+    });
+    expect(problem?.code).toBe('SPLIT-004');
+  });
+
+  it('checks against the rule-controlled amount', () => {
+    // A rule sets the row's amount to -3000: the same legs that were fine
+    // at -2500 must now be refused.
+    expect(
+      validateMatchedSplit({ legs, targetCents: -3000, isTransfer: false }),
+    ).not.toBeNull();
+  });
+
+  it('refuses a split that is also a transfer (SPLIT-006)', () => {
+    const problem = validateMatchedSplit({
+      legs,
+      targetCents: -2500,
+      isTransfer: true,
+    });
+    expect(problem?.code).toBe('SPLIT-006');
   });
 });

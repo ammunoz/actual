@@ -1244,7 +1244,12 @@ describe('useImportReview', () => {
 
     act(() => {
       result.current.edit(0, {
-        splits: [{ amountCents: -1500, categoryId: 'c-1' }],
+        // Two legs that add up to the row's -2500: the sum guard now
+        // refuses a one-leg split before it reaches reconciliation.
+        splits: [
+          { amountCents: -1500, categoryId: 'c-1' },
+          { amountCents: -1000, categoryId: 'c-1' },
+        ],
       });
     });
 
@@ -1274,6 +1279,80 @@ describe('useImportReview', () => {
         tableOptions: expect.objectContaining({ splits: 'grouped' }),
       }),
     );
+  });
+
+  it('refuses an unbalanced split on a matched row without writing it', async () => {
+    // The split guard must run on the reconciliation path too: otherwise
+    // the legs' sum silently rewrites the matched parent's amount. The
+    // user's split stays in the review so they can fix it and retry.
+    sendMock.mockImplementation((async (name: string) => {
+      switch (name) {
+        case 'payees-get':
+          return PAYEES;
+        case 'accounts-get':
+          return ACCOUNTS;
+        case 'rules-get':
+          return RULES;
+        case 'get-categories':
+          return CATEGORIES;
+        case 'transactions-parse-file':
+          return PARSED;
+        case 'query':
+          return {
+            data: [
+              {
+                id: 'txn-1',
+                account: 'a-1',
+                date: '2026-09-07',
+                amount: -2500,
+                payee: 'p-2',
+                is_parent: true,
+                imported_id: 'FITID-1',
+                subtransactions: [],
+              },
+            ],
+            dependencies: [],
+          };
+        case 'transactions-batch-update':
+          return { added: [], updated: [], deleted: [] };
+        case 'transactions-import':
+          return {
+            updatedPreview: [],
+            added: [],
+            updated: [],
+            errors: [],
+          };
+        default:
+          throw new Error(`unexpected send: ${name}`);
+      }
+    }) as never);
+
+    const { result } = await renderReview();
+    act(() => {
+      result.current.edit(0, {
+        splits: [
+          { amountCents: -1500, categoryId: 'c-1' },
+          { amountCents: -500, categoryId: 'c-2' },
+        ],
+      });
+    });
+
+    let applied: boolean | undefined;
+    await act(async () => {
+      applied = await result.current.apply();
+    });
+
+    expect(applied).toBe(false);
+    expect(result.current.error).toContain('The legs do not add up');
+    // No budget write happened: the split is still in the review.
+    expect(sendMock).not.toHaveBeenCalledWith(
+      'transactions-batch-update',
+      expect.anything(),
+    );
+    expect(result.current.state?.rows[0].edits.splits).toEqual([
+      { amountCents: -1500, categoryId: 'c-1' },
+      { amountCents: -500, categoryId: 'c-2' },
+    ]);
   });
 
   it('undoes an edit', async () => {
