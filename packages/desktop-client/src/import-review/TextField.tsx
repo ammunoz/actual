@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { Input } from '@actual-app/components/input';
@@ -35,10 +35,14 @@ export type TextFieldProps = {
 };
 
 /**
- * A text field that commits on enter.
+ * A text field that commits on enter or on blur.
  *
  * It refuses text the caller says is not acceptable, and says why,
- * rather than committing something wrong.
+ * rather than committing something wrong. Blur committing matters for
+ * a pane of several fields: clicking "Add leg" or "Save" blurs the
+ * focused field before the button's handler runs, so the draft the
+ * handler reads holds what the user typed rather than the value the
+ * field showed when it mounted.
  */
 export function TextField({
   label,
@@ -51,6 +55,13 @@ export function TextField({
 }: TextFieldProps) {
   const [text, setText] = useState(initialText);
   const [refused, setRefused] = useState(false);
+  // The last value handed to `onCommit`. Enter commits and the following
+  // blur would otherwise commit the same text a second time — which is
+  // harmless for an amount but would fire any side effect twice. A ref
+  // (not state) also covers two commit paths firing before a re-render.
+  // `onCommit` is assumed to APPLY unconditionally: every caller here
+  // writes the value into its draft, which in turn updates `initialText`.
+  const committedText = useRef(initialText);
 
   // The field follows the value it was given when that value changes.
   //
@@ -66,17 +77,27 @@ export function TextField({
   if (initialText !== shownInitialText) {
     setShownInitialText(initialText);
     setText(initialText);
+    committedText.current = initialText;
     setRefused(false);
   }
+
+  const commit = (value: string) => {
+    if (!isValid(value)) {
+      setRefused(true);
+      return;
+    }
+    // An unacceptable value leaves the last good commit in place, so
+    // Enter followed by blur (or blur alone) commits at most once.
+    if (value === committedText.current) return;
+    committedText.current = value;
+    setRefused(false);
+    onCommit(value);
+  };
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    if (!isValid(text)) {
-      setRefused(true);
-      return;
-    }
-    onCommit(text);
+    commit(text);
   };
 
   return (
@@ -91,6 +112,7 @@ export function TextField({
           setRefused(false);
         }}
         onKeyDown={onKeyDown}
+        onUpdate={commit}
       />
       {refused && errorText ? (
         <Text style={{ color: theme.errorText }}>{errorText}</Text>
