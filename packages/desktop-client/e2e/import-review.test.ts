@@ -3229,7 +3229,7 @@ NEWFILEUID:NONE
     expect(
       importBox.y < titleBox.y + titleBox.height &&
         titleBox.y < importBox.y + importBox.height,
-      "at the dialog's 900px width, Import must share the title row",
+      'Import must share the title row at a normal desktop width',
     ).toBe(true);
 
     // Narrow must wrap rather than push the header sideways: the middle
@@ -4629,9 +4629,9 @@ NEWFILEUID:NONE
     await expect(dialog).not.toBeVisible();
   });
 
-  test('the X button asks before it throws the work away', async () => {
+  test('the Back button asks before it throws the work away', async () => {
     accountPage = await navigation.createAccount({
-      name: 'Keyboard Review X Button',
+      name: 'Keyboard Review Back Button',
       offBudget: false,
       balance: 0,
     });
@@ -4648,13 +4648,13 @@ NEWFILEUID:NONE
 
     await page.keyboard.press('a');
 
-    await dialog.getByRole('button', { name: 'Close' }).click();
+    await dialog.getByRole('button', { name: 'Back' }).click();
 
     const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
     await expect(dialog.getByText('Review import')).toBeVisible();
 
-    // The confirmation takes the keyboard: the X button has the focus
+    // The confirmation takes the keyboard: the Back button has the focus
     // after the click, and the confirmation takes it back.
     await expect(
       confirm.getByRole('button', { name: 'Keep reviewing' }),

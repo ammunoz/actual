@@ -10,18 +10,15 @@ import { View } from '@actual-app/components/view';
  * drift apart — the first mockup of the redesign got this wrong and the
  * headers did not line up with the body.
  *
- * **The widths are a budget, not a guess.** The modal is 900px. Its
- * container takes 10px of padding each side, the list's own border takes
- * 1, the content View takes 16, and the row takes 10: 826px of row.
- * Four gaps at 12px leave 778px for the columns, and the list's vertical
- * scrollbar takes about 15 of those.
- *
- * The four FIXED columns take 446, so the payee — the only flexible one —
- * gets the rest: about 332px, or about 317px once the scrollbar of a
- * long file is counted. That is enough for a payee name, and nothing
- * truncates: the only long string in the review, the file's raw vendor
- * string, is not in the list at all. It is evidence, and it lives in the
- * detail section, in full, for the row the user is on.
+ * **The widths are a budget, not a guess.** The four FIXED columns take
+ * 446px in total, plus four 12px gaps. The payee is the only flexible
+ * column: it takes whatever is left at the page's current width, with a
+ * floor so it is never squeezed to nothing on a narrow window. On the
+ * old 900px modal that left the payee about 317–332px; on the full-page
+ * review it gets the much wider remainder. Nothing truncates: the only
+ * long string in the review, the file's raw vendor string, is not in the
+ * list at all. It is evidence, and it lives in the detail section, in
+ * full, for the row the user is on.
  *
  * The date and the amount are wide enough for the RULED field as well:
  * a ruled cell carries a tag glyph and the field's padding beside the
@@ -43,7 +40,7 @@ export const REVIEW_COLUMNS = {
  * The style a column's box carries.
  *
  * The fixed columns do not shrink, so on a narrow viewport the row is
- * wider than the modal and the TABLE scrolls — once, with the header on
+ * wider than the page and the TABLE scrolls — once, with the header on
  * it — rather than every row having its own scrollbar.
  *
  * The flexible column has a floor, so the payee is never squeezed to

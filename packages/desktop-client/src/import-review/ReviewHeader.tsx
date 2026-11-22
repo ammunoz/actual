@@ -1,6 +1,7 @@
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
+import { SvgArrowLeft } from '@actual-app/components/icons/v1';
 import { Text } from '@actual-app/components/text';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
@@ -8,16 +9,14 @@ import type { TrustLevel } from '@actual-app/core/server/transactions/import/rev
 import { css } from '@emotion/css';
 import type { TFunction } from 'i18next';
 
-import { ModalCloseButton } from '#components/common/Modal';
-
 import { KeyCap } from './KeyCap';
 import { TRUST_LEVEL_KEYS, TRUST_LEVELS } from './keymap';
 
 /**
  * The id of the review's title.
  *
- * The modal is labelled by its title, so a screen reader says what the
- * dialog is instead of the app's generic "Modal dialog".
+ * The review region is labelled by its title, so a screen reader says
+ * what the page is instead of the app's generic "Modal dialog".
  */
 export const REVIEW_TITLE_ID = 'import-review-title';
 
@@ -115,15 +114,14 @@ export function ReviewHeader({
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        // The header wraps rather than overflowing: the modal is 900px
-        // wide, but it is capped at the viewport, and a narrow window
-        // must not push the Import button off the screen.
+        // The header wraps rather than overflowing: a narrow window must
+        // not push the Import button off the screen.
         flexWrap: 'wrap',
-        // The mockup's header gaps are 6 (X/Escape), 16 (to the title),
-        // 12 and 12 (title/trust label/segments). Grouping the middle
-        // three reproduces that rhythm: a flat row with 16px between
-        // every item was a few pixels too wide at 900px and pushed the
-        // Import button onto a second line.
+        // The mockup's header gaps are 16 (to the title), 12 and 12
+        // (title/trust label/segments). Grouping the middle three
+        // reproduces that rhythm: a flat row with 16px between every
+        // item was a few pixels too wide on a narrow window and pushed
+        // the Import button onto a second line.
         columnGap: 16,
         rowGap: 8,
         minHeight: 60,
@@ -131,14 +129,12 @@ export function ReviewHeader({
       }}
       data-testid="import-review-header-row"
     >
-      {/* The X closes the review, and so does Escape. The button says
-          which key does the same thing. */}
-      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-        <ModalCloseButton onPress={onClose} />
-        <KeyCap>
-          <Trans>Escape</Trans>
-        </KeyCap>
-      </View>
+      {/* Back leaves the review; Escape does the same thing through the
+          page's hotkey binding. */}
+      <Button variant="bare" onPress={onClose}>
+        <SvgArrowLeft width={10} height={10} style={{ marginRight: 5 }} />
+        <Trans>Back</Trans>
+      </Button>
 
       {/* The title and the trust control share the mockup's `header-main`
           group: 12px between its three items. It wraps on its own lines
