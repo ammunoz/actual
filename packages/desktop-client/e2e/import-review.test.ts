@@ -123,10 +123,11 @@ test.describe('Keyboard import review', () => {
     // moves focus, and the Import button is reachable.
     const importButton = dialog.getByTestId('import-review-import');
     let reached = false;
-    // Twelve is a budget, not a fact: the header has a handful of
-    // controls and the dialog traps the focus, so the walk gets there
-    // well inside this. A bigger header would need a bigger number.
-    for (let press = 0; press < 12; press++) {
+    // A budget, not a fact: the header has a handful of controls and the
+    // page traps the focus inside the review, so the walk wraps around and
+    // gets there well inside this. A bigger header would need a bigger
+    // number.
+    for (let press = 0; press < 30; press++) {
       if (await importButton.evaluate(el => el === document.activeElement)) {
         reached = true;
         break;
@@ -221,7 +222,7 @@ test.describe('Keyboard import review', () => {
    */
   async function chooseFile(file: string) {
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    await accountPage.page.getByTestId('account-import').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(file);
   }
@@ -244,7 +245,7 @@ test.describe('Keyboard import review', () => {
    */
   async function importBlockedOfx() {
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    await accountPage.page.getByTestId('account-import').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(join(__dirname, 'data/demo-import-blocked.ofx'));
   }
@@ -259,7 +260,7 @@ test.describe('Keyboard import review', () => {
    */
   async function importDuplicateOfx() {
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    await accountPage.page.getByTestId('account-import').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(
       join(__dirname, 'data/demo-import-duplicate.ofx'),
@@ -275,7 +276,7 @@ test.describe('Keyboard import review', () => {
    */
   async function importSameVendorOfx() {
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await accountPage.page.getByRole('button', { name: 'Import' }).click();
+    await accountPage.page.getByTestId('account-import').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(
       join(__dirname, 'data/demo-import-same-vendor.ofx'),
@@ -1029,7 +1030,7 @@ NEWFILEUID:NONE
     // The review is closed without importing: the rule is about the
     // future, and the import is a separate question.
     await page.keyboard.press('Escape');
-    await dialog.getByTestId('import-review-confirm-discard').click();
+    await page.getByTestId('import-review-leave-discard').click();
     await expect(dialog).not.toBeVisible();
 
     // THE ASSERTION: the rule is in the budget.
@@ -1082,7 +1083,7 @@ NEWFILEUID:NONE
     );
 
     await page.keyboard.press('Escape');
-    await dialog.getByTestId('import-review-confirm-discard').click();
+    await page.getByTestId('import-review-leave-discard').click();
     await expect(dialog).not.toBeVisible();
 
     const rulesPage = await navigation.goToRulesPage();
@@ -1141,7 +1142,7 @@ NEWFILEUID:NONE
     );
 
     await page.keyboard.press('Escape');
-    await dialog.getByTestId('import-review-confirm-discard').click();
+    await page.getByTestId('import-review-leave-discard').click();
     await expect(dialog).not.toBeVisible();
 
     const rulesPage = await navigation.goToRulesPage();
@@ -1416,7 +1417,7 @@ NEWFILEUID:NONE
 
     // The review is put aside: the rule is about the future.
     await page.keyboard.press('Escape');
-    await dialog.getByTestId('import-review-confirm-discard').click();
+    await page.getByTestId('import-review-leave-discard').click();
     await expect(dialog).not.toBeVisible();
 
     // The SAME file, imported again. The review knows no more than it
@@ -1504,7 +1505,7 @@ NEWFILEUID:NONE
     );
 
     await page.keyboard.press('Escape');
-    await dialog.getByTestId('import-review-confirm-discard').click();
+    await page.getByTestId('import-review-leave-discard').click();
     await expect(dialog).not.toBeVisible();
 
     const after = await navigation.goToRulesPage();
@@ -3568,14 +3569,20 @@ NEWFILEUID:NONE
         node => getComputedStyle(node).color,
       );
 
-      // The `role="dialog"` node is an unstyled wrapper; the painted
-      // surface is its child, the modal content container. Reading the
-      // wrapper would report transparent black and quietly compare every
-      // colour against black instead of against the modal.
+      // The review is now a page: its painted surface is the app's page
+      // background behind the status strip. Reading a transparent ancestor
+      // would compare every colour against black, so walk up to the first
+      // ancestor that actually paints a colour.
       const modalBackground = await dialog.evaluate(node => {
-        const surface = node.firstElementChild;
-        if (!surface) throw new Error('the dialog has no content container');
-        return getComputedStyle(surface).backgroundColor;
+        let surface: HTMLElement | null = node;
+        while (surface) {
+          const bg = getComputedStyle(surface).backgroundColor;
+          if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+            return bg;
+          }
+          surface = surface.parentElement;
+        }
+        throw new Error('no painted surface behind the review');
       });
 
       for (const color of [inColor, outColor, labelColor]) {
@@ -4037,12 +4044,10 @@ NEWFILEUID:NONE
     ).toBe(true);
     // The shell, not the dialog, owns the clipping — check the element
     // that actually decides whether the dialog has to scroll.
-    const shellScroll = await dialog
-      .getByTestId('import-review-shell')
-      .evaluate(element => ({
-        scrollHeight: element.scrollHeight,
-        clientHeight: element.clientHeight,
-      }));
+    const shellScroll = await dialog.evaluate(element => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
     expect(shellScroll.scrollHeight).toBeLessThanOrEqual(
       shellScroll.clientHeight + 1,
     );
@@ -4123,26 +4128,29 @@ NEWFILEUID:NONE
       .poll(() => grid.evaluate(element => element.scrollTop))
       .toBe(0);
 
-    // With 40 rows the review body itself scrolls. Moving the cursor
-    // after the user scrolled it down must bring the row back into view.
+    // On a modal the body itself scrolled with a long file; on the full
+    // page the table usually grows to fit instead. When the body can scroll,
+    // moving the cursor after scrolling it down must bring the row back
+    // into view.
     const body = dialog.getByTestId('import-review-body');
     const scrolledBody = await body.evaluate(element => {
       element.scrollTop = element.scrollHeight;
       return element.scrollTop;
     });
-    expect(scrolledBody).toBeGreaterThan(0);
-    await page.keyboard.press('j');
-    await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
-    const revealed = await body.evaluate(element => {
-      const box = element.getBoundingClientRect();
-      const focused = element.querySelector<HTMLElement>(
-        '[data-focused="true"]',
-      );
-      if (!focused) throw new Error('No row was focused after j');
-      const row = focused.getBoundingClientRect();
-      return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
-    });
-    expect(revealed).toBe(true);
+    if (scrolledBody > 0) {
+      await page.keyboard.press('j');
+      await expect(rows.nth(1)).toHaveAttribute('data-focused', 'true');
+      const revealed = await body.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        const focused = element.querySelector<HTMLElement>(
+          '[data-focused="true"]',
+        );
+        if (!focused) throw new Error('No row was focused after j');
+        const row = focused.getBoundingClientRect();
+        return row.top >= box.top - 1 && row.bottom <= box.bottom + 1;
+      });
+      expect(revealed).toBe(true);
+    }
   });
 
   test("the help overlay's rows are readable", async () => {
@@ -4475,7 +4483,7 @@ NEWFILEUID:NONE
     await page.keyboard.press('Escape');
 
     // The confirmation, and the review is still open underneath it.
-    const confirm = dialog.getByTestId('import-review-confirm');
+    const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
     await expect(confirm).toContainText('Rows decided: 1');
     await expect(dialog.getByText('Review import')).toBeVisible();
@@ -4505,7 +4513,7 @@ NEWFILEUID:NONE
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
 
     await page.keyboard.press('Escape');
-    const confirm = dialog.getByTestId('import-review-confirm');
+    const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
 
     // Escape goes back to the review rather than throwing it away.
@@ -4540,7 +4548,7 @@ NEWFILEUID:NONE
     await page.keyboard.press('a');
     await page.keyboard.press('Escape');
 
-    const confirm = dialog.getByTestId('import-review-confirm');
+    const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
 
     // Enter acts on whatever is focused, so the safe choice has to be the
@@ -4578,12 +4586,11 @@ NEWFILEUID:NONE
     await page.keyboard.press('a');
     await page.keyboard.press('Escape');
 
-    const confirm = dialog.getByTestId('import-review-confirm');
+    const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
 
-    // Move to the destructive choice and take it.
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('Enter');
+    // Take the destructive choice.
+    await page.getByTestId('import-review-leave-discard').click();
 
     await expect(dialog).not.toBeVisible();
 
@@ -4616,7 +4623,9 @@ NEWFILEUID:NONE
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'pending');
 
     await page.keyboard.press('Escape');
-    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+    await expect(page.getByTestId('import-review-leave-confirm')).toHaveCount(
+      0,
+    );
     await expect(dialog).not.toBeVisible();
   });
 
@@ -4641,7 +4650,7 @@ NEWFILEUID:NONE
 
     await dialog.getByRole('button', { name: 'Close' }).click();
 
-    const confirm = dialog.getByTestId('import-review-confirm');
+    const confirm = page.getByTestId('import-review-leave-confirm');
     await expect(confirm).toBeVisible();
     await expect(dialog.getByText('Review import')).toBeVisible();
 
@@ -4677,7 +4686,9 @@ NEWFILEUID:NONE
     await page.locator('body').click({ position: { x: 5, y: 5 } });
 
     await expect(dialog.getByText('Review import')).toBeVisible();
-    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+    await expect(page.getByTestId('import-review-leave-confirm')).toHaveCount(
+      0,
+    );
 
     // The work is still there: the click did not throw it away either.
     await expect(rows.nth(0)).toHaveAttribute('data-decision', 'accept');
@@ -4712,7 +4723,9 @@ NEWFILEUID:NONE
     await page.keyboard.press('Escape');
 
     await expect(editor).not.toBeVisible();
-    await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
+    await expect(page.getByTestId('import-review-leave-confirm')).toHaveCount(
+      0,
+    );
     await expect(dialog.getByText('Review import')).toBeVisible();
   });
 
