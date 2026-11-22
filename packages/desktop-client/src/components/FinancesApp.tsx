@@ -550,7 +550,10 @@ export function FinancesApp() {
                           {/* The Titlebar is absolutely positioned over the
                               route area; leave room for it (36px) so the
                               review's header and Import button are not
-                              covered by the notifications/help controls. */}
+                              covered by the notifications/help controls.
+                              On narrow screens the mobile header slot
+                              reserves its own space instead, so no extra
+                              top padding is needed there. */}
                           <View
                             style={{
                               height: '100%',
