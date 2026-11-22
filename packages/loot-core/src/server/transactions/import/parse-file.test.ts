@@ -6,7 +6,7 @@ import * as db from '#server/db';
 import * as prefs from '#server/prefs';
 import { amountToInteger } from '#shared/util';
 
-import { parseFile } from './parse-file';
+import { parseFile, parseOfxIdentity } from './parse-file';
 
 beforeEach(global.emptyDatabase());
 
@@ -111,6 +111,29 @@ describe('File import', () => {
     expect(errors.length).toBe(0);
     expect(await getTransactions('one')).toMatchSnapshot();
   }, 45000);
+
+  test('ofx parse reports account identities', async () => {
+    const result = await parseFile(
+      __dirname + '/../../../mocks/files/data.ofx',
+      {},
+    );
+    expect(result.ofxIdentities).toEqual(['012345678|123456789123']);
+  });
+
+  test('parseOfxIdentity reads identities without importing', async () => {
+    expect(
+      await parseOfxIdentity(__dirname + '/../../../mocks/files/data.ofx'),
+    ).toEqual(['012345678|123456789123']);
+    expect(
+      await parseOfxIdentity(
+        __dirname + '/../../../mocks/files/credit-card.ofx',
+      ),
+    ).toEqual(['Apple Card|12345|7dc6a2fd-2124-457a-a14']);
+  });
+
+  test('parseOfxIdentity rejects for a missing file', async () => {
+    await expect(parseOfxIdentity('/no/such/file.ofx')).rejects.toBeDefined();
+  });
 
   test('ofx import works (credit card)', async () => {
     await prefs.loadPrefs();
