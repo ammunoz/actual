@@ -1597,7 +1597,7 @@ export function ImportPage({
    * Close the review for good, throwing away whatever is in it.
    *
    * This is the only way to close the review WITHOUT applying it: the
-   * escape binding and the X button both come through `requestClose`, so
+   * escape binding and the Back button both come through `requestClose`, so
    * both ask first when there is something to ask about.
    */
   const confirmClose = () => {
@@ -2143,7 +2143,7 @@ export function ImportPage({
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
-          maxWidth: 760,
+          maxWidth: 960,
           margin: '24px auto',
           padding: 24,
           border: `1px solid ${theme.tableBorder}`,
@@ -2229,8 +2229,6 @@ export function ImportPage({
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
-          maxWidth: 900,
-          margin: '0 auto',
           height: '100%',
           minHeight: 0,
           overflow: 'hidden',
