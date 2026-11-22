@@ -1,12 +1,11 @@
 import {
-  OFX_IDENTITY_LAST_N_CAP,
-  type AccountRef,
-  type IdentityEntry,
   findMismatch,
+  OFX_IDENTITY_LAST_N_CAP,
   readIdentityMap,
   recordAccounts,
   suggestAccount,
 } from './ofx-identity';
+import type { AccountRef, IdentityEntry } from './ofx-identity';
 
 const OPEN: readonly AccountRef[] = [
   { id: 'checking', name: 'Checking' },
@@ -144,7 +143,12 @@ describe('findMismatch', () => {
 describe('recordAccounts', () => {
   it('increments hits for repeated imports into one account', () => {
     const first = recordAccounts(new Map(), ['A'], 'checking', 't1');
-    const second = recordAccounts(readIdentityMap(first), ['A'], 'checking', 't2');
+    const second = recordAccounts(
+      readIdentityMap(first),
+      ['A'],
+      'checking',
+      't2',
+    );
     expect(readIdentityMap(second).get('A')?.hits).toBe(2);
   });
 
@@ -204,7 +208,9 @@ describe('suggestAccount', () => {
   });
 
   it('does not suggest a closed or deleted account', () => {
-    expect(suggestAccount(entry(), [{ id: 'taxes', name: 'Taxes' }])).toBeUndefined();
+    expect(
+      suggestAccount(entry(), [{ id: 'taxes', name: 'Taxes' }]),
+    ).toBeUndefined();
     expect(suggestAccount(undefined, OPEN)).toBeUndefined();
   });
 });

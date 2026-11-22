@@ -15,10 +15,10 @@ import { Trans } from 'react-i18next';
  */
 export const HELP_LIMITATIONS = [
   <Trans key="accounts">
-    A file is imported into the account you opened the review for. If your bank
-    put two accounts in one file, they all come here: Actual&apos;s parser drops
-    the bank&apos;s account id, so the review cannot tell one statement from the
-    next.
+    A file is imported into the account you opened the review for. The review
+    reads the account details in an OFX file to warn about a mismatch and to
+    suggest an account, but it still cannot split a file that contains two bank
+    statements — those all land in the chosen account.
   </Trans>,
   <Trans key="vendor-map">
     The payee names you remember are remembered for the whole budget, not for

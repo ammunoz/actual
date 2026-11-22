@@ -75,6 +75,8 @@ import {
   buildUpdatePayload,
 } from './build-payload';
 import type { ReviewPayeeRef } from './build-payload';
+import { findMismatch, readIdentityMap, recordAccounts } from './ofx-identity';
+import type { AccountMismatch } from './ofx-identity';
 import { ruleEffectsFor } from './rule-effects';
 import type { ReportedRow, RuleEffects } from './rule-effects';
 import { ruleToWrite } from './rules';
@@ -95,12 +97,6 @@ import {
 } from './split-reconcile';
 import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
-import {
-  findMismatch,
-  readIdentityMap,
-  recordAccounts,
-  type AccountMismatch,
-} from './ofx-identity';
 import { OFX_IDENTITY_MAP_PREF, VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 import { useImportSession } from './use-import-session';
