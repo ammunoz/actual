@@ -551,7 +551,14 @@ export function FinancesApp() {
                               route area; leave room for it (36px) so the
                               review's header and Import button are not
                               covered by the notifications/help controls. */}
-                          <View style={{ paddingTop: isNarrowWidth ? 0 : 36 }}>
+                          <View
+                            style={{
+                              height: '100%',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              paddingTop: isNarrowWidth ? 0 : 36,
+                            }}
+                          >
                             <ImportPage />
                           </View>
                         </ErrorBoundary>

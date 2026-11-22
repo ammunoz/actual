@@ -2144,6 +2144,9 @@ export function ImportPage({
           flexDirection: 'column',
           width: '100%',
           maxWidth: 960,
+          // The parent is a fixed-height flex column; keep the card at its
+          // content height instead of shrinking its border on short screens.
+          flexShrink: 0,
           margin: '24px auto',
           padding: 24,
           border: `1px solid ${theme.tableBorder}`,
@@ -2217,8 +2220,10 @@ export function ImportPage({
         aria-labelledby={REVIEW_TITLE_ID}
         onKeyDownCapture={onShellKeyDown}
         style={{
-          // The page fills the route container, so the table can grow to
-          // the full viewport height instead of the modal's 90vh cap.
+          // The page fills the route container (the wrapper in
+          // FinancesApp.tsx gives it a definite height), so the table can
+          // grow to the full viewport height instead of the modal's 90vh
+          // cap.
           // Clipping here and scrolling the body below keeps the footer
           // pinned at the bottom rather than pushing it into the page's
           // scrollport.
@@ -2229,7 +2234,7 @@ export function ImportPage({
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
-          height: '100%',
+          flex: 1,
           minHeight: 0,
           overflow: 'hidden',
         }}
