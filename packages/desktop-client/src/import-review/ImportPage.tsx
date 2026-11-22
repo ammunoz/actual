@@ -1,4 +1,8 @@
-import type { ComponentType, SVGProps } from 'react';
+import type {
+  ComponentType,
+  KeyboardEvent as ReactKeyboardEvent,
+  SVGProps,
+} from 'react';
 import {
   useCallback,
   useEffect,
@@ -62,7 +66,7 @@ import { useMetadataPref } from '#hooks/useMetadataPref';
 // oxlint-disable-next-line eslint/no-restricted-imports
 import { useNavigate } from '#hooks/useNavigate';
 import { pushModal } from '#modals/modalsSlice';
-import { useDispatch, useSelector } from '#redux';
+import { useDispatch, useSelector, useStore } from '#redux';
 
 import { BankIcon } from './BankIcon';
 import { initialChainContext, nextChainField } from './chain-mode';
@@ -362,6 +366,33 @@ export function ImportPage({
   // the help, or the confirmation.
   const [pane, setPane] = useState<PaneMode>(null);
   const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+  // When an apply pushes another modal (e.g. "merge unused payees"), leave
+  // the review hidden but stay on the page: navigating would close that
+  // modal through `Modals.tsx` and lose the user's pending question.
+  const [hideAfterApply, setHideAfterApply] = useState(false);
+  const store = useStore();
+  const stackedModalCount = useSelector(
+    state => state.modals.modalStack.length,
+  );
+  useEffect(() => {
+    // An apply that raised a question (e.g. merge unused payees) kept the
+    // route in place so `Modals.tsx` would not close it. Once that question
+    // is answered, go back to the account with the imported transactions.
+    if (hideAfterApply && stackedModalCount === 0) closeReview();
+  }, [hideAfterApply, stackedModalCount, closeReview]);
+  const afterApply = useCallback(
+    (didChange: boolean) => {
+      if (!didChange) return;
+      // Read the stack NOW: the apply may have pushed a question (e.g.
+      // merge unused payees) that must survive the review going away.
+      if (store.getState().modals.modalStack.length > 0) {
+        setHideAfterApply(true);
+      } else {
+        closeReview();
+      }
+    },
+    [store, closeReview],
+  );
 
   // The `Why?` disclosure belongs to the row under the cursor. It closes
   // when the cursor moves, so an explanation of one row is never left
@@ -394,6 +425,7 @@ export function ImportPage({
   // that is no longer there.
   const gridRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const paneWasOpenRef = useRef(false);
   const pendingGridRefocusRef = useRef(false);
 
@@ -407,6 +439,38 @@ export function ImportPage({
    * action, and a scroll would take the target out from under it.
    */
   const focusGrid = () => gridRef.current?.focus({ preventScroll: true });
+
+  // As a modal the review trapped Tab inside the dialog. On a page, Tab
+  // would otherwise walk out into the sidebar while a row is under the
+  // cursor. Wrap focus at the shell's edges, but stand down while a pane
+  // or a stacked modal owns the keyboard.
+  const onShellKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.key !== 'Tab' ||
+      pane !== null ||
+      isEditingRule ||
+      leaveModalOpen
+    ) {
+      return;
+    }
+    const shell = shellRef.current;
+    if (!shell) return;
+    const focusable = Array.from(
+      shell.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   // Why the last thing the user asked for did not happen.
   //
@@ -1706,9 +1770,7 @@ export function ImportPage({
         // the rule the user just made might or might not be in the
         // import. The Import button is off for the same reason.
         if (creatingRule) break;
-        void review.apply().then(didChange => {
-          if (didChange) closeReview();
-        });
+        void review.apply().then(afterApply);
         break;
       case 'close':
         requestClose();
@@ -1966,7 +2028,8 @@ export function ImportPage({
       // The Leave dialog is a modal on top of the review, like the rule
       // editor: its own keys must be the only ones firing while it is up,
       // or a letter would still decide a row behind the dialog.
-      enabled: pane === null && !isEditingRule && !leaveModalOpen,
+      enabled:
+        pane === null && !isEditingRule && !leaveModalOpen && !hideAfterApply,
     },
   );
 
@@ -2029,12 +2092,12 @@ export function ImportPage({
   useEffect(() => {
     // The setup screen is an ordinary page: the app's own shortcuts should
     // keep working there. Only the review itself owns the keyboard.
-    if (needsSetup) return;
+    if (needsSetup || hideAfterApply) return;
     disableScope('app');
     return () => {
       enableScope('app');
     };
-  }, [enableScope, disableScope, needsSetup]);
+  }, [enableScope, disableScope, needsSetup, hideAfterApply]);
 
   const isLoading = review.status === 'parsing' || review.status === 'applying';
 
@@ -2065,6 +2128,13 @@ export function ImportPage({
   const ruledRowCount = rows.filter(
     row => visibleEffectsFor(review.ruleEffects, row).length > 0,
   ).length;
+
+  if (hideAfterApply) {
+    // The review is done and a modal it raised is still open. Do not paint
+    // the review behind it; the route stays put so the modal is not closed
+    // by `Modals.tsx`'s route-change handler.
+    return null;
+  }
 
   if (needsSetup) {
     return (
@@ -2141,9 +2211,11 @@ export function ImportPage({
   return (
     <>
       <View
+        ref={shellRef}
         data-testid="import-review-shell"
         role="region"
         aria-labelledby={REVIEW_TITLE_ID}
+        onKeyDownCapture={onShellKeyDown}
         style={{
           // The page fills the route container, so the table can grow to
           // the full viewport height instead of the modal's 90vh cap.
@@ -2151,6 +2223,9 @@ export function ImportPage({
           // pinned at the bottom rather than pushing it into the page's
           // scrollport.
           position: 'relative',
+          // The modal used to paint a white surface; keep the same surface
+          // on the page so the status text keeps its contrast against it.
+          backgroundColor: theme.tableBackground,
           display: 'flex',
           flexDirection: 'column',
           width: '100%',
@@ -2219,9 +2294,7 @@ export function ImportPage({
             pane?.kind === 'transfer'
           }
           onApply={() => {
-            void review.apply().then(didChange => {
-              if (didChange) closeReview();
-            });
+            void review.apply().then(afterApply);
           }}
           onClose={requestClose}
         />

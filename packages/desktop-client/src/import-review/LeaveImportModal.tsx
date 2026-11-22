@@ -1,3 +1,6 @@
+import { useRef } from 'react';
+import type { KeyboardEvent } from 'react';
+import { useHotkeys } from 'react-hotkeys-hook';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -38,6 +41,30 @@ export function LeaveImportModal({
   onDiscardAndLeave,
 }: LeaveImportModalProps) {
   const { t } = useTranslation();
+  const keepRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+  const discardRef = useRef<HTMLButtonElement>(null);
+
+  // The old in-page confirmation moved between its two choices with the
+  // arrow keys. Keep that here: the safe choice starts focused, and arrows
+  // step through the three in order.
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+    const back = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+    if (!forward && !back) return;
+    event.preventDefault();
+    const order = [keepRef.current, saveRef.current, discardRef.current];
+    const current = order.indexOf(document.activeElement as HTMLButtonElement);
+    const next = forward
+      ? Math.min(current + 1, order.length - 1)
+      : Math.max(current - 1, 0);
+    order[next]?.focus();
+  };
+
+  // The review used to show its confirmation as an in-page pane whose own
+  // Escape binding went back to the review. Keep that behaviour: Escape
+  // here means "keep reviewing", never "discard".
+  useHotkeys('escape', onKeep, { enableOnFormTags: true });
 
   return (
     <Modal
@@ -49,7 +76,11 @@ export function LeaveImportModal({
       {() => (
         <>
           <ModalHeader title={t('Leave this import?')} />
-          <View style={{ lineHeight: 1.5, gap: 12 }}>
+          <View
+            data-testid="import-review-leave-confirm"
+            onKeyDown={onKeyDown}
+            style={{ lineHeight: 1.5, gap: 12 }}
+          >
             <Text style={{ color: theme.tableHeaderText }}>
               {t('Rows decided: {{decided}} · Rows edited: {{edited}}', {
                 decided,
@@ -71,14 +102,24 @@ export function LeaveImportModal({
               }}
             >
               <InitialFocus>
-                <Button onPress={onKeep}>
+                <Button
+                  ref={keepRef}
+                  data-testid="import-review-leave-keep"
+                  onPress={onKeep}
+                >
                   <Trans>Keep reviewing</Trans>
                 </Button>
               </InitialFocus>
-              <Button onPress={onSaveAndLeave}>
+              <Button
+                ref={saveRef}
+                data-testid="import-review-leave-save"
+                onPress={onSaveAndLeave}
+              >
                 <Trans>Save &amp; leave</Trans>
               </Button>
               <Button
+                ref={discardRef}
+                data-testid="import-review-leave-discard"
                 style={{ color: theme.errorText }}
                 onPress={onDiscardAndLeave}
               >

@@ -339,7 +339,7 @@ test.describe('Accounts', () => {
 
     async function importRows(rows: string[]) {
       const fileChooserPromise = page.waitForEvent('filechooser');
-      await page.getByRole('button', { name: 'Import' }).click();
+      await page.getByTestId('account-import').click();
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles({
         name: 'transactions.csv',
@@ -548,7 +548,7 @@ test.describe('Accounts', () => {
 
     async function importCsv(screenshot = false) {
       const fileChooserPromise = page.waitForEvent('filechooser');
-      await accountPage.page.getByRole('button', { name: 'Import' }).click();
+      await accountPage.page.getByTestId('account-import').click();
 
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(join(__dirname, 'data/test.csv'));
@@ -572,7 +572,7 @@ test.describe('Accounts', () => {
 
     test('preserves QIF categories in preview and imported transactions', async () => {
       const fileChooserPromise = page.waitForEvent('filechooser');
-      await accountPage.page.getByRole('button', { name: 'Import' }).click();
+      await accountPage.page.getByTestId('account-import').click();
 
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(join(__dirname, 'data/qif-categories.qif'));
@@ -599,7 +599,7 @@ test.describe('Accounts', () => {
       await importCsv(false);
 
       const fileChooserPromise = page.waitForEvent('filechooser');
-      await accountPage.page.getByRole('button', { name: 'Import' }).click();
+      await accountPage.page.getByTestId('account-import').click();
 
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(join(__dirname, 'data/test.csv'));
@@ -623,7 +623,7 @@ test.describe('Accounts', () => {
     test('imports a new transaction when an unchecked match has the same amount', async () => {
       async function openCsv(content: string) {
         const fileChooserPromise = page.waitForEvent('filechooser');
-        await accountPage.page.getByRole('button', { name: 'Import' }).click();
+        await accountPage.page.getByTestId('account-import').click();
         const fileChooser = await fileChooserPromise;
         await fileChooser.setFiles({
           name: 'same-amount.csv',
@@ -671,7 +671,7 @@ test.describe('Accounts', () => {
 
     test('import notes checkbox is not shown for CSV files', async () => {
       const fileChooserPromise = page.waitForEvent('filechooser');
-      await accountPage.page.getByRole('button', { name: 'Import' }).click();
+      await accountPage.page.getByTestId('account-import').click();
 
       const fileChooser = await fileChooserPromise;
       await fileChooser.setFiles(join(__dirname, 'data/test.csv'));

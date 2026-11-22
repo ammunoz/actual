@@ -547,7 +547,13 @@ export function FinancesApp() {
                           FallbackComponent={FeatureErrorFallback}
                           resetKeys={[location.pathname]}
                         >
-                          <ImportPage />
+                          {/* The Titlebar is absolutely positioned over the
+                              route area; leave room for it (36px) so the
+                              review's header and Import button are not
+                              covered by the notifications/help controls. */}
+                          <View style={{ paddingTop: isNarrowWidth ? 0 : 36 }}>
+                            <ImportPage />
+                          </View>
                         </ErrorBoundary>
                       }
                     />
