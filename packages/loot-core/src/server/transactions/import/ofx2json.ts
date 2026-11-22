@@ -12,9 +12,19 @@ type OFXTransaction = {
   type: string;
 };
 
-type OFXParseResult = {
+export type OFXParseResult = {
   headers: Record<string, unknown>;
   transactions: OFXTransaction[];
+  /**
+   * Bank-account identities declared by the file, one per statement.
+   *
+   * A file can contain several statements, and a single statement may omit
+   * its institution or bank details. Each identity is a stable key made from
+   * the bank id and account id (`BANKID|ACCTID`) when both are present, or
+   * the institution and account id (`ORG|FID|ACCTID`) otherwise. Entries with
+   * no usable identity are left out entirely.
+   */
+  ofxIdentities: string[];
 };
 
 function sgml2Xml(sgml) {
@@ -102,6 +112,95 @@ function getAsArray(value) {
   return Array.isArray(value) ? value : value === undefined ? [] : [value];
 }
 
+/**
+ * The financial institution declared by the file's sign-on response.
+ *
+ * OFX calls the institution id `FID` (there is no `FIID` element), paired
+ * with the human-readable `ORG`. Both may be absent — many banks omit the
+ * whole `FI` block — so callers must treat this as optional.
+ */
+function getOfxFi(data): { ORG?: string; FID?: string } | undefined {
+  return data?.['OFX']?.['SIGNONMSGSRSV1']?.['SONRS']?.['FI'];
+}
+
+function normalizeOfxValue(value): string {
+  return value == null ? '' : String(value).trim();
+}
+
+/**
+ * Build the identity for one statement's account id.
+ *
+ * A bank statement supplies `BANKID` and `ACCTID`, which together identify
+ * the account (`BANKID|ACCTID`) — the bank id alone is not enough, since one
+ * bank has many accounts. Credit-card and investment statements have no
+ * `BANKID`, so their `ACCTID` is paired with the file's `ORG`/`FID` instead.
+ */
+function buildOfxIdentity(
+  accountId: string,
+  bankId: string,
+  fi: { ORG?: string; FID?: string } | undefined,
+): string | undefined {
+  if (!accountId) return undefined;
+  if (bankId) return `${bankId}|${accountId}`;
+  const org = normalizeOfxValue(fi?.ORG);
+  const fid = normalizeOfxValue(fi?.FID);
+  if (!org || !fid) return undefined;
+  return `${org}|${fid}|${accountId}`;
+}
+
+/**
+ * Collect the identities declared by ALL statement blocks in the file.
+ *
+ * `getStmtTrn` deliberately dispatches to a single walker, which would miss
+ * statements of other types in a mixed file. Identity collection does not
+ * share that limitation: it walks bank, credit-card and investment blocks
+ * independently so an account is not silently overlooked.
+ */
+function getOfxIdentities(data): string[] {
+  const ofx = data?.['OFX'];
+  if (!ofx) return [];
+  const fi = getOfxFi(data);
+  const identities: string[] = [];
+
+  for (const stmtTrnRs of getAsArray(ofx['BANKMSGSRSV1']?.['STMTTRNRS'])) {
+    const from = stmtTrnRs?.['STMTRS']?.['BANKACCTFROM'];
+    const identity = buildOfxIdentity(
+      normalizeOfxValue(from?.['ACCTID']),
+      normalizeOfxValue(from?.['BANKID']),
+      fi,
+    );
+    if (identity) identities.push(identity);
+  }
+
+  for (const stmtTrnRs of getAsArray(
+    ofx['CREDITCARDMSGSRSV1']?.['CCSTMTTRNRS'],
+  )) {
+    const from = stmtTrnRs?.['CCSTMTRS']?.['CCACCTFROM'];
+    const identity = buildOfxIdentity(
+      normalizeOfxValue(from?.['ACCTID']),
+      '',
+      fi,
+    );
+    if (identity) identities.push(identity);
+  }
+
+  for (const stmtTrnRs of getAsArray(
+    ofx['INVSTMTMSGSRSV1']?.['INVSTMTTRNRS'],
+  )) {
+    // Investment statements identify the account with `INVACCTFROM`, an
+    // InvestmentAccount aggregate carrying ACCTID (and BROKERID).
+    const from = stmtTrnRs?.['INVSTMTRS']?.['INVACCTFROM'];
+    const accountId =
+      typeof from === 'object' && from != null
+        ? normalizeOfxValue(from['ACCTID'])
+        : normalizeOfxValue(from);
+    const identity = buildOfxIdentity(accountId, '', fi);
+    if (identity) identities.push(identity);
+  }
+
+  return identities;
+}
+
 function mapOfxTransaction(stmtTrn): OFXTransaction {
   // YYYYMMDDHHMMSS format. We just need the date.
   const dtPosted = stmtTrn['DTPOSTED'];
@@ -186,5 +285,6 @@ export async function ofx2json(
   return {
     headers,
     transactions: getStmtTrn(dataParsed).map(mapOfxTransaction),
+    ofxIdentities: getOfxIdentities(dataParsed),
   };
 }
