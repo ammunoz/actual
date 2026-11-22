@@ -93,6 +93,8 @@ type ParseError = { message: string; internal: string };
 export type ParseFileResult = {
   errors: ParseError[];
   transactions?: Transaction[];
+  /** Bank-account identities declared by an OFX file, one per statement. */
+  ofxIdentities?: string[];
 };
 
 export type ParseFileOptions = {
@@ -266,6 +268,7 @@ async function parseOFX(
 
   return {
     errors,
+    ofxIdentities: data.ofxIdentities,
     transactions: data.transactions.map(trans => {
       const parsedAmount = parseOfxAmount(trans.amount);
       if (parsedAmount === null) {
@@ -289,6 +292,20 @@ async function parseOFX(
       };
     }),
   };
+}
+
+/**
+ * Read the account identities from an OFX file without the review-time
+ * amount/payee conversion. The XML is still parsed internally; this skips
+ * only `parseOFX`'s shaping of transactions into import rows. The setup
+ * screen uses it to suggest a target account before the full review loads.
+ * Errors reject: callers fall back to no suggestion. Uses the same
+ * byte-decoding path as `parseOFX`.
+ */
+export async function parseOfxIdentity(filepath: string): Promise<string[]> {
+  const contents = await fs.readFile(filepath, 'binary');
+  const data = await ofx2json(contents);
+  return data.ofxIdentities;
 }
 
 async function parseCAMT(
