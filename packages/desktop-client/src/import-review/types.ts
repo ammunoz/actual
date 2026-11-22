@@ -148,3 +148,10 @@ export const KEYBOARD_MODE_PREF = 'import-review.keyboard-mode';
  * The synced preference that holds the vendor dictionary.
  */
 export const VENDOR_MAP_PREF = 'import-review.vendor-map';
+
+/**
+ * The synced preference holding the map from OFX account identities to the
+ * accounts they were last imported into. A warning aid and a picker default,
+ * not a rule: it never changes where rows are imported.
+ */
+export const OFX_IDENTITY_MAP_PREF = 'import-review.ofx-identity-map';
