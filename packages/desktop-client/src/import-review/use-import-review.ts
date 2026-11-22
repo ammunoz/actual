@@ -192,8 +192,14 @@ export type UseImportReviewOpts = {
    * file to read: the review continues where it was left.
    */
   session?: ImportReviewSession | undefined;
-  /** Called after a successful apply, with whether anything changed. */
-  onImported: (didChange: boolean) => void;
+  /**
+   * Called after a successful apply, with whether anything changed.
+   *
+   * Optional: the standalone page does not need it — the account table is a
+   * LiveQuery that refreshes itself from sync events. Kept for callers that
+   * still want an explicit signal.
+   */
+  onImported?: ((didChange: boolean) => void) | undefined;
 };
 
 /**
@@ -1101,6 +1107,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   // on a trust-level change would throw away every decision the user had
   // made.
   useEffect(() => {
+    // The standalone page renders a setup screen before a file or account
+    // has been chosen. There is nothing to parse yet — and `parse-file`
+    // would reject an empty path — so do not call the server on that screen.
+    if (!filename || !accountId) return;
     let cancelled = false;
 
     /**
@@ -2169,7 +2179,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           // The work is in the budget now, so there is nothing left to
           // pick up later.
           clearFromStore();
-          onImported(true);
+          onImported?.(true);
           return true;
         }
         // Every row was dropped or held back, so there was nothing to
@@ -2300,7 +2310,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // the preference re-parses the file and throws away the very
       // decisions that produced the entries.
       writeVendorMap(state);
-      onImported(true);
+      onImported?.(true);
       return true;
     }
 
@@ -2356,7 +2366,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   }, [accountId, filename, focusedIndex, saveToStore, state, trustLevel]);
 
   const close = useCallback(() => {
-    onImported(false);
+    onImported?.(false);
   }, [onImported]);
 
   // What the gate says about each row, and what the review adds up to.

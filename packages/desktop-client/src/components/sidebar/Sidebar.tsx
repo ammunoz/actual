@@ -1,10 +1,11 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { SvgAdd } from '@actual-app/components/icons/v1';
+import { SvgAdd, SvgUpload } from '@actual-app/components/icons/v1';
 import { View } from '@actual-app/components/view';
 
 import { useGlobalPref } from '#hooks/useGlobalPref';
+import { useNavigate } from '#hooks/useNavigate';
 import { replaceModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
 
@@ -19,6 +20,7 @@ import { ToggleButton } from './ToggleButton';
 export function Sidebar() {
   const { t } = useTranslation();
   const dispatch = useDispatch();
+  const navigate = useNavigate();
   const sidebar = useSidebar();
   const [isFloating = false, setFloatingSidebarPref] =
     useGlobalPref('floatingSidebar');
@@ -53,6 +55,12 @@ export function Sidebar() {
 
         <SecondaryButtons
           buttons={[
+            {
+              title: t('Import'),
+              Icon: SvgUpload,
+              onClick: () => void navigate('/import'),
+              dataTestId: 'sidebar-import',
+            },
             {
               title: t('Add account'),
               Icon: SvgAdd,

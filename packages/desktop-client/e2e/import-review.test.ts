@@ -72,7 +72,7 @@ test.describe('Keyboard import review', () => {
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -115,7 +115,7 @@ test.describe('Keyboard import review', () => {
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-row')).toHaveCount(3);
 
     // `tab` used to be the cycle binding, so it was prevented and NO
@@ -163,7 +163,7 @@ test.describe('Keyboard import review', () => {
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -427,7 +427,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog).toBeVisible();
     // The review's own header, not Actual's import modal.
     await expect(dialog.getByText('Review import')).toBeVisible();
@@ -480,7 +480,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     // The three rows from the fixture. Each name appears twice: once as
@@ -518,7 +518,7 @@ NEWFILEUID:NONE
 
     // The first import puts the three transactions in the budget.
     await importOfx();
-    let dialog = page.getByRole('dialog');
+    let dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
     await dialog.getByRole('button', { name: 'Import' }).click();
     await expect(dialog).not.toBeVisible();
@@ -529,7 +529,7 @@ NEWFILEUID:NONE
     // the review has to recognise the transactions that are already in the
     // budget and update them in place.
     await importOfx();
-    dialog = page.getByRole('dialog');
+    dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -562,9 +562,7 @@ NEWFILEUID:NONE
     // question alone: it is still the user's to answer.
     const mergeModal = page.getByTestId('merge-unused-payees-modal');
     await expect(mergeModal).toBeVisible();
-    await expect(
-      page.getByTestId('keyboard-import-transactions-modal'),
-    ).not.toBeVisible();
+    await expect(page.getByTestId('import-review-shell')).toHaveCount(0);
 
     await mergeModal.getByRole('button', { name: 'Do nothing' }).click();
     await expect(mergeModal).not.toBeVisible();
@@ -593,7 +591,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -620,7 +618,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -636,9 +634,7 @@ NEWFILEUID:NONE
     await expect(editor).not.toBeVisible();
 
     await page.keyboard.press('w');
-    await expect(
-      page.getByTestId('keyboard-import-transactions-modal'),
-    ).not.toBeVisible();
+    await expect(page.getByTestId('import-review-shell')).toHaveCount(0);
 
     // Nothing was imported: the review was put aside, not applied.
     await expect(accountPage.transactionTableRow).toHaveCount(0);
@@ -669,7 +665,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -713,7 +709,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -739,7 +735,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -770,7 +766,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -795,7 +791,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const hints = dialog.getByTestId('import-review-hints');
@@ -835,7 +831,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -877,7 +873,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importDuplicateOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -910,7 +906,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const hints = dialog.getByTestId('import-review-hints');
@@ -945,7 +941,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -997,7 +993,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -1068,7 +1064,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1112,7 +1108,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1174,7 +1170,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1276,7 +1272,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1392,7 +1388,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1481,7 +1477,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importSameVendorOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(2);
 
@@ -1534,7 +1530,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -1574,7 +1570,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -1598,7 +1594,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -1634,7 +1630,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -1683,7 +1679,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1749,7 +1745,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
     const editor = dialog.getByTestId('import-review-editor');
@@ -1791,7 +1787,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
     const editor = dialog.getByTestId('import-review-editor');
@@ -1829,7 +1825,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1859,7 +1855,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1906,7 +1902,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1960,7 +1956,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -1983,7 +1979,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2012,7 +2008,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -2048,7 +2044,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -2091,7 +2087,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -2176,7 +2172,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2213,7 +2209,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2262,7 +2258,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2317,7 +2313,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2354,7 +2350,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2498,7 +2494,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importDuplicateOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(2);
 
@@ -2559,7 +2555,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importSameVendorOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(2);
 
@@ -2623,7 +2619,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importSameVendorOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rules = dialog.getByTestId('import-review-rules-zone');
     await expect(rules).toBeVisible();
     const lines = rules.getByTestId('import-review-ruled-field');
@@ -2669,7 +2665,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const reason = dialog.getByTestId('import-review-verdict');
     await expect(reason).toBeVisible();
 
@@ -2739,7 +2735,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const details = dialog.getByTestId('import-review-details');
     await expect(details).toBeVisible();
 
@@ -2825,7 +2821,7 @@ NEWFILEUID:NONE
     // them is ruled. The region must be the same size for all three.
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2876,7 +2872,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithRows(40);
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(40);
 
@@ -2918,7 +2914,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -2951,7 +2947,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-row')).toHaveCount(3);
 
     // No rule touched this row, and its payee is not settled, so the blank
@@ -3013,7 +3009,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importSameVendorOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(2);
 
@@ -3107,7 +3103,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
@@ -3132,7 +3128,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const header = dialog.getByTestId('import-review-header');
@@ -3179,7 +3175,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     // The heading, not the text: the review says "Importing into {the
     // account}", and an account called "…Review Import…" would match a
     // plain text search for the title as well.
@@ -3256,7 +3252,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3296,7 +3292,7 @@ NEWFILEUID:NONE
     // rows: the trust level holds some of them back.
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     // The heading, not the text: the review says "Importing into {the
     // account}", and an account called "…Review Import…" would match a
     // plain text search for the title as well.
@@ -3341,7 +3337,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3456,7 +3452,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3542,7 +3538,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const sumIn = dialog.getByTestId('import-review-sum-in');
     const sumOut = dialog.getByTestId('import-review-sum-out');
     const label = dialog.getByTestId('import-review-amount-label');
@@ -3607,7 +3603,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3663,7 +3659,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3718,7 +3714,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -3798,7 +3794,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
     const grid = dialog.getByTestId('import-review-grid');
 
@@ -3882,7 +3878,7 @@ NEWFILEUID:NONE
     // LIST has to scroll. A file small enough to fit would prove nothing.
     await importOfxWithRows(60);
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -3958,7 +3954,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithRows(40);
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const grid = dialog.getByTestId('import-review-grid');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(40);
@@ -4022,7 +4018,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
     const hints = dialog.getByTestId('import-review-hints');
@@ -4085,7 +4081,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithRows(40);
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const grid = dialog.getByTestId('import-review-grid');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(40);
@@ -4160,7 +4156,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
     // The hint strip only appears once the review has parsed and rendered
     // its rows, so waiting for it is how the test knows the modal's own
@@ -4211,7 +4207,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-hints')).toBeVisible();
 
     await page.keyboard.press('Shift+Slash');
@@ -4267,7 +4263,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4303,7 +4299,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4337,7 +4333,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4368,7 +4364,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4392,7 +4388,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4419,7 +4415,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     // The account page binds `t` to "add transaction", and the review
@@ -4444,7 +4440,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     // Nothing has been decided or edited, so there is nothing to lose and
@@ -4466,7 +4462,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4499,7 +4495,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4535,7 +4531,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4573,7 +4569,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4606,7 +4602,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4635,7 +4631,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4667,7 +4663,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4675,12 +4671,10 @@ NEWFILEUID:NONE
 
     await page.keyboard.press('a');
 
-    // A click outside the dialog used to dismiss it and throw the work
-    // away with it. The click lands on the overlay behind the dialog, in
-    // the corner the dialog does not cover.
-    await page
-      .getByTestId('keyboard-import-transactions-modal')
-      .click({ position: { x: 5, y: 5 } });
+    // A click outside the review used to dismiss the modal and throw the
+    // work away with it. The page has no overlay, but a click on the page
+    // outside the review must still leave the review and its work alone.
+    await page.locator('body').click({ position: { x: 5, y: 5 } });
 
     await expect(dialog.getByText('Review import')).toBeVisible();
     await expect(dialog.getByTestId('import-review-confirm')).toHaveCount(0);
@@ -4700,7 +4694,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4733,7 +4727,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4769,7 +4763,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4801,7 +4795,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4843,7 +4837,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4902,7 +4896,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4944,7 +4938,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -4999,7 +4993,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5040,7 +5034,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5090,7 +5084,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5124,7 +5118,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5179,7 +5173,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5225,7 +5219,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5269,7 +5263,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithPayee('TRANSFER TO Ally Savings');
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(1);
     // The prefix is stripped and the residual names an account, so the row
@@ -5289,7 +5283,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithPayee('ONLINE TRANSFER TO SOMEWHERE UNKNOWN');
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(1);
     // The warning is shown but NOTHING is prefilled: a false positive must
@@ -5314,7 +5308,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfxWithPayee('ONLINE TRANSFER TO Ally Savings');
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(1);
     await expect(rows.nth(0)).toContainText('Ally Savings');
@@ -5346,7 +5340,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     await page.keyboard.press('Shift+Slash');
@@ -5373,7 +5367,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(
       dialog.getByRole('heading', { name: 'Review import' }),
     ).toBeVisible();
@@ -5416,7 +5410,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importBlockedOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
 
     const rows = dialog.getByTestId('import-review-row');
@@ -5463,7 +5457,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-details')).toBeVisible();
 
     const transaction = dialog.getByTestId('import-review-transaction');
@@ -5521,7 +5515,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-details')).toBeVisible();
 
     // At desktop widths each column owns its scroll. On the default rows
@@ -5595,7 +5589,7 @@ NEWFILEUID:NONE
     await enableKeyboardReview();
     await importOfx();
 
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByTestId('import-review-details')).toBeVisible();
 
     // Two tight targets, not the whole page: the detail region carries the

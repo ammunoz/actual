@@ -3,18 +3,20 @@
  *
  * This is the single seam between Actual's own import flow and ours. It
  * lives in our code so that the decision — which experience, for which
- * file, under which preference — is ours, and upstream's `Account.tsx` only
- * has to ask for "an import modal".
+ * file, under which preference — is ours, and upstream's `Account.tsx`
+ * only has to ask for "an import".
  *
  * When the feature is off, or the file is not an OFX/QFX file, this returns
  * Actual's own modal descriptor, byte-for-byte identical to what upstream
  * would have pushed. That is what makes the feature safe to ship opt-in:
  * an upstream user's experience does not change at all.
+ *
+ * With the feature on, it returns a NAVIGATION descriptor for the standalone
+ * `/import` page instead of a modal descriptor.
  */
 
 import { useCallback } from 'react';
 
-import type { ImportReviewSession } from './session';
 import { KEYBOARD_MODE_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 
@@ -22,32 +24,23 @@ import { useCustomSyncedPref } from './use-custom-synced-pref';
 const OFX_EXTENSIONS = ['.ofx', '.qfx'];
 
 /**
- * The modal descriptor, as a discriminated union so that a consumer can
- * narrow on `name` and get the right `options` type. It has to be assignable
- * to Actual's own `Modal` union, which is discriminated the same way.
+ * The import destination: either a navigation to the standalone review
+ * page, or Actual's own import modal.
  */
 export type ImportModalDescriptor =
   | {
-      name: 'import-transactions';
-      options: {
-        accountId: string;
-        filename: string;
-        onImported: (didChange: boolean) => void;
-      };
+      kind: 'page';
+      path: string;
     }
   | {
-      name: 'keyboard-import-transactions';
-      options: {
-        accountId: string;
-        filename: string;
-        /**
-         * The saved review to pick up, instead of a file.
-         *
-         * A session holds the rows that were already parsed, so there is
-         * no file to read: the review continues where it was left.
-         */
-        session?: ImportReviewSession | undefined;
-        onImported: (didChange: boolean) => void;
+      kind: 'modal';
+      modal: {
+        name: 'import-transactions';
+        options: {
+          accountId: string;
+          filename: string;
+          onImported: (didChange: boolean) => void;
+        };
       };
     };
 
@@ -64,7 +57,7 @@ export function isKeyboardReviewFile(filename: string): boolean {
 }
 
 /**
- * Build the modal descriptor for an import.
+ * Build the import descriptor.
  *
  * `keyboardMode` is the value of the opt-in preference. When it is off, or
  * the file is not an OFX file, Actual's own modal is used.
@@ -74,27 +67,24 @@ export function buildImportModal(
   filename: string,
   onImported: (didChange: boolean) => void,
   keyboardMode: boolean,
-  session?: ImportReviewSession | undefined,
 ): ImportModalDescriptor {
   if (keyboardMode && isKeyboardReviewFile(filename)) {
     return {
-      name: 'keyboard-import-transactions',
-      options: { accountId, filename, onImported, session },
+      kind: 'page',
+      path: `/import?account=${encodeURIComponent(accountId)}&file=${encodeURIComponent(filename)}`,
     };
   }
   return {
-    name: 'import-transactions',
-    options: { accountId, filename, onImported },
+    kind: 'modal',
+    modal: {
+      name: 'import-transactions',
+      options: { accountId, filename, onImported },
+    },
   };
 }
 
 /**
  * The hook form: reads the opt-in preference and returns the descriptor.
- *
- * `SyncedPrefs` does NOT have a catch-all: `keyof` collapses to the literal
- * union of the known keys, so `useSyncedPref` rejects a key this feature
- * invents. `useCustomSyncedPref` confines that cast to one file, so the
- * preference types upstream owns stay untouched.
  */
 export function useOpenImportModalFor(): (
   accountId: string,

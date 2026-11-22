@@ -6,8 +6,8 @@
  * surface with Actual's code small and stable across rebases.
  */
 
-export { KeyboardImportModal } from './KeyboardImportModal';
-export type { KeyboardImportModalProps } from './KeyboardImportModal';
+export { ImportPage } from './ImportPage';
+export type { ImportPageProps } from './ImportPage';
 
 export {
   buildImportModal,

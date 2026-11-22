@@ -62,6 +62,8 @@ import { useCategories } from '#hooks/useCategories';
 import { useDateFormat } from '#hooks/useDateFormat';
 import { useFormat } from '#hooks/useFormat';
 import { useLocalPref } from '#hooks/useLocalPref';
+// oxlint-disable-next-line eslint/no-restricted-imports
+import { useNavigate } from '#hooks/useNavigate';
 import { usePayees } from '#hooks/usePayees';
 import { getSchedulesQuery } from '#hooks/useSchedules';
 import { SelectedProviderWithItems } from '#hooks/useSelected';
@@ -233,6 +235,8 @@ type AccountInternalProps = {
     filename: string,
     onImported: (didChange: boolean) => void,
   ) => ImportModalDescriptor;
+  /** Navigate to the standalone import page. */
+  navigateToImport: (path: string) => void;
   filterConditions: RuleConditionEntity[];
   showBalances?: boolean;
   showNetWorthChart: boolean;
@@ -696,19 +700,20 @@ class AccountInternal extends PureComponent<
 
       if (res) {
         if (accountId && res?.length > 0) {
-          this.props.dispatch(
-            pushModal({
-              modal: this.props.openImportModalFor(
-                accountId,
-                res[0],
-                (didChange: boolean) => {
-                  if (didChange) {
-                    this.fetchTransactions();
-                  }
-                },
-              ),
-            }),
+          const descriptor = this.props.openImportModalFor(
+            accountId,
+            res[0],
+            (didChange: boolean) => {
+              if (didChange) {
+                this.fetchTransactions();
+              }
+            },
           );
+          if (descriptor.kind === 'page') {
+            this.props.navigateToImport(descriptor.path);
+          } else {
+            this.props.dispatch(pushModal({ modal: descriptor.modal }));
+          }
         }
       }
     }
@@ -2095,6 +2100,7 @@ type AccountHackProps = Omit<
   | 'dispatch'
   | 'splitsExpandedDispatch'
   | 'openImportModalFor'
+  | 'navigateToImport'
   | 'onBatchEdit'
   | 'onBatchDuplicate'
   | 'onBatchLinkSchedule'
@@ -2116,12 +2122,14 @@ function AccountHack(props: AccountHackProps) {
   } = useTransactionBatchActions();
 
   const openImportModalFor = useOpenImportModalFor();
+  const navigateToImport = useNavigate();
 
   return (
     <AccountInternal
       dispatch={dispatch}
       splitsExpandedDispatch={splitsExpandedDispatch}
       openImportModalFor={openImportModalFor}
+      navigateToImport={path => void navigateToImport(path)}
       onBatchEdit={onBatchEdit}
       onBatchDuplicate={onBatchDuplicate}
       onBatchLinkSchedule={onBatchLinkSchedule}

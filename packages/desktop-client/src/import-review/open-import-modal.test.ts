@@ -24,32 +24,37 @@ describe('buildImportModal', () => {
   };
 
   it('uses Actual own modal when the feature is off', () => {
-    const modal = buildImportModal('a-1', '/tmp/t.ofx', onImported, false);
-    expect(modal.name).toBe('import-transactions');
-    expect(modal.options.accountId).toBe('a-1');
-    expect(modal.options.filename).toBe('/tmp/t.ofx');
+    const descriptor = buildImportModal('a-1', '/tmp/t.ofx', onImported, false);
+    expect(descriptor.kind).toBe('modal');
+    if (descriptor.kind !== 'modal') return;
+    expect(descriptor.modal.name).toBe('import-transactions');
+    expect(descriptor.modal.options.accountId).toBe('a-1');
+    expect(descriptor.modal.options.filename).toBe('/tmp/t.ofx');
   });
 
   it('uses Actual own modal for a non-OFX file even when the feature is on', () => {
-    const modal = buildImportModal('a-1', '/tmp/t.csv', onImported, true);
-    expect(modal.name).toBe('import-transactions');
+    const descriptor = buildImportModal('a-1', '/tmp/t.csv', onImported, true);
+    expect(descriptor.kind).toBe('modal');
   });
 
-  it('uses the keyboard review for an OFX file when the feature is on', () => {
-    const modal = buildImportModal('a-1', '/tmp/t.ofx', onImported, true);
-    expect(modal.name).toBe('keyboard-import-transactions');
-    expect(modal.options.accountId).toBe('a-1');
-    expect(modal.options.filename).toBe('/tmp/t.ofx');
+  it('navigates to the review page for an OFX file when the feature is on', () => {
+    const descriptor = buildImportModal('a-1', '/tmp/t.ofx', onImported, true);
+    expect(descriptor.kind).toBe('page');
+    if (descriptor.kind !== 'page') return;
+    expect(descriptor.path).toContain('/import');
+    expect(descriptor.path).toContain('account=a-1');
+    expect(descriptor.path).toContain('file=');
   });
 
-  it('uses the keyboard review for a QFX file when the feature is on', () => {
-    const modal = buildImportModal('a-1', '/tmp/t.qfx', onImported, true);
-    expect(modal.name).toBe('keyboard-import-transactions');
+  it('navigates to the review page for a QFX file when the feature is on', () => {
+    const descriptor = buildImportModal('a-1', '/tmp/t.qfx', onImported, true);
+    expect(descriptor.kind).toBe('page');
   });
 
-  it('carries the onImported callback through unchanged', () => {
-    const modal = buildImportModal('a-1', '/tmp/t.ofx', onImported, true);
-    expect(modal.options.onImported).toBe(onImported);
+  it('carries the onImported callback through on the modal path', () => {
+    const descriptor = buildImportModal('a-1', '/tmp/t.ofx', onImported, false);
+    if (descriptor.kind !== 'modal') throw new Error('expected modal');
+    expect(descriptor.modal.options.onImported).toBe(onImported);
   });
 
   it('the off-path descriptor is identical to the on-path one for a non-OFX file', () => {
