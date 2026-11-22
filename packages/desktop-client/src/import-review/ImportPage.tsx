@@ -2144,8 +2144,9 @@ export function ImportPage({
           flexDirection: 'column',
           width: '100%',
           maxWidth: 960,
-          // The parent is a fixed-height flex column; keep the card at its
-          // content height instead of shrinking its border on short screens.
+          // The route wrapper is a fixed-height flex column; keep the card
+          // at its content height so its border does not shrink around the
+          // form on short screens. The pane still scrolls when needed.
           flexShrink: 0,
           margin: '24px auto',
           padding: 24,
