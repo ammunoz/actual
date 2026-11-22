@@ -43,6 +43,7 @@ function session(
     };
     editedRowKeys: ReadonlySet<string>;
     vendorChoices: ReadonlyMap<string, { raw: string; payeeId: string }>;
+    ofxIdentities: readonly string[];
     savedAt: string;
   }> = {},
 ): Session {
@@ -54,6 +55,7 @@ function session(
     state: { rows: [row()], trustLevel: 'cautious' },
     editedRowKeys: new Set<string>(),
     vendorChoices: new Map(),
+    ofxIdentities: [],
     savedAt: '2026-09-07T12:00:00.000Z',
     ...overrides,
   });
@@ -75,7 +77,12 @@ describe('buildSession', () => {
     ]);
     // The format version: a session written by an older version of the
     // review is discarded rather than half-understood.
-    expect(saved.v).toBe(3);
+    expect(saved.v).toBe(4);
+  });
+
+  it('holds the OFX identities so a resumed review can warn', () => {
+    const saved = session({ ofxIdentities: ['BANKID|ACCTID'] });
+    expect(saved.ofxIdentities).toEqual(['BANKID|ACCTID']);
   });
 
   it('discards a session that held a routing', () => {
@@ -84,6 +91,13 @@ describe('buildSession', () => {
     // would put every row into the account the review was opened for,
     // which is not what the user had done.
     const older = { ...session(), v: 2 };
+    expect(isUsableSession(older)).toBe(false);
+  });
+
+  it('discards a version 3 session without identities', () => {
+    // v3 sessions have no ofxIdentities, so a resumed review could not
+    // warn about a mismatched account. Discard rather than resume blindly.
+    const older = { ...session(), v: 3 };
     expect(isUsableSession(older)).toBe(false);
   });
 
@@ -124,6 +138,7 @@ describe('the session as a string', () => {
     const saved = session({
       editedRowKeys: new Set(['row-0']),
       focusedIndex: 2,
+      ofxIdentities: ['BANKID|ACCTID'],
     });
 
     const read = readSession(writeSession(saved));
@@ -131,6 +146,7 @@ describe('the session as a string', () => {
     expect(read?.rows).toHaveLength(1);
     expect(read?.editedRowKeys).toEqual(['row-0']);
     expect(read?.focusedIndex).toBe(2);
+    expect(read?.ofxIdentities).toEqual(['BANKID|ACCTID']);
   });
 
   it('is nothing when the stored value is not a session', () => {

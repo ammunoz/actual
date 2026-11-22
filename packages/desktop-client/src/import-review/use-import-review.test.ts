@@ -878,8 +878,9 @@ describe('useImportReview', () => {
 
   // A review that was put aside: two rows, both pending.
   const SAVED_SESSION = {
-    v: 3,
+    v: 4,
     savedAt: '2026-09-07T12:00:00.000Z',
+    ofxIdentities: [],
     accountId: 'a-1',
     filename: '/tmp/demo.ofx',
     trustLevel: 'cautious' as const,

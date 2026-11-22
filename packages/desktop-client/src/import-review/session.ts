@@ -35,8 +35,13 @@ import type {
  * session held a routing — which rows went into which account — and that
  * routing is gone, so a version 2 session is discarded rather than
  * restored with its account choices silently dropped.
+ *
+ * Version 4 adds `ofxIdentities`, the bank's own account ids from the file.
+ * A resumed review does not re-read the file, so without them it could not
+ * warn that the file's identity points at a different account. A version 3
+ * session is discarded rather than resumed with that warning missing.
  */
-export const SESSION_VERSION = 3;
+export const SESSION_VERSION = 4;
 
 /**
  * How big a session may be before the review refuses to save it.
@@ -92,6 +97,12 @@ export type ImportReviewSession = {
    * this to tell them apart.
    */
   fingerprint: string;
+  /**
+   * The bank-account identities declared by the file, for the mismatch
+   * warning. A resumed review does not re-parse the file, so they are kept
+   * here rather than recomputed.
+   */
+  ofxIdentities: string[];
 };
 
 /**
@@ -127,6 +138,7 @@ export function buildSession(opts: {
   state: ImportPreviewState;
   editedRowKeys: ReadonlySet<string>;
   vendorChoices: ReadonlyMap<string, SessionVendorChoice>;
+  ofxIdentities: readonly string[];
   savedAt: string;
 }): ImportReviewSession {
   return {
@@ -140,6 +152,7 @@ export function buildSession(opts: {
     editedRowKeys: [...opts.editedRowKeys],
     vendorChoices: [...opts.vendorChoices.entries()],
     fingerprint: fingerprintRows(opts.state.rows),
+    ofxIdentities: [...opts.ofxIdentities],
   };
 }
 
@@ -171,6 +184,8 @@ export function isUsableSession(value: unknown): value is ImportReviewSession {
   if (!Array.isArray(session.rows)) return false;
   if (!Array.isArray(session.editedRowKeys)) return false;
   if (!Array.isArray(session.vendorChoices)) return false;
+  if (!Array.isArray(session.ofxIdentities)) return false;
+  if (!session.ofxIdentities.every(id => typeof id === 'string')) return false;
   if (typeof session.focusedIndex !== 'number') return false;
   if (
     session.trustLevel !== 'paranoid' &&

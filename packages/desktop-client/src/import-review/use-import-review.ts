@@ -95,7 +95,13 @@ import {
 } from './split-reconcile';
 import type { SplitTransactionUpdate } from './split-reconcile';
 import { transferErrorMessage } from './transfer-error-labels';
-import { VENDOR_MAP_PREF } from './types';
+import {
+  findMismatch,
+  readIdentityMap,
+  recordAccounts,
+  type AccountMismatch,
+} from './ofx-identity';
+import { OFX_IDENTITY_MAP_PREF, VENDOR_MAP_PREF } from './types';
 import { useCustomSyncedPref } from './use-custom-synced-pref';
 import { useImportSession } from './use-import-session';
 
@@ -277,6 +283,12 @@ export type ImportReviewState = {
   error: string | null;
   /** The rows as they stand, with decisions and edits applied. */
   state: ImportPreviewState | null;
+  /**
+   * A file account identity points at a different account than this one.
+   * A standing warning is shown while this is set; it never blocks the
+   * import.
+   */
+  mismatch: AccountMismatch | null;
   /** The index of the focused row. */
   focusedIndex: number;
   /** The trust level the gate matrix uses. */
@@ -535,6 +547,15 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const [status, setStatus] = useState<ReviewStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [state, setState] = useState<ImportPreviewState | null>(null);
+  // The bank's own account ids from the file. They are kept at hook level,
+  // not on the rows: re-resolution replaces row objects and would drop a
+  // marker attached to them. A resumed review has no file to re-parse, so
+  // they are restored from the session instead.
+  const [ofxIdentities, setOfxIdentities] = useState<string[]>([]);
+  const ofxIdentitiesRef = useRef<string[]>([]);
+  useEffect(() => {
+    ofxIdentitiesRef.current = ofxIdentities;
+  }, [ofxIdentities]);
 
   /**
    * The rows as they stand, right now.
@@ -634,6 +655,28 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
   const ruleWriteRef = useRef(false);
 
   const [vendorMapRaw, setVendorMapRaw] = useCustomSyncedPref(VENDOR_MAP_PREF);
+  const [identityMapRaw, setIdentityMapRaw] = useCustomSyncedPref(
+    OFX_IDENTITY_MAP_PREF,
+  );
+  const identityMapRawRef = useRef(identityMapRaw);
+  useEffect(() => {
+    identityMapRawRef.current = identityMapRaw;
+  }, [identityMapRaw]);
+
+  // The standing warning, derived at hook level so it survives every
+  // re-resolution of the rows and the vendor-map re-parse.
+  const mismatch = useMemo(() => {
+    const map = readIdentityMap(identityMapRaw);
+    // A remembered account that no longer exists cannot be a meaningful
+    // "you imported this elsewhere" warning; skip it rather than naming a
+    // deleted account.
+    const live = new Map(
+      [...map].filter(([, entry]) =>
+        accounts.some(account => account.id === entry.accountId),
+      ),
+    );
+    return findMismatch(live, ofxIdentities, accountId);
+  }, [identityMapRaw, ofxIdentities, accountId, accounts]);
 
   // Where a review is put aside when the user saves it.
   const { save: saveToStore, clear: clearFromStore } = useImportSession();
@@ -1221,6 +1264,12 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         // would change what the user agreed to.
         resolvedMapRawRef.current = vendorMapRawRef.current;
 
+        // Capture identities from the session BEFORE any re-resolution:
+        // the review does not re-read the file on resume, and rebuilding
+        // the rows would otherwise lose the information that the warning
+        // depends on.
+        setOfxIdentities(saved.ofxIdentities ?? []);
+        ofxIdentitiesRef.current = saved.ofxIdentities ?? [];
         const state = sessionToPreviewState(saved);
         setState(state);
         setTrustLevelState(saved.trustLevel);
@@ -1307,6 +1356,10 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       setMatchedTransactionIds(new Map());
       vendorChoices.current = new Map();
       undoStack.current = [];
+      // A re-parse also forgets the file's identities: a parse that fails
+      // after a previous review must not leave the old warning behind.
+      setOfxIdentities([]);
+      ofxIdentitiesRef.current = [];
 
       // A review that is being PICKED UP rather than started.
       //
@@ -1356,6 +1409,13 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
           setError(parsed.errors[0].message);
           return;
         }
+
+        // Capture the file's account identities at parse time, before the
+        // rows are rebuilt by the resolver and the split-context passes.
+        // The ref is set here too: apply/saveSession read it directly and
+        // must not see the previous review's identities.
+        setOfxIdentities(parsed?.ofxIdentities ?? []);
+        ofxIdentitiesRef.current = parsed?.ofxIdentities ?? [];
 
         const payeeList: readonly ReviewPayee[] = payeeEntities.map(p => ({
           id: p.id,
@@ -1662,6 +1722,22 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     },
     [setVendorMapRaw],
   );
+
+  // Remember which account this file's identities landed in. It is written
+  // only after a successful apply, beside the vendor map: a failed import
+  // must not teach the budget a false account, and a no-op apply should not
+  // inflate the history either (the caller guards both with `didChange`).
+  const writeIdentityMap = useCallback(() => {
+    const identities = ofxIdentitiesRef.current;
+    if (identities.length === 0) return;
+    const raw = recordAccounts(
+      readIdentityMap(identityMapRawRef.current),
+      identities,
+      accountId,
+      new Date().toISOString(),
+    );
+    setIdentityMapRaw(raw);
+  }, [accountId, setIdentityMapRaw]);
 
   /**
    * Record the state as it is NOW, so the change that follows can be
@@ -2176,6 +2252,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
         setStatus('reviewing');
         if (didChange) {
           writeVendorMap(state);
+          writeIdentityMap();
           // The work is in the budget now, so there is nothing left to
           // pick up later.
           clearFromStore();
@@ -2310,6 +2387,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       // the preference re-parses the file and throws away the very
       // decisions that produced the entries.
       writeVendorMap(state);
+      writeIdentityMap();
       onImported?.(true);
       return true;
     }
@@ -2334,6 +2412,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     onImported,
     t,
     writeVendorMap,
+    writeIdentityMap,
   ]);
 
   /**
@@ -2355,6 +2434,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
       state,
       editedRowKeys: editedRowKeys.current,
       vendorChoices: vendorChoices.current,
+      ofxIdentities: ofxIdentitiesRef.current,
       savedAt: new Date().toISOString(),
     });
 
@@ -2435,6 +2515,7 @@ export function useImportReview(opts: UseImportReviewOpts): ImportReviewState {
     status,
     error,
     state,
+    mismatch,
     focusedIndex: Math.min(focusedIndex, Math.max(0, rows.length - 1)),
     trustLevel,
     payees,
