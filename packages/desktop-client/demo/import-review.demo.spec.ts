@@ -49,9 +49,10 @@ const TRIM_PATH = join(dirname(VIDEO_PATH), 'trim.json');
 /**
  * The app's own transitions are switched off.
  *
- * The modal fades in over 100ms, and Playwright's click-stability check
- * can see the node it is about to click get re-mounted underneath it.
- * A recording that retries a click looks like a stutter.
+ * The import page's route transition re-mounts nodes, and Playwright's
+ * click-stability check can see the node it is about to click get
+ * re-mounted underneath it. A recording that retries a click looks like
+ * a stutter.
  */
 const withoutAnimations = () => {
   const css = `*, *::before, *::after {
@@ -153,14 +154,18 @@ test('records the keyboard import review, from the command bar to the budget', a
     await beat(1200);
 
     const fileChooserPromise = page.waitForEvent('filechooser');
-    await page.getByRole('button', { name: 'Import' }).click();
+    await page.getByTestId('account-import').click();
     const fileChooser = await fileChooserPromise;
     await fileChooser.setFiles(
       join(__dirname, '..', 'e2e', 'data', 'demo-import-blocked.ofx'),
     );
 
-    const dialog = page.getByRole('dialog');
+    // The review is a full page now. Pause once on the whole layout —
+    // the table at full height, the detail and actions below it — so the
+    // viewer can see the room the page gives the review.
+    const dialog = page.getByTestId('import-review-shell');
     await expect(dialog.getByText('Review import')).toBeVisible();
+    await beat(1800);
     const rows = dialog.getByTestId('import-review-row');
     await expect(rows).toHaveCount(3);
 
