@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ComponentType, ReactNode, SVGProps } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router';
 
 import {
   SvgCog,
@@ -26,8 +27,6 @@ import { useNavigate } from '#hooks/useNavigate';
 import { useReports } from '#hooks/useReports';
 import { useSidebarMenu } from '#hooks/useSidebarMenu';
 import { useImportReviewCommand } from '#import-review';
-import { pushModal } from '#modals/modalsSlice';
-import { useDispatch } from '#redux';
 import type { Binding, SheetFields, SheetNames } from '#spreadsheet';
 import {
   accountBalance,
@@ -98,6 +97,7 @@ export function CommandBar() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
   const [budgetName] = useMetadataPref('budgetName');
   const { modalStack } = useModalState();
   const { startTour } = useTour();
@@ -105,7 +105,6 @@ export function CommandBar() {
   const { availableItems: menuItems } = useSidebarMenu();
   const menuItemDetails = useSidebarMenuItemDetails();
   const importReviewCommand = useImportReviewCommand();
-  const dispatch = useDispatch();
 
   const navigationItems = useMemo(
     () => [
@@ -147,12 +146,13 @@ export function CommandBar() {
     (e: KeyboardEvent) => {
       if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        // Do not open CommandBar if a modal is already open
-        if (modalStack.length > 0) return;
+        // Do not open CommandBar if a modal is already open, or while the
+        // import review page owns the keyboard — it binds plain letters.
+        if (modalStack.length > 0 || location.pathname === '/import') return;
         setOpen(true);
       }
     },
-    [modalStack.length],
+    [modalStack.length, location.pathname],
   );
 
   useEffect(() => {
@@ -239,6 +239,11 @@ export function CommandBar() {
       key: 'import-review',
       heading: t('Import'),
       items: [
+        {
+          id: 'import-review-new',
+          name: t('Import a file'),
+          Icon: importReviewCommand.item.Icon,
+        },
         importReviewCommand.item,
         ...(importReviewCommand.resumeItem
           ? [importReviewCommand.resumeItem]
@@ -246,30 +251,15 @@ export function CommandBar() {
       ],
       onSelect: ({ id }) => {
         setOpen(false);
-        if (id === 'import-review-resume') {
-          // The saved review is picked up where it was left. The rows are
-          // in the session, so there is no file to read again.
-          const session = importReviewCommand.session;
-          if (session) {
-            dispatch(
-              pushModal({
-                modal: {
-                  name: 'keyboard-import-transactions',
-                  options: {
-                    accountId: session.accountId,
-                    filename: session.filename,
-                    session,
-                    // The account page refreshes itself when the sync
-                    // events arrive, so there is nothing to do here.
-                    onImported: () => undefined,
-                  },
-                },
-              }),
-            );
-          }
-          return;
+        if (id === 'import-review-new') {
+          handleNavigate('/import');
+        } else if (id === 'import-review-resume') {
+          // The page reads the saved review from localStorage itself, so
+          // the session blob never has to travel through the URL.
+          handleNavigate('/import?resume=1');
+        } else {
+          importReviewCommand.toggle();
         }
-        importReviewCommand.toggle();
       },
     },
     {

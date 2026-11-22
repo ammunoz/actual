@@ -4,6 +4,7 @@ import {
   SvgAdd,
   SvgCheveronDownUp,
   SvgCheveronUpDown,
+  SvgUpload,
 } from '@actual-app/components/icons/v1';
 import { SvgSearchAlternate } from '@actual-app/components/icons/v2';
 import { theme } from '@actual-app/components/theme';
@@ -11,6 +12,7 @@ import { spacing } from '@actual-app/components/tokens';
 import { View } from '@actual-app/components/view';
 
 import { Link } from '#components/common/Link';
+import { useNavigate } from '#hooks/useNavigate';
 import { replaceModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
 import * as bindings from '#spreadsheet/bindings';
@@ -35,6 +37,7 @@ export function AccountsHeaderRow({
 }: AccountsHeaderRowProps) {
   const { t } = useTranslation();
   const dispatch = useDispatch();
+  const navigate = useNavigate();
 
   const onAddAccount = () => {
     dispatch(replaceModal({ modal: { name: 'add-account', options: {} } }));
@@ -75,6 +78,11 @@ export function AccountsHeaderRow({
         label={t('Find account')}
         isToggledOn={isSearchOpen}
         onPress={onToggleSearch}
+      />
+      <SidebarIconButton
+        Icon={SvgUpload}
+        label={t('Import')}
+        onPress={() => void navigate('/import')}
       />
       <SidebarIconButton
         Icon={SvgAdd}

@@ -56,21 +56,6 @@ export type Modal =
       };
     }
   | {
-      name: 'keyboard-import-transactions';
-      options: {
-        accountId: string;
-        filename: string;
-        /**
-         * The saved review to pick up, instead of a file.
-         *
-         * A session holds the rows that were already parsed, so there is
-         * no file to read: the review continues where it was left.
-         */
-        session?: unknown;
-        onImported: (didChange: boolean) => void;
-      };
-    }
-  | {
       name: 'add-account';
       options: {
         upgradingAccountId?: string;

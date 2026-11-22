@@ -19,6 +19,7 @@ import { useMetaThemeColor } from '#hooks/useMetaThemeColor';
 import { useNavigate } from '#hooks/useNavigate';
 import { useNewsNotification } from '#hooks/useNewsNotification';
 import { ScrollProvider } from '#hooks/useScrollListener';
+import { ImportPage } from '#import-review';
 import { addNotification } from '#notifications/notificationsSlice';
 import { useDispatch, useSelector } from '#redux';
 
@@ -535,6 +536,18 @@ export function FinancesApp() {
                           resetKeys={[location.pathname]}
                         >
                           <NarrowAlternate name="Account" />
+                        </ErrorBoundary>
+                      }
+                    />
+
+                    <Route
+                      path="/import"
+                      element={
+                        <ErrorBoundary
+                          FallbackComponent={FeatureErrorFallback}
+                          resetKeys={[location.pathname]}
+                        >
+                          <ImportPage />
                         </ErrorBoundary>
                       }
                     />

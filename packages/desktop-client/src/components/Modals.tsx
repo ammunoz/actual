@@ -8,8 +8,6 @@ import * as monthUtils from '@actual-app/core/shared/months';
 import { useMetadataPref } from '#hooks/useMetadataPref';
 import { useModalState } from '#hooks/useModalState';
 import { SheetNameProvider } from '#hooks/useSheetName';
-import { KeyboardImportModal } from '#import-review';
-import type { KeyboardImportModalProps } from '#import-review';
 import { closeModal } from '#modals/modalsSlice';
 import { useDispatch } from '#redux';
 
@@ -135,17 +133,6 @@ export function Modals() {
 
         case 'import-transactions':
           return <ImportTransactionsModal key={key} {...modal.options} />;
-
-        case 'keyboard-import-transactions':
-          return (
-            <KeyboardImportModal
-              key={key}
-              // The cast is here, and only here: the modal's options are
-              // declared in upstream's slice, which cannot know about the
-              // review's own types. The saved review travels with them.
-              {...(modal.options as KeyboardImportModalProps)}
-            />
-          );
 
         case 'add-account':
           return <CreateAccountModal key={key} {...modal.options} />;
