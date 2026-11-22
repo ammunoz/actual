@@ -5591,6 +5591,137 @@ NEWFILEUID:NONE
     ).toBe(true);
   });
 
+  test('the standalone page suggests a file account and warns on a mismatch', async () => {
+    // Two accounts, so the remembered one can differ from the default.
+    // Create the second one through the app's IPC: the account page-model's
+    // Name field is ambiguous once an account already exists.
+    await navigation.createAccount({
+      name: 'First Account',
+      offBudget: false,
+      balance: 0,
+    });
+    await page.evaluate(async () => {
+      const $send = (
+        window as unknown as {
+          $send: <T>(type: string, args?: unknown) => Promise<T>;
+        }
+      ).$send;
+      await $send('account-create', { name: 'Remembered Account' });
+    });
+
+    const accounts = await page.evaluate(async () => {
+      const $send = (
+        window as unknown as {
+          $send: <T>(type: string, args?: unknown) => Promise<T>;
+        }
+      ).$send;
+      return $send<Array<{ id: string; name: string }>>('accounts-get');
+    });
+    const rememberedId = accounts.find(
+      acc => acc.name === 'Remembered Account',
+    )?.id;
+    expect(rememberedId).toBeDefined();
+
+    // Seed a dominant history: this file "usually" goes to the second
+    // account. Raw IPC writes the DB but not Redux, so reload to load prefs.
+    await page.evaluate(
+      async ({ identity, accountId }) => {
+        const $send = (
+          window as unknown as {
+            $send: <T>(type: string, args?: unknown) => Promise<T>;
+          }
+        ).$send;
+        await $send('preferences/save', {
+          id: 'import-review.ofx-identity-map',
+          value: JSON.stringify({
+            [identity]: {
+              accountId,
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              hits: 3,
+              lastN: [],
+            },
+          }),
+        });
+      },
+      { identity: 'DEMOBANK|DEMO-CHECKING-001', accountId: rememberedId },
+    );
+    await page.reload();
+
+    await page.getByTestId('sidebar-import').click();
+    await expect(page).toHaveURL(/\/import$/);
+
+    const chooserPromise = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: 'Choose a file' }).click();
+    await (
+      await chooserPromise
+    ).setFiles(join(__dirname, 'data/demo-import.ofx'));
+
+    // The picker is prefilled with the remembered account and labelled.
+    await expect(page.getByTestId('import-review-setup-account')).toHaveValue(
+      rememberedId!,
+    );
+    await expect(
+      page.getByTestId('import-review-setup-suggestion'),
+    ).toBeVisible();
+
+    // The user keeps the suggestion and confirms with Continue. The target
+    // equals the remembered account, so no warning band should appear.
+    await page.getByTestId('import-review-setup-continue').click();
+    const shell = page.getByTestId('import-review-shell');
+    await expect(shell).toBeVisible();
+    await expect(
+      shell.getByTestId('import-review-account-warning'),
+    ).toHaveCount(0);
+  });
+
+  test('the standalone page shows a standing warning on an account mismatch', async () => {
+    accountPage = await navigation.createAccount({
+      name: 'Warning Target',
+      offBudget: false,
+      balance: 0,
+    });
+    await enableKeyboardReview();
+
+    // Create a second account through IPC and seed the demo file's identity
+    // to it. Importing into 'Warning Target' then disagrees with the map.
+    const otherId = await page.evaluate(async () => {
+      const $send = (
+        window as unknown as {
+          $send: <T>(type: string, args?: unknown) => Promise<T>;
+        }
+      ).$send;
+      return $send<string>('account-create', { name: 'Other Account' });
+    });
+
+    await page.evaluate(
+      async ({ identity, accountId }) => {
+        const $send = (
+          window as unknown as {
+            $send: <T>(type: string, args?: unknown) => Promise<T>;
+          }
+        ).$send;
+        await $send('preferences/save', {
+          id: 'import-review.ofx-identity-map',
+          value: JSON.stringify({
+            [identity]: {
+              accountId,
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              hits: 3,
+              lastN: [],
+            },
+          }),
+        });
+      },
+      { identity: 'DEMOBANK|DEMO-CHECKING-001', accountId: otherId },
+    );
+    await page.reload();
+
+    await importOfx();
+    await expect(
+      page.getByTestId('import-review-account-warning'),
+    ).toBeVisible();
+  });
+
   test('the refined review surface in every theme', async () => {
     accountPage = await navigation.createAccount({
       name: 'Keyboard Review VRT',

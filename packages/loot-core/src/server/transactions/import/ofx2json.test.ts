@@ -91,7 +91,8 @@ describe('ofxIdentities', () => {
 
   test('a bank statement without BANKID falls back to ORG|FID|ACCTID', async () => {
     const from = '<BANKACCTFROM><ACCTID>A1</ACCTID></BANKACCTFROM>';
-    const fi = '<SIGNONMSGSRSV1><SONRS><FI><ORG>Bank</ORG><FID>42</FID></FI></SONRS></SIGNONMSGSRSV1>';
+    const fi =
+      '<SIGNONMSGSRSV1><SONRS><FI><ORG>Bank</ORG><FID>42</FID></FI></SONRS></SIGNONMSGSRSV1>';
     const file = `${OFX_HEADERS}<OFX>${fi}<BANKMSGSRSV1>
       <STMTTRNRS><STMTRS>${from}<BANKTRANLIST></BANKTRANLIST></STMTRS></STMTTRNRS>
     </BANKMSGSRSV1></OFX>`;
@@ -103,11 +104,10 @@ describe('ofxIdentities', () => {
       <INVACCTFROM><BROKERID>B1</BROKERID><ACCTID>INV-1</ACCTID></INVACCTFROM>
       <INVTRANLIST></INVTRANLIST>
     </INVSTMTRS></INVSTMTTRNRS>`;
-    const fi = '<SIGNONMSGSRSV1><SONRS><FI><ORG>Broker</ORG><FID>9</FID></FI></SONRS></SIGNONMSGSRSV1>';
+    const fi =
+      '<SIGNONMSGSRSV1><SONRS><FI><ORG>Broker</ORG><FID>9</FID></FI></SONRS></SIGNONMSGSRSV1>';
     const file = `${OFX_HEADERS}<OFX>${fi}<INVSTMTMSGSRSV1>${inv}</INVSTMTMSGSRSV1></OFX>`;
-    expect((await ofx2json(file)).ofxIdentities).toEqual([
-      'Broker|9|INV-1',
-    ]);
+    expect((await ofx2json(file)).ofxIdentities).toEqual(['Broker|9|INV-1']);
   });
 
   test('identities are collected from all statement types in a mixed file', async () => {

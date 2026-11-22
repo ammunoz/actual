@@ -12,7 +12,7 @@ describe('the help overlay', () => {
     render(<HelpOverlay />);
 
     expect(screen.getByText('Limitations')).toBeInTheDocument();
-    expect(screen.getByText(/Actual's parser drops/)).toBeInTheDocument();
+    expect(screen.getByText(/cannot split a file/)).toBeInTheDocument();
     expect(
       screen.getByText(/remembered for the whole budget/),
     ).toBeInTheDocument();

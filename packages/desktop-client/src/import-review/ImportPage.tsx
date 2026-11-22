@@ -33,6 +33,7 @@ import { Text } from '@actual-app/components/text';
 import { TextOneLine } from '@actual-app/components/text-one-line';
 import { theme } from '@actual-app/components/theme';
 import { View } from '@actual-app/components/view';
+import { send } from '@actual-app/core/platform/client/connection';
 import {
   effectiveAmountCents,
   effectiveTransferAccountId,
@@ -88,6 +89,7 @@ import {
 } from './keymap';
 import type { ReviewAction } from './keymap';
 import { LeaveImportModal } from './LeaveImportModal';
+import { readIdentityMap, suggestAccount } from './ofx-identity';
 import { OwnershipRow } from './OwnershipRow';
 import { ReviewColumns } from './review-columns';
 import { REVIEW_TITLE_ID, ReviewHeader, trustLevelLabel } from './ReviewHeader';
@@ -111,6 +113,8 @@ import type { ImportReviewSession } from './session';
 import { SplitPane } from './SplitPane';
 import { StatusChip } from './StatusChip';
 import { TransferPane } from './TransferPane';
+import { OFX_IDENTITY_MAP_PREF } from './types';
+import { useCustomSyncedPref } from './use-custom-synced-pref';
 import { useImportReview } from './use-import-review';
 import { storageKey, useImportSession } from './use-import-session';
 import { ZoneLabel, ZoneSubhead } from './ZoneLabel';
@@ -274,18 +278,34 @@ export function ImportPage({
   const [setupAccount, setSetupAccount] = useState(
     () => accountId || openAccounts[0]?.id || '',
   );
+  // Once an identity has suggested an account, the cold-load default below
+  // must not overwrite it. Cleared in the picker's onChange so an explicit
+  // choice always wins.
+  const suggestedAccountRef = useRef<string | null>(null);
+  const [pickedFile, setPickedFile] = useState<string | null>(null);
+  const filePickRef = useRef(0);
+  const [setupMessage, setSetupMessage] = useState<{
+    kind: 'suggestion' | 'error';
+    text: string;
+  } | null>(null);
+  const [identityMapRaw] = useCustomSyncedPref(OFX_IDENTITY_MAP_PREF);
+
   // `useAccounts` is a react-query hook: on a cold load `data` is undefined
   // until the list resolves, so the initial state above can be empty. Keep
   // the selection in step with the loaded accounts.
   useEffect(() => {
+    if (suggestedAccountRef.current) return;
     if (!setupAccount && openAccounts[0]) {
       setSetupAccount(openAccounts[0].id);
     }
   }, [setupAccount, openAccounts]);
+
+  // Step 1: choose a file and work out where it probably belongs. We do NOT
+  // navigate yet — the account is committed to the URL only when the user
+  // confirms with Continue, so a suggestion can actually be changed.
   const chooseFile = async () => {
-    // Fall back to the first account in case the effect has not run yet.
-    const target = setupAccount || openAccounts[0]?.id;
-    if (!target) return;
+    setSetupMessage(null);
+    const pick = ++filePickRef.current;
     try {
       const res = await window.Actual.openFileDialog({
         filters: [
@@ -295,15 +315,57 @@ export function ImportPage({
           },
         ],
       });
-      if (res?.[0]) {
-        void navigate(
-          `/import?account=${encodeURIComponent(target)}&file=${encodeURIComponent(res[0])}`,
-          { replace: true },
-        );
+      if (!res?.[0]) return;
+      setPickedFile(res[0]);
+      // A previous pick may have suggested an account. Treat every new file
+      // as fresh: if this one has no suggestion, fall back to the default
+      // rather than silently keeping the old file's account.
+      suggestedAccountRef.current = null;
+      setSetupAccount(openAccounts[0]?.id ?? '');
+
+      let suggestion: string | undefined;
+      try {
+        const identities = await send('ofx-parse-identity', {
+          filepath: res[0],
+        });
+        const identity = identities.find(id => id.length > 0);
+        if (identity) {
+          const entry = readIdentityMap(identityMapRaw).get(identity);
+          suggestion = suggestAccount(entry, openAccounts);
+        }
+      } catch {
+        // A file we cannot read for identity is still reviewable. The full
+        // parse in the review owns the real error surface.
+      }
+      // A newer pick may have finished while this one was awaiting the IPC.
+      if (pick !== filePickRef.current) return;
+
+      suggestedAccountRef.current = suggestion ?? null;
+      if (suggestion) {
+        setSetupAccount(suggestion);
+        setSetupMessage({
+          kind: 'suggestion',
+          text: t('Suggested from this file — change if needed'),
+        });
       }
     } catch {
-      setNotice(t('The file could not be opened.'));
+      setSetupMessage({
+        kind: 'error',
+        text: t('The file could not be opened.'),
+      });
     }
+  };
+
+  // Step 2: commit the chosen account and file to the URL. Changing either
+  // forces a full re-parse, so this happens once, on the user's confirmation.
+  const continueWithFile = () => {
+    if (!pickedFile) return;
+    const target = setupAccount || openAccounts[0]?.id;
+    if (!target) return;
+    void navigate(
+      `/import?account=${encodeURIComponent(target)}&file=${encodeURIComponent(pickedFile)}`,
+      { replace: true },
+    );
   };
 
   // Each column owns its scroll at desktop widths; on a narrow window the
@@ -2165,8 +2227,8 @@ export function ImportPage({
         </Text>
         <Text style={{ color: theme.tableHeaderText }}>
           <Trans>
-            Choose the account to import into, then pick a file. You can review
-            every transaction before anything is added to your budget.
+            Pick a file, confirm the account to import into, then review every
+            transaction before anything is added to your budget.
           </Trans>
         </Text>
         <View style={{ flexDirection: 'column', gap: 6 }}>
@@ -2174,8 +2236,14 @@ export function ImportPage({
             <Trans>Import into account</Trans>
           </Text>
           <select
+            data-testid="import-review-setup-account"
             value={setupAccount}
-            onChange={event => setSetupAccount(event.target.value)}
+            onChange={event => {
+              // An explicit choice wins over any suggestion.
+              suggestedAccountRef.current = null;
+              setSetupMessage(null);
+              setSetupAccount(event.target.value);
+            }}
             style={{
               fontFamily: 'inherit',
               fontSize: 14,
@@ -2192,13 +2260,29 @@ export function ImportPage({
               </option>
             ))}
           </select>
+          {setupMessage?.kind === 'suggestion' ? (
+            <Text
+              data-testid="import-review-setup-suggestion"
+              style={{ color: theme.warningTextDark, fontSize: 12 }}
+            >
+              {setupMessage.text}
+            </Text>
+          ) : null}
+          {setupMessage?.kind === 'error' ? (
+            <Text
+              data-testid="import-review-setup-error"
+              style={{ color: theme.errorTextDark, fontSize: 12 }}
+            >
+              {setupMessage.text}
+            </Text>
+          ) : null}
         </View>
         {openAccounts.length === 0 ? (
           <Text style={{ color: theme.errorText }}>
             <Trans>Add an account before importing a file.</Trans>
           </Text>
         ) : null}
-        <View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button
             variant="primary"
             isDisabled={openAccounts.length === 0}
@@ -2207,6 +2291,15 @@ export function ImportPage({
             <SvgUpload width={14} height={14} style={{ marginRight: 8 }} />
             <Trans>Choose a file</Trans>
           </Button>
+          {pickedFile ? (
+            <Button
+              data-testid="import-review-setup-continue"
+              variant="normal"
+              onPress={continueWithFile}
+            >
+              <Trans>Continue</Trans>
+            </Button>
+          ) : null}
         </View>
       </View>
     );
@@ -2471,6 +2564,38 @@ export function ImportPage({
                 })}
               </Text>
             </View>
+
+            {review.mismatch ? (
+              <View
+                data-testid="import-review-account-warning"
+                role="status"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexShrink: 0,
+                  padding: '6px 10px',
+                  backgroundColor: theme.warningBackground,
+                  borderBottom: `1px solid ${theme.tableBorder}`,
+                }}
+              >
+                <SvgFlag
+                  width={12}
+                  height={12}
+                  aria-hidden="true"
+                  style={{ color: theme.warningTextDark }}
+                />
+                <Text style={{ color: theme.warningTextDark, fontSize: 12 }}>
+                  {t(
+                    'This file was last imported into {{remembered}}, not {{current}}. Check the account before importing.',
+                    {
+                      remembered: accountName(review.mismatch.mappedAccountId),
+                      current: accountName(accountId),
+                    },
+                  )}
+                </Text>
+              </View>
+            ) : null}
 
             <View
               ref={gridRef}

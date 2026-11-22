@@ -157,10 +157,10 @@ has, each labelled with the key that does it.
 These are the things a person would otherwise find out the hard way — after
 the import, when the transactions are already in the budget.
 
-- A file is imported into the account you opened the review for. If your
-  bank put two accounts in one file, they all come here: Actual's parser
-  drops the bank's account id, so the review cannot tell one statement from
-  the next.
+- A file is imported into the account you opened the review for. The review
+  reads the account details in an OFX file to warn about a mismatch and to
+  suggest an account on the standalone import page, but it still cannot split
+  a file with two bank statements — those all land in the chosen account.
 - The payee names you remember are remembered for the whole budget, not for
   one account. The same vendor name in two accounts keeps only the last
   choice.
@@ -217,24 +217,28 @@ it, and CI never waits for it.
 ## What this fork touches upstream
 
 The fork is **74 commits ahead of upstream's `master`** and 3 behind it, as
-of this commit, and it changes nine upstream application files. Everything
-else is new:
+of this commit. Everything else is new:
 
 |                                                             |                              |
 | ----------------------------------------------------------- | ---------------------------- |
 | `packages/desktop-client/src/import-review/`                | the whole feature — 60 files |
 | `packages/loot-core/src/server/transactions/import/review/` | the domain layer — 34 files  |
 
-The nine upstream files are:
+The upstream application files the fork edits are:
 
 |                                                                   |                                                                  |
 | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
 | `packages/desktop-client/src/components/CommandBar.tsx`           | the command bar entry                                            |
 | `packages/desktop-client/src/components/Modals.tsx`               | the modal registry                                               |
 | `packages/desktop-client/src/components/accounts/Account.tsx`     | the import button                                                |
+| `packages/desktop-client/src/components/FinancesApp.tsx`          | the standalone import page route                                 |
+| `packages/desktop-client/src/components/sidebar/Sidebar.tsx`      | the import page shortcut                                         |
 | `packages/desktop-client/src/modals/modalsSlice.ts`               | the modal's slice                                                |
 | `packages/loot-core/src/server/accounts/app.ts`                   | the accounts server                                              |
 | `packages/loot-core/src/server/accounts/sync.ts`                  | the accounts sync                                                |
+| `packages/loot-core/src/server/transactions/import/ofx2json.ts`   | reads the bank/account identity from OFX files                   |
+| `packages/loot-core/src/server/transactions/import/parse-file.ts` | exposes the identities and an identity-only IPC                  |
+| `packages/loot-core/src/server/transactions/app.ts`               | registers the identity-only IPC handler                          |
 | `packages/loot-core/src/server/transactions/transaction-rules.ts` | the transaction rules                                            |
 | `packages/loot-core/src/types/models/transaction.ts`              | the transaction model                                            |
 | `packages/component-library/src/themes/source/colors.ts`          | **one colour token** (`ruleLockText`, for the value a rule owns) |
